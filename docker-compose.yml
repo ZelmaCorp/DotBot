@@ -49,8 +49,8 @@ services:
       - "--global.checknewversion=false"
       - "--global.sendanonymoususage=false"
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:80"
+      - "8443:443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - letsencrypt_data:/letsencrypt
