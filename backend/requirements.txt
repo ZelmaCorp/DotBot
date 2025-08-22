@@ -8,13 +8,6 @@ httpx==0.25.2
 # Environment and configuration
 python-dotenv==1.0.0
 
-# Database (optional)
-sqlalchemy==2.0.23
-psycopg2-binary==2.9.9
-
-# Redis (optional)
-redis==5.0.1
-
 # Logging
 structlog==23.2.0
 
