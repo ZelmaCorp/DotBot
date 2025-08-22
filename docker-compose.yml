@@ -5,14 +5,18 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    ports:
+      - "80:80"
     environment:
       - NODE_ENV=production
+    depends_on:
+      - backend
     networks:
       - dotbot-network
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN_NAME}`) || Host(`localhost`)"
+      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN_NAME}`)"
       - "traefik.http.routers.frontend.tls=true"
       - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
 
@@ -20,26 +24,64 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
       - ASI_ONE_API_KEY=${ASI_ONE_API_KEY}
-      - ASI_ONE_ENDPOINT=${ASI_ONE_ENDPOINT}
-    ports:
-      - "3011:8000"
+    depends_on:
+      - postgres
+      - redis
     networks:
       - dotbot-network
     restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.backend.rule=(Host(`${DOMAIN_NAME}`) || Host(`localhost`)) && PathPrefix(`/api`)"
+      - "traefik.http.routers.backend.rule=Host(`${DOMAIN_NAME}`) && PathPrefix(`/api`)"
       - "traefik.http.routers.backend.tls=true"
       - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-dotbot}
+      - POSTGRES_USER=${POSTGRES_USER:-dotbot}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - dotbot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dotbot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - dotbot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Reverse proxy with automatic SSL
   traefik:
     image: traefik:v2.10
     command:
-      - "--api.dashboard=false"
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
@@ -51,8 +93,9 @@ services:
       - "--global.checknewversion=false"
       - "--global.sendanonymoususage=false"
     ports:
-      - "3010:80"
-      - "8443:443"
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - letsencrypt_data:/letsencrypt
@@ -60,14 +103,49 @@ services:
       - dotbot-network
     restart: unless-stopped
     labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
       # HTTP to HTTPS redirect
       - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
       - "traefik.http.routers.http-catchall.entrypoints=web"
       - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
 
+  # Logging with Loki
+  loki:
+    image: grafana/loki:2.9.2
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+      - ./config/loki-config.yaml:/etc/loki/local-config.yaml
+    networks:
+      - dotbot-network
+    restart: unless-stopped
+
+  # Log shipping
+  promtail:
+    image: grafana/promtail:2.9.2
+    volumes:
+      - ./logs:/var/log/dotbot:ro
+      - /var/log:/var/log:ro
+      - ./config/promtail-config.yaml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - dotbot-network
+    restart: unless-stopped
+    depends_on:
+      - loki
+
 volumes:
+  postgres_data:
+  redis_data:
   letsencrypt_data:
+  loki_data:
 
 networks:
   dotbot-network:
