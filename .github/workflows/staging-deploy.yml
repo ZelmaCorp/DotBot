@@ -193,15 +193,24 @@ jobs:
           sudo lsof -ti:3010 | xargs sudo kill -9 2>/dev/null || true
           sudo lsof -ti:3011 | xargs sudo kill -9 2>/dev/null || true
           
-          # Pull latest images
-          docker-compose pull
-          
-          # NUCLEAR OPTION: Force complete rebuild by removing all images first
+          # ULTIMATE FIX: Remove ALL cached images and registry references
           docker-compose down --rmi all --volumes --remove-orphans || true
           docker system prune -af || true
+          docker rmi $(docker images -q ghcr.io/zelmacorp/dotbot/frontend 2>/dev/null) 2>/dev/null || true
+          docker rmi $(docker images -q ghcr.io/zelmacorp/dotbot/backend 2>/dev/null) 2>/dev/null || true
           
-          # Start services (complete rebuild from scratch)
-          BUILD_DATE=$(date +%s) docker-compose build --no-cache --pull --build-arg BUILD_DATE=$(date +%s)
+          # VERIFY SOURCE CODE VERSION BEFORE BUILD
+          echo "=== VERIFYING LOCAL SOURCE CODE ==="
+          echo "Line 17-19 of main.py should have ABSOLUTE imports:"
+          sed -n '17,19p' main.py
+          
+          # Force build from source ONLY - NO PULLING FROM REGISTRY
+          BUILD_DATE=$(date +%s) docker-compose build --no-cache --build-arg BUILD_DATE=$(date +%s)
+          
+          # VERIFY BUILT CONTAINER HAS CORRECT CODE
+          echo "=== VERIFYING BUILT CONTAINER CODE ==="
+          docker run --rm ghcr.io/zelmacorp/dotbot/backend:staging sed -n '17,19p' /app/main.py || echo "Container not found"
+          
           docker-compose up -d --force-recreate
           
           # Show container status for debugging
