@@ -209,7 +209,8 @@ const App: React.FC = () => {
         </div>
 
         {/* Main chat area */}
-        <div className="flex-1 flex flex-col">
+        <div className=\"flex-1 flex flex-col\">
+          <p>Hello</p>
           <ChatInterface
             session={currentSession}
             agents={agents}
