@@ -136,14 +136,14 @@ jobs:
         cp docker-compose.yml deploy/
         cp config/staging.env deploy/.env
         
-        # Create docker-compose override for staging
-        cat > deploy/docker-compose.override.yml << EOF
+        # Create docker-compose override for staging with proper YAML formatting
+        cat > deploy/docker-compose.override.yml << 'EOF'
         version: '3.8'
         services:
           frontend:
-            image: ${{ needs.build.outputs.frontend-image }}
+            image: "${{ needs.build.outputs.frontend-image }}"
           backend:
-            image: ${{ needs.build.outputs.backend-image }}
+            image: "${{ needs.build.outputs.backend-image }}"
         EOF
         
     - name: Copy deployment files to server
