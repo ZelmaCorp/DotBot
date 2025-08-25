@@ -196,9 +196,9 @@ const App: React.FC = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className=\"flex h-screen bg-gray-950 text-white\">
+      <div className="flex h-screen bg-gray-950 text-white">
         {/* Sidebar */}
-        <div className=\"w-80 flex-shrink-0\">
+        <div className="w-80 flex-shrink-0">
           <Sidebar
             sessions={sessions}
             currentSessionId={currentSession?.id || null}
@@ -209,7 +209,7 @@ const App: React.FC = () => {
         </div>
 
         {/* Main chat area */}
-        <div className=\"flex-1 flex flex-col\">
+        <div className="flex-1 flex flex-col">
           <ChatInterface
             session={currentSession}
             agents={agents}
