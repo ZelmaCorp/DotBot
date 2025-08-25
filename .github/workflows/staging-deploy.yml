@@ -16,10 +16,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
@@ -38,7 +38,7 @@ jobs:
       run: npm run type-check
       
     - name: Setup Python
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v4
       with:
         python-version: '3.11'
         
@@ -67,17 +67,17 @@ jobs:
       
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: Convert repository name to lowercase
       id: repo-name
       run: echo "lowercase=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
       
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      uses: docker/setup-buildx-action@v3
       
     - name: Log in to Container Registry
-      uses: docker/login-action@v2
+      uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -93,7 +93,7 @@ jobs:
           type=sha,prefix=staging-
           
     - name: Build and push frontend image
-      uses: docker/build-push-action@v4
+      uses: docker/build-push-action@v5
       with:
         context: ./frontend
         push: true
@@ -112,7 +112,7 @@ jobs:
           type=sha,prefix=staging-
           
     - name: Build and push backend image
-      uses: docker/build-push-action@v4
+      uses: docker/build-push-action@v5
       with:
         context: ./backend
         push: true
@@ -129,29 +129,42 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: Setup deployment files
       run: |
         # Create deployment directory structure
         mkdir -p deploy
         
-        # Copy simple docker-compose (no Traefik) and environment file
-        cp docker-compose.simple.yml deploy/docker-compose.yml
-        cp config/staging.env deploy/.env
-        
-        # Create docker-compose override for staging with proper image references
-        cat > deploy/docker-compose.override.yml << 'EOF'
+        # Create docker-compose for deployment (images only, no build contexts)
+        cat > deploy/docker-compose.yml << 'EOF'
         version: '3.8'
+        
         services:
           frontend:
             image: ${{ needs.build.outputs.frontend-image }}
+            ports:
+              - "3010:80"
+            environment:
+              - NODE_ENV=production
+            restart: unless-stopped
+        
           backend:
             image: ${{ needs.build.outputs.backend-image }}
+            ports:
+              - "3011:8000"
+            environment:
+              - NODE_ENV=production
+              - ASI_ONE_API_KEY=${ASI_ONE_API_KEY}
+              - ASI_ONE_ENDPOINT=${ASI_ONE_ENDPOINT}
+            restart: unless-stopped
         EOF
         
+        # Copy environment file
+        cp config/staging.env deploy/.env
+        
     - name: Copy deployment files to server
-      uses: appleboy/scp-action@v0.1.4
+      uses: appleboy/scp-action@v0.1.5
       with:
         host: ${{ secrets.STAGING_HOST }}
         username: ${{ secrets.STAGING_USER }}
@@ -162,7 +175,7 @@ jobs:
         strip_components: 1
         
     - name: Deploy to staging server
-      uses: appleboy/ssh-action@v0.1.11
+      uses: appleboy/ssh-action@v1.0.0
       with:
         host: ${{ secrets.STAGING_HOST }}
         username: ${{ secrets.STAGING_USER }}
@@ -184,32 +197,31 @@ jobs:
           # Login to GitHub Container Registry
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # COMPREHENSIVE CLEANUP: Stop all services and remove orphans
+          # CLEANUP: Stop existing services
           docker-compose down --remove-orphans || true
-          docker stop $(docker ps -aq --filter "name=dotbot") 2>/dev/null || true
-          docker rm $(docker ps -aq --filter "name=dotbot") 2>/dev/null || true
           
           # Free up any processes using our target ports
           sudo lsof -ti:3010 | xargs sudo kill -9 2>/dev/null || true
           sudo lsof -ti:3011 | xargs sudo kill -9 2>/dev/null || true
           
-          # ULTIMATE FIX: Remove ALL cached images and registry references
-          docker-compose down --rmi all --volumes --remove-orphans || true
-          docker system prune -af || true
-          docker rmi $(docker images -q ghcr.io/zelmacorp/dotbot/frontend 2>/dev/null) 2>/dev/null || true
-          docker rmi $(docker images -q ghcr.io/zelmacorp/dotbot/backend 2>/dev/null) 2>/dev/null || true
+          # Clean up old containers and images to ensure fresh deployment
+          docker container prune -f || true
+          docker image prune -f || true
           
-          # Pull the latest pre-built images
-          echo "=== PULLING LATEST IMAGES ==="
+          # VERIFY PRE-BUILT IMAGES
+          echo "=== USING PRE-BUILT IMAGES FROM REGISTRY ==="
+          echo "Images built in previous job with correct ABSOLUTE imports"
+          
+          # Pull the pre-built images from registry (they were built in the 'build' job)
+          echo "=== PULLING PRE-BUILT IMAGES ==="
           docker-compose pull
+          
+          # VERIFY PULLED CONTAINER HAS CORRECT CODE
+          echo "=== VERIFYING PULLED CONTAINER CODE ==="
+          docker run --rm ${{ needs.build.outputs.backend-image }} sed -n '17,19p' /app/main.py || echo "Container verification failed"
           
           # Start services with pre-built images
           docker-compose up -d --force-recreate
-          
-          # VERIFY DEPLOYED CONTAINER HAS CORRECT CODE
-          echo "=== VERIFYING DEPLOYED CONTAINER CODE ==="
-          sleep 10  # Wait for containers to start
-          docker-compose exec -T backend sed -n '17,19p' /app/main.py || echo "Could not verify backend code"
           
           # Show container status for debugging
           echo "=== Container Status ==="
@@ -217,15 +229,15 @@ jobs:
           
           # Show logs if containers are failing
           echo "=== Frontend Logs ==="
-          docker logs dotbot_frontend_1 || true
+          docker logs dotbot-frontend-1 2>/dev/null || docker logs dotbot_frontend_1 2>/dev/null || echo "Frontend container not found"
           echo "=== Backend Logs ==="
-          docker logs dotbot_backend_1 || true
+          docker logs dotbot-backend-1 2>/dev/null || docker logs dotbot_backend_1 2>/dev/null || echo "Backend container not found"
           
           # Wait a bit more for backend to potentially crash and show error logs
           echo "=== Waiting for backend to stabilize or show crash logs ==="
           sleep 30
           echo "=== Backend Logs After Wait ==="
-          docker logs dotbot_backend_1 || true
+          docker logs dotbot-backend-1 2>/dev/null || docker logs dotbot_backend_1 2>/dev/null || echo "Backend container not found"
           
           # Wait for services to be ready
           sleep 60
@@ -236,7 +248,7 @@ jobs:
           
           # Test backend internal port first
           echo "=== Testing Backend Internal ==="
-          docker exec dotbot_backend_1 curl -f http://localhost:8000/api/health || echo "Backend internal health check failed"
+          docker exec dotbot-backend-1 curl -f http://localhost:8000/api/health 2>/dev/null || docker exec dotbot_backend_1 curl -f http://localhost:8000/api/health 2>/dev/null || echo "Backend internal health check failed"
           
           # Check health
           curl -f http://localhost:3010/health || exit 1
