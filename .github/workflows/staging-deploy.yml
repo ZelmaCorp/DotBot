@@ -182,7 +182,6 @@ jobs:
         port: ${{ secrets.STAGING_PORT || 22 }}
         script_stop: true
         timeout: 30m
-
         script: |
           # Set deployment directory
           DEPLOY_DIR="/opt/dotbot"
