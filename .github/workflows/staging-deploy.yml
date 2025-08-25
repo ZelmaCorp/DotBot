@@ -178,7 +178,7 @@ jobs:
           docker-compose up -d
           
           # Wait for services to be ready
-          sleep 30
+          sleep 60
           
           # Check health
           curl -f http://localhost:3010/health || exit 1
