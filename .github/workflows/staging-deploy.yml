@@ -195,8 +195,9 @@ jobs:
           # Pull latest images
           docker-compose pull
           
-          # Start services (rebuild to ensure latest code)
-          docker-compose up -d --build
+          # Start services (rebuild with no cache to ensure latest code)
+          docker-compose build --no-cache
+          docker-compose up -d
           
           # Show container status for debugging
           echo "=== Container Status ==="
