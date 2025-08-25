@@ -169,6 +169,7 @@ jobs:
         key: ${{ secrets.STAGING_SSH_KEY }}
         port: ${{ secrets.STAGING_PORT || 22 }}
         script_stop: true
+        timeout: 20m
         script: |
           # Set deployment directory
           DEPLOY_DIR="/opt/dotbot"
@@ -195,9 +196,9 @@ jobs:
           # Pull latest images
           docker-compose pull
           
-          # Start services (rebuild with no cache to ensure latest code)
-          docker-compose build --no-cache
-          docker-compose up -d
+          # Start services (rebuild to ensure latest code)
+          docker-compose build --pull
+          docker-compose up -d --force-recreate
           
           # Show container status for debugging
           echo "=== Container Status ==="
