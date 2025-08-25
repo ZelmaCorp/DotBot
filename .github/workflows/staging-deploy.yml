@@ -174,8 +174,8 @@ jobs:
           # Pull latest images
           docker-compose pull
           
-          # Start services
-          docker-compose up -d
+          # Start services (rebuild to ensure latest code)
+          docker-compose up -d --build
           
           # Wait for services to be ready
           sleep 60
