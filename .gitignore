@@ -162,4 +162,10 @@ docs/site/
 # Test outputs
 test-results/
 coverage/
+coverage.xml
+.coverage
 junit.xml
+
+# Root package files (frontend has its own)
+/package-lock.json
+/package.json
