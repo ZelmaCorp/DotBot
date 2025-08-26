@@ -182,7 +182,6 @@ jobs:
         port: ${{ secrets.STAGING_PORT || 22 }}
         script_stop: true
         timeout: 30m
-
         script: |
           # Set deployment directory
           DEPLOY_DIR="/opt/dotbot"
@@ -239,6 +238,22 @@ jobs:
           echo "=== Backend Logs After Wait ==="
           docker logs dotbot-backend-1 2>/dev/null || docker logs dotbot_backend_1 2>/dev/null || echo "Backend container not found"
           
+          # Show container status for debugging
+          echo "=== Container Status ==="
+          docker ps -a
+          
+          # Show logs if containers are failing
+          echo "=== Frontend Logs ==="
+          docker logs dotbot_frontend_1 || true
+          echo "=== Backend Logs ==="
+          docker logs dotbot-backend-1 2>/dev/null || docker logs dotbot_backend_1 2>/dev/null || echo "Backend container not found"
+          
+          # Wait a bit more for backend to potentially crash and show error logs
+          echo "=== Waiting for backend to stabilize or show crash logs ==="
+          sleep 30
+          echo "=== Backend Logs After Wait ==="
+          docker logs dotbot-backend-1 2>/dev/null || docker logs dotbot_backend_1 2>/dev/null || echo "Backend container not found"
+          
           # Wait for services to be ready
           sleep 60
           
@@ -268,7 +283,6 @@ jobs:
       uses: 8398a7/action-slack@v3
       if: always()
       continue-on-error: true
-
       with:
         status: ${{ job.status }}
         channel: '#deployments'
@@ -280,7 +294,6 @@ jobs:
           
           :link: Frontend - http://${{ secrets.STAGING_HOST }}:3010
           :gear: Backend API - http://${{ secrets.STAGING_HOST }}:3011
-
       env:
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         
@@ -326,7 +339,6 @@ jobs:
       run: |
         # Test API endpoints (direct port access)
         response=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.STAGING_HOST }}:3011/api/status)
-
         if [ "$response" != "200" ]; then
           echo "API status check failed with response code: $response"
           exit 1
