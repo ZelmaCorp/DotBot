@@ -218,6 +218,9 @@ jobs:
           docker container prune -f || true
           docker image prune -f || true
           
+          # Remove any existing containers with staging names to avoid conflicts
+          docker ps -a | grep dotbot-staging | awk '{print $1}' | xargs -r docker rm -f || true
+          
           # Deploy staging services (without --force-recreate to avoid ContainerConfig bug)
           docker-compose pull
           docker-compose up -d
