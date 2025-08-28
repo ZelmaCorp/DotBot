@@ -209,18 +209,26 @@ jobs:
           # Login to GitHub Container Registry
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # CLEANUP: Stop existing staging containers only
+          # CLEANUP: Stop and remove existing staging containers
           docker stop dotbot-staging-frontend dotbot-staging-backend 2>/dev/null || true
           docker rm dotbot-staging-frontend dotbot-staging-backend 2>/dev/null || true
           docker network rm dotbot-staging 2>/dev/null || true
           
-          # Force remove any corrupted containers/images
+          # Clean up any corrupted containers/images
           docker container prune -f || true
           docker image prune -f || true
           
-          # Deploy staging services (without --force-recreate to avoid ContainerConfig bug)
+          # Remove any existing containers with the same names to prevent conflicts
+          docker rm -f dotbot-staging-frontend dotbot-staging-backend 2>/dev/null || true
+          
+          # Deploy staging services with fresh start
           docker-compose pull
-          docker-compose up -d
+          
+          # Try normal deployment first, fallback to force recreate if needed
+          if ! docker-compose up -d; then
+            echo "Normal deployment failed, trying force recreate..."
+            docker-compose up -d --force-recreate
+          fi
           
           # Wait for services to start
           sleep 30
