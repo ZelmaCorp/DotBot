@@ -1,10 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import dotbotLogo from '../../assets/dotbot-logo.svg';
-import dotbotLogoLight from '../../assets/dotbot-logo_light.svg';
 import iconWrite from '../../assets/icon-write.svg';
 import iconSearch from '../../assets/icon-search.svg';
 import iconTransactions from '../../assets/icon-transactions.svg';
-import sidebarCollapseIcon from '../../assets/cuida_sidebar-collapse-outline.svg';
 
 interface SidebarProps {
   onNewChat: () => void;

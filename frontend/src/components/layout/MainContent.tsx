@@ -65,11 +65,11 @@ const MainContent: React.FC<MainContentProps> = ({
           /* Welcome Screen */
           <div className="welcome-screen">
             {/* DotBot Logo/Title */}
-            <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '40px' }}>
               <img 
                 src={dotbotLogo} 
                 alt="DotBot" 
-                style={{ height: '80px', width: 'auto', marginBottom: '16px' }}
+                style={{ height: '60px', width: 'auto', marginBottom: '12px' }}
               />
               <p className="welcome-subtitle">
                 What's the dot you need help with?

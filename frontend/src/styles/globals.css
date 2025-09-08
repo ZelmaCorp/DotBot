@@ -303,7 +303,7 @@ body {
   color: var(--text-muted);
 }
 
-/* Main content styles */
+/* Main content styles - stays fixed, sidebar overlays */
 .main-content {
   flex: 1;
   display: flex;
@@ -311,30 +311,9 @@ body {
   background: transparent;
   height: 100vh;
   overflow: hidden;
-  transition: all 0.3s ease-in-out;
-}
-
-/* Main content adjustments based on sidebar state */
-.app-container .main-content {
-  margin-left: 15.6vw;
-  width: calc(100vw - 15.6vw);
-}
-
-.app-container.sidebar-collapsed .main-content {
-  margin-left: 3vw;
-  width: calc(100vw - 3vw);
-}
-
-@media (min-width: 1200px) {
-  .app-container .main-content {
-    margin-left: clamp(240px, 15.6vw, 320px);
-    width: calc(100vw - clamp(240px, 15.6vw, 320px));
-  }
-  
-  .app-container.sidebar-collapsed .main-content {
-    margin-left: clamp(60px, 3vw, 80px);
-    width: calc(100vw - clamp(60px, 3vw, 80px));
-  }
+  width: 100vw;
+  margin-left: 0;
+  position: relative;
 }
 
 /* TopBar padding: 8px 40px, gap: 16px */
@@ -355,7 +334,7 @@ body {
   overflow: hidden;
 }
 
-/* Welcome screen styles - Context padding: 32px 32px 84px 32px, gap: 20px */
+/* Welcome screen styles - Context padding: 32px 32px 84px 32px, gap: 0px */
 .welcome-screen {
   flex: 1;
   display: flex;
@@ -363,7 +342,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 32px 32px 84px 32px;
-  gap: 20px;
+  gap: 0;
 }
 
 .welcome-title {
@@ -379,15 +358,15 @@ body {
 
 .welcome-subtitle {
   font-size: 1.25rem;
-  color: var(--text-secondary);
-  margin-bottom: 64px;
+  color: #fdfdfd;
+  margin-bottom: 0;
   text-align: center;
 }
 
 .quick-actions {
   display: flex;
-  gap: 20px;
-  margin-bottom: 48px;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .quick-action-btn {
@@ -397,7 +376,7 @@ body {
   justify-content: center;
   padding: 16px;
   border-radius: 12px;
-  background-color: #2a2d5a;
+  background-color: #0D082ABF;
   border: 1px solid transparent;
   color: #d1d5db;
   cursor: pointer;
@@ -408,7 +387,7 @@ body {
 }
 
 .quick-action-btn:hover {
-  background-color: #3a3d6a;
+  background-color: #0D082A;
   border-color: rgba(139, 92, 246, 0.3);
   color: white;
 }
