@@ -1,0 +1,184 @@
+import React, { useState } from 'react';
+import WalletButton from '../wallet/WalletButton';
+import ThemeToggle from '../ui/ThemeToggle';
+import ChatInterface from '../chat/ChatInterface';
+import dotbotLogo from '../../assets/DotBotLogo.svg';
+import coinStackIcon from '../../assets/coin-stack.svg';
+import iconTransactions from '../../assets/icon-transactions.svg';
+import iconCog from '../../assets/icon-cog.svg';
+import voiceIcon from '../../assets/mingcute_voice-line.svg';
+import actionButtonIcon from '../../assets/action-button.svg';
+
+interface Message {
+  id: string;
+  type: 'user' | 'bot';
+  content: string;
+  timestamp: number;
+}
+
+interface MainContentProps {
+  onCheckBalance: () => void;
+  onTransfer: () => void;
+  onStatus: () => void;
+  onSendMessage: (message: string) => void;
+  messages: Message[];
+  isTyping: boolean;
+  showWelcomeScreen: boolean;
+}
+
+const MainContent: React.FC<MainContentProps> = ({
+  onCheckBalance,
+  onTransfer,
+  onStatus,
+  onSendMessage,
+  messages,
+  isTyping,
+  showWelcomeScreen
+}) => {
+  const [welcomeInputValue, setWelcomeInputValue] = useState('');
+
+  const quickActions = [
+    {
+      icon: coinStackIcon,
+      label: 'Check Balance',
+      onClick: onCheckBalance
+    },
+    {
+      icon: iconTransactions,
+      label: 'Transfer',
+      onClick: onTransfer
+    },
+    {
+      icon: iconCog,
+      label: 'Status',
+      onClick: onStatus
+    }
+  ];
+
+  return (
+    <div className="main-content">
+      {/* Header with Theme Toggle and Wallet */}
+      <div className="main-header">
+        <ThemeToggle />
+        <WalletButton />
+      </div>
+
+      {/* Main Body */}
+      <div className="main-body">
+        {showWelcomeScreen ? (
+          /* Welcome Screen */
+          <div className="welcome-screen">
+            {/* DotBot Logo/Title */}
+            <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+              <img 
+                src={dotbotLogo} 
+                alt="DotBot" 
+                style={{ height: '60px', width: 'auto', marginBottom: '12px' }}
+              />
+              <p className="welcome-subtitle">
+                What's the dot you need help with?
+              </p>
+            </div>
+
+            {/* Quick Action Buttons */}
+            <div className="quick-actions">
+              {quickActions.map((action, index) => (
+                <button
+                  key={index}
+                  onClick={action.onClick}
+                  className="quick-action-btn"
+                >
+                  <img 
+                    src={action.icon} 
+                    alt={action.label}
+                    className="quick-action-icon"
+                  />
+                  <span className="quick-action-label">
+                    {action.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Welcome Input */}
+            <div style={{ width: '100%', maxWidth: '720px' }}>
+              <form 
+                onSubmit={(e) => e.preventDefault()} 
+                className="action-badge"
+              >
+                <input
+                  type="text"
+                  placeholder="Type your message..."
+                  value={welcomeInputValue}
+                  onChange={(e) => setWelcomeInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && welcomeInputValue.trim()) {
+                      onSendMessage(welcomeInputValue.trim());
+                      setWelcomeInputValue('');
+                    }
+                  }}
+                />
+                {!welcomeInputValue.trim() ? (
+                  <button
+                    type="button"
+                    className="input-action-btn mic"
+                    title="Voice input"
+                    style={{ 
+                      background: 'none', 
+                      border: 'none', 
+                      padding: '0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <img 
+                      src={voiceIcon} 
+                      alt="Voice input"
+                      style={{ width: '32px', height: '32px' }}
+                    />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="action-button"
+                    title="Send message"
+                    onClick={() => {
+                      if (welcomeInputValue.trim()) {
+                        onSendMessage(welcomeInputValue.trim());
+                        setWelcomeInputValue('');
+                      }
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <img 
+                      src={actionButtonIcon} 
+                      alt="Send message"
+                      style={{ width: '32px', height: '32px' }}
+                    />
+                  </button>
+                )}
+              </form>
+            </div>
+          </div>
+        ) : (
+          /* Chat Interface */
+          <ChatInterface
+            messages={messages}
+            onSendMessage={onSendMessage}
+            isTyping={isTyping}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default MainContent;
