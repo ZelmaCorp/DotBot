@@ -1,3 +1,5 @@
+# Staging Docker Compose Configuration
+# Uses ports 3010/3011 for staging environment behind external Nginx proxy
 version: '3.8'
 
 services:
@@ -10,6 +12,11 @@ services:
     environment:
       - NODE_ENV=production
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   backend:
     build:
@@ -24,3 +31,8 @@ services:
       - ASI_ONE_API_KEY=${ASI_ONE_API_KEY}
       - ASI_ONE_ENDPOINT=${ASI_ONE_ENDPOINT}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

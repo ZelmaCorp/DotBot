@@ -135,28 +135,41 @@ jobs:
         # Create deployment directory structure
         mkdir -p deploy
         
-        # Create docker-compose for deployment (images only, no build contexts)
+        # Create docker-compose for staging deployment
         cat > deploy/docker-compose.yml << 'EOF'
         version: '3.8'
         
         services:
           frontend:
             image: ${{ needs.build.outputs.frontend-image }}
+            container_name: dotbot-staging-frontend
             ports:
               - "3010:80"
             environment:
-              - NODE_ENV=production
-            restart: unless-stopped
+              - NODE_ENV=staging
+            restart: always
+            networks:
+              - dotbot-staging
         
           backend:
             image: ${{ needs.build.outputs.backend-image }}
+            container_name: dotbot-staging-backend
             ports:
               - "3011:8000"
             environment:
-              - NODE_ENV=production
+              - NODE_ENV=staging
               - ASI_ONE_API_KEY=${ASI_ONE_API_KEY}
               - ASI_ONE_ENDPOINT=${ASI_ONE_ENDPOINT}
-            restart: unless-stopped
+            restart: always
+            networks:
+              - dotbot-staging
+            depends_on:
+              - frontend
+        
+        networks:
+          dotbot-staging:
+            name: dotbot-staging
+            driver: bridge
         EOF
         
         # Copy environment file
@@ -182,7 +195,6 @@ jobs:
         port: ${{ secrets.STAGING_PORT || 22 }}
         script_stop: true
         timeout: 30m
-
         script: |
           # Set deployment directory
           DEPLOY_DIR="/opt/dotbot"
@@ -194,122 +206,48 @@ jobs:
           # Navigate to deployment directory
           cd $DEPLOY_DIR
           
+          # Check Docker and Docker Compose versions
+          docker --version
+          docker-compose --version
+          
           # Login to GitHub Container Registry
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # CLEANUP: Stop existing services
-          docker-compose down --remove-orphans || true
+          # CompreFix/GitHub actionshensive cleanup to prevent ContainerConfig errors
+          # Only cleanup if containers are not running properly
+          if ! docker ps | grep -q "dotbot-staging-frontend.*Up"; then
+            echo "Frontend not running, performing cleanup..."
+            docker stop dotbot-staging-frontend dotbot-staging-backend 2>/dev/null || true
+            docker rm -f dotbot-staging-frontend dotbot-staging-backend 2>/dev/null || true
+            docker network rm dotbot-staging 2>/dev/null || true
+            docker container prune -f || true
+            docker image prune -f || true
+            docker volume prune -f || true
+          else
+            echo "Containers are running, skipping cleanup..."
+          fi
           
-          # Free up any processes using our target ports
-          sudo lsof -ti:3010 | xargs sudo kill -9 2>/dev/null || true
-          sudo lsof -ti:3011 | xargs sudo kill -9 2>/dev/null || true
-          
-          # Clean up old containers and images to ensure fresh deployment
-          docker container prune -f || true
-          docker image prune -f || true
-          
-          # VERIFY PRE-BUILT IMAGES
-          echo "=== USING PRE-BUILT IMAGES FROM REGISTRY ==="
-          echo "Images built in previous job with correct ABSOLUTE imports"
-          
-          # Pull the pre-built images from registry (they were built in the 'build' job)
-          echo "=== PULLING PRE-BUILT IMAGES ==="
+          # Pull latest images and deploy with fallback strategy
           docker-compose pull
+          docker-compose down --volumes || true
           
-          # VERIFY PULLED CONTAINER HAS CORRECT CODE
-          echo "=== VERIFYING PULLED CONTAINER CODE ==="
-          docker run --rm ${{ needs.build.outputs.backend-image }} sed -n '17,19p' /app/main.py || echo "Container verification failed"
+          # Try Docker Compose first, fallback to docker run if needed
+          if ! docker-compose up -d; then
+            echo "Docker Compose failed, using docker run fallback..."
+            docker run -d --name dotbot-staging-frontend --network dotbot-staging -p 3010:80 ${{ needs.build.outputs.frontend-image }}
+            docker run -d --name dotbot-staging-backend --network dotbot-staging -p 3011:8000 -e NODE_ENV=staging -e ASI_ONE_API_KEY="$ASI_ONE_API_KEY" -e ASI_ONE_ENDPOINT="$ASI_ONE_ENDPOINT" ${{ needs.build.outputs.backend-image }}
+
+          fi
           
-          # Start services with pre-built images
-          docker-compose up -d --force-recreate
-          
-          # Show container status for debugging
-          echo "=== Container Status ==="
-          docker ps -a
-          
-          # Show logs if containers are failing
-          echo "=== Frontend Logs ==="
-          docker logs dotbot-frontend-1 2>/dev/null || docker logs dotbot_frontend_1 2>/dev/null || echo "Frontend container not found"
-          echo "=== Backend Logs ==="
-          docker logs dotbot-backend-1 2>/dev/null || docker logs dotbot_backend_1 2>/dev/null || echo "Backend container not found"
-          
-          # Wait a bit more for backend to potentially crash and show error logs
-          echo "=== Waiting for backend to stabilize or show crash logs ==="
+          # Wait for services to start
           sleep 30
-          echo "=== Backend Logs After Wait ==="
-          docker logs dotbot-backend-1 2>/dev/null || docker logs dotbot_backend_1 2>/dev/null || echo "Backend container not found"
           
-          # Show container status for debugging
-          echo "=== Container Status ==="
-          docker ps -a
-          
-          # Show logs if containers are failing
-          echo "=== Frontend Logs ==="
-          docker logs dotbot_frontend_1 || true
-          echo "=== Backend Logs ==="
-          docker logs dotbot_backend_1 || true
-          
-          # Wait for services to be ready
-          sleep 60
-          
-          # Check container health before curl tests
-          echo "=== Final Container Status ==="
-          docker ps -a
-          
-          # Test backend internal port first
-          echo "=== Testing Backend Internal ==="
-          docker exec dotbot-backend-1 curl -f http://localhost:8000/api/health 2>/dev/null || docker exec dotbot_backend_1 curl -f http://localhost:8000/api/health 2>/dev/null || echo "Backend internal health check failed"
-          
-          # Check health
+          # Verify deployment
+          docker ps | grep dotbot-staging
           curl -f http://localhost:3010/health || exit 1
           curl -f http://localhost:3011/api/health || exit 1
           
-          # Cleanup old images
-          docker image prune -af
-          
-  notify:
-    name: Send Notifications
-    runs-on: ubuntu-latest
-    needs: [test, build, deploy]
-    if: always()
-    
-    steps:
-    - name: Notify deployment status
-      uses: 8398a7/action-slack@v3
-      if: always()
-      continue-on-error: true
 
-      with:
-        status: ${{ job.status }}
-        channel: '#deployments'
-        username: 'GitHub Actions'
-        icon_emoji: ':rocket:'
-        fields: repo,message,commit,author,action,eventName,ref,workflow
-        text: |
-          Staging deployment ${{ job.status == 'success' && 'succeeded' || 'failed' }}!
-          
-          :link: Frontend - http://${{ secrets.STAGING_HOST }}:3010
-          :gear: Backend API - http://${{ secrets.STAGING_HOST }}:3011
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        
-    - name: Create deployment status
-      uses: actions/github-script@v7
-      if: always() && github.event_name == 'deployment'
-      with:
-        script: |
-          if (context.payload.deployment?.id) {
-            github.rest.repos.createDeploymentStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: context.payload.deployment.id,
-              state: '${{ needs.deploy.result }}',
-              environment_url: 'http://${{ secrets.STAGING_HOST }}:3010',
-              description: 'Staging deployment ${{ needs.deploy.result }}'
-            });
-          } else {
-            console.log('No deployment context available, skipping deployment status update');
-          }
 
   health-check:
     name: Post-Deployment Health Check
