@@ -527,20 +527,11 @@ body {
 }
 
 .action-button {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background-color: var(--brand-pink);
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .action-button:hover {
-  background-color: var(--pink-600);
   transform: scale(1.05);
 }
 

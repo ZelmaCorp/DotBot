@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send } from 'lucide-react';
 import voiceIcon from '../../assets/mingcute_voice-line.svg';
+import actionButtonIcon from '../../assets/action-button.svg';
 
 interface Message {
   id: string;
@@ -107,34 +107,47 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               onKeyDown={handleKeyDown}
               placeholder="Type your message..."
             />
-            <button
-              type="button"
-              className="input-action-btn mic"
-              title="Voice input"
-              style={{ 
-                background: 'none', 
-                border: 'none', 
-                padding: '4px',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              <img 
-                src={voiceIcon} 
-                alt="Voice input"
-                style={{ width: '16px', height: '16px' }}
-              />
-            </button>
-            <button
-              type="submit"
-              disabled={!inputValue.trim()}
-              className="action-button"
-              title="Send message"
-            >
-              <Send style={{ width: '16px', height: '16px' }} />
-            </button>
+            {!inputValue.trim() ? (
+              <button
+                type="button"
+                className="input-action-btn mic"
+                title="Voice input"
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  padding: '0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <img 
+                  src={voiceIcon} 
+                  alt="Voice input"
+                  style={{ width: '32px', height: '32px' }}
+                />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="action-button"
+                title="Send message"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: '0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <img 
+                  src={actionButtonIcon} 
+                  alt="Send message"
+                  style={{ width: '32px', height: '32px' }}
+                />
+              </button>
+            )}
           </form>
         </div>
       </div>

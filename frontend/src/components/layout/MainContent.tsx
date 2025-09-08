@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import WalletButton from '../wallet/WalletButton';
 import ThemeToggle from '../ui/ThemeToggle';
 import ChatInterface from '../chat/ChatInterface';
@@ -6,6 +6,8 @@ import dotbotLogo from '../../assets/DotBotLogo.svg';
 import coinStackIcon from '../../assets/coin-stack.svg';
 import iconTransactions from '../../assets/icon-transactions.svg';
 import iconCog from '../../assets/icon-cog.svg';
+import voiceIcon from '../../assets/mingcute_voice-line.svg';
+import actionButtonIcon from '../../assets/action-button.svg';
 
 interface Message {
   id: string;
@@ -33,6 +35,8 @@ const MainContent: React.FC<MainContentProps> = ({
   isTyping,
   showWelcomeScreen
 }) => {
+  const [welcomeInputValue, setWelcomeInputValue] = useState('');
+
   const quickActions = [
     {
       icon: coinStackIcon,
@@ -105,29 +109,62 @@ const MainContent: React.FC<MainContentProps> = ({
                 <input
                   type="text"
                   placeholder="Type your message..."
+                  value={welcomeInputValue}
+                  onChange={(e) => setWelcomeInputValue(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                      onSendMessage(e.currentTarget.value.trim());
-                      e.currentTarget.value = '';
+                    if (e.key === 'Enter' && welcomeInputValue.trim()) {
+                      onSendMessage(welcomeInputValue.trim());
+                      setWelcomeInputValue('');
                     }
                   }}
                 />
-                <button
-                  type="button"
-                  className="action-button"
-                  onClick={() => {
-                    const input = document.querySelector('.action-badge input') as HTMLInputElement;
-                    if (input?.value.trim()) {
-                      onSendMessage(input.value.trim());
-                      input.value = '';
-                    }
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22,2 15,22 11,13 2,9 22,2"></polygon>
-                  </svg>
-                </button>
+                {!welcomeInputValue.trim() ? (
+                  <button
+                    type="button"
+                    className="input-action-btn mic"
+                    title="Voice input"
+                    style={{ 
+                      background: 'none', 
+                      border: 'none', 
+                      padding: '0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <img 
+                      src={voiceIcon} 
+                      alt="Voice input"
+                      style={{ width: '32px', height: '32px' }}
+                    />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="action-button"
+                    title="Send message"
+                    onClick={() => {
+                      if (welcomeInputValue.trim()) {
+                        onSendMessage(welcomeInputValue.trim());
+                        setWelcomeInputValue('');
+                      }
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <img 
+                      src={actionButtonIcon} 
+                      alt="Send message"
+                      style={{ width: '32px', height: '32px' }}
+                    />
+                  </button>
+                )}
               </form>
             </div>
           </div>
