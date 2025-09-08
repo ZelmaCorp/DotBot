@@ -71,23 +71,27 @@
 
 /* Light Theme Variables */
 :root {
-  --bg-primary: var(--comp-light-bg);
-  --bg-secondary: var(--comp-light);
-  --bg-sidebar: var(--comp-light-bg);
-  --bg-input: var(--comp-light-bg);
-  --bg-action: var(--transparent-dark-purple-75);
+  --bg-primary: #FEFEFE;
+  --bg-secondary: rgba(255, 255, 255, 0.8);
+  --bg-sidebar: rgba(255, 255, 255, 0.9);
+  --bg-input: rgba(255, 255, 255, 0.9);
+  --bg-action: #0D082ABF;
   --bg-message-user: var(--pink-50);
-  --bg-message-bot: var(--white-100);
+  --bg-message-bot: rgba(255, 255, 255, 0.9);
   
-  --text-primary: var(--text-semi-dark);
-  --text-secondary: var(--text-dark-semi-muted);
-  --text-muted: var(--text-dark-muted);
+  --text-primary: #0D082A;
+  --text-secondary: #6A6A6A;
+  --text-muted: #A7A5A5;
   
-  --border-primary: var(--white-400);
-  --border-secondary: var(--white-300);
+  --border-primary: rgba(0, 0, 0, 0.1);
+  --border-secondary: rgba(0, 0, 0, 0.05);
   --border-action: var(--transparent-dark-gray-25-border);
   
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  
+  /* Danger colors */
+  --bg-danger: #ef4444;
+  --bg-danger-hover: #dc2626;
 }
 
 [data-theme="dark"] {
@@ -109,6 +113,10 @@
   --border-action: var(--transparent-dark-gray-25-border);
   
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  
+  /* Danger colors for dark theme */
+  --bg-danger: #ef4444;
+  --bg-danger-hover: #dc2626;
 }
 
 /* Custom CSS for DotBot */
@@ -124,30 +132,39 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: var(--bg-primary);
+  background: url('../assets/bgLight1.svg') no-repeat center center;
+  background-size: cover;
   color: var(--text-primary);
   overflow: hidden;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: all 0.3s ease;
+}
+
+[data-theme="dark"] body {
+  background: url('../assets/bgDark.svg') no-repeat center center;
+  background-size: cover;
 }
 
 /* App container */
 .app-container {
   display: flex;
   height: 100vh;
-  background: linear-gradient(135deg, var(--comp-light-bg) 0%, var(--white-200) 50%, var(--comp-light-bg) 100%);
+  background: url('../assets/bgLight1.svg') no-repeat center center;
+  background-size: cover;
   overflow: hidden;
   position: relative;
 }
 
 [data-theme="dark"] .app-container {
-  background: linear-gradient(135deg, var(--brand-purple) 0%, #1a1b3e 50%, var(--brand-purple) 100%);
+  background: url('../assets/bgDark.svg') no-repeat center center;
+  background-size: cover;
 }
 
 /* Sidebar styles - App Sidebar padding: 24px 12px, gap: 40px */
 .sidebar {
   background-color: var(--bg-sidebar);
+  backdrop-filter: blur(10px);
   height: 100vh;
-  transition: width 0.3s ease-in-out;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
   padding: 24px 12px;
@@ -158,11 +175,13 @@ body {
   z-index: 1000;
   box-shadow: var(--shadow);
   overflow: hidden;
+  border-right: 1px solid var(--border-secondary);
 }
 
 .sidebar.collapsed {
   padding: 24px 8px;
   align-items: center;
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar.expanded {
@@ -198,24 +217,33 @@ body {
   cursor: pointer;
   padding: 8px;
   border-radius: 8px;
-  transition: all 0.2s ease;
+  transition: gap 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   color: var(--text-primary);
   min-width: 48px;
   justify-content: flex-start;
   width: 100%;
+  position: relative;
 }
 
 .sidebar.collapsed .sidebar-logo-button {
-  justify-content: center;
   gap: 0;
   padding: 8px;
-  width: auto;
-  min-width: 40px;
 }
 
-.sidebar-logo-button:hover {
-  background-color: var(--bg-action);
+.sidebar-logo-text {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 16px;
+  opacity: 1;
+  transition: opacity 0.2s ease-in-out;
+  white-space: nowrap;
 }
+
+.sidebar.collapsed .sidebar-logo-text {
+  opacity: 0;
+}
+
+/* Toggle button should not have hover effect */
 
 .sidebar-logo-icon {
   width: 32px;
@@ -262,45 +290,109 @@ body {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 0.2s ease, color 0.2s ease;
   text-align: left;
   font-size: 14px;
   font-weight: 500;
+  position: relative;
+  overflow: hidden;
 }
 
 .sidebar-nav-item:hover {
+  background-color: rgba(168, 85, 247, 0.1);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .sidebar-nav-item:hover {
   background-color: var(--bg-action);
   color: var(--text-primary);
 }
 
 .sidebar.collapsed .sidebar-nav-item {
-  justify-content: center;
-  gap: 0;
   padding: 12px;
   width: 40px;
   min-width: 40px;
+  justify-content: center;
 }
 
 .sidebar.expanded .sidebar-nav-item {
-  justify-content: flex-start;
-  gap: 12px;
   padding: 12px;
+  justify-content: flex-start;
+}
+
+.sidebar.expanded .sidebar-nav-item .sidebar-nav-icon {
+  margin-right: 12px;
+}
+
+.sidebar-nav-item span {
+  opacity: 1;
+  transition: opacity 0.2s ease-in-out;
+  white-space: nowrap;
+}
+
+.sidebar.collapsed .sidebar-nav-item span {
+  opacity: 0;
 }
 
 .sidebar-nav-icon {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
+  filter: brightness(0) saturate(100%) invert(25%) sepia(10%) saturate(1071%) hue-rotate(227deg) brightness(90%) contrast(89%);
+}
+
+[data-theme="dark"] .sidebar-nav-icon {
+  filter: none;
 }
 
 .sidebar-footer {
   padding: 16px;
   text-align: center;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-footer-expanded {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  opacity: 1;
+  transition: opacity 0.3s ease-in-out 0.1s;
+}
+
+.sidebar-footer-collapsed {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  opacity: 1;
+  transition: opacity 0.3s ease-in-out 0.1s;
+}
+
+.sidebar-footer-logo {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  filter: brightness(0) saturate(100%) invert(25%) sepia(10%) saturate(1071%) hue-rotate(227deg) brightness(90%) contrast(89%);
+}
+
+.sidebar-footer-logo-collapsed {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  filter: brightness(0) saturate(100%) invert(25%) sepia(10%) saturate(1071%) hue-rotate(227deg) brightness(90%) contrast(89%);
+}
+
+[data-theme="dark"] .sidebar-footer-logo,
+[data-theme="dark"] .sidebar-footer-logo-collapsed {
+  filter: none;
 }
 
 .sidebar-footer-text {
   font-size: 12px;
   color: var(--text-muted);
+  opacity: 1;
+  transition: opacity 0.2s ease-in-out;
+  white-space: nowrap;
 }
 
 /* Main content styles - stays fixed, sidebar overlays */
@@ -358,7 +450,7 @@ body {
 
 .welcome-subtitle {
   font-size: 1.25rem;
-  color: #fdfdfd;
+  color: var(--text-secondary);
   margin-bottom: 0;
   text-align: center;
 }
@@ -376,9 +468,9 @@ body {
   justify-content: center;
   padding: 16px;
   border-radius: 12px;
-  background-color: #0D082ABF;
-  border: 1px solid transparent;
-  color: #d1d5db;
+  background-color: #FDFDFDBF;
+  border: 1px solid #B4B2BD40;
+  color: #3D3955;
   cursor: pointer;
   transition: all 0.2s;
   width: 120px;
@@ -387,6 +479,18 @@ body {
 }
 
 .quick-action-btn:hover {
+  background-color: #FDFDFD;
+  border-color: #B4B2BD80;
+  color: #3D3955;
+}
+
+[data-theme="dark"] .quick-action-btn {
+  background-color: #0D082ABF;
+  border: 1px solid transparent;
+  color: #d1d5db;
+}
+
+[data-theme="dark"] .quick-action-btn:hover {
   background-color: #0D082A;
   border-color: rgba(139, 92, 246, 0.3);
   color: white;
@@ -396,6 +500,11 @@ body {
   width: 24px;
   height: 24px;
   margin-bottom: 8px;
+  filter: brightness(0) saturate(100%) invert(25%) sepia(10%) saturate(1071%) hue-rotate(227deg) brightness(90%) contrast(89%);
+}
+
+[data-theme="dark"] .quick-action-icon {
+  filter: none;
 }
 
 .quick-action-label {
@@ -500,9 +609,9 @@ body {
   border-radius: 40px;
   padding: 12px 16px;
   gap: 10px;
-  background-color: var(--bg-action);
-  border: 1px solid var(--border-action);
-  color: var(--text-muted);
+  background-color: #FDFDFDBF;
+  border: 1px solid #B4B2BD40;
+  color: #3D3955;
   font-family: 'Roboto', sans-serif;
   font-weight: 400;
   font-size: 16px;
@@ -516,14 +625,28 @@ body {
   background: transparent;
   border: none;
   outline: none;
-  color: var(--text-primary);
+  color: #3D3955;
   font-family: inherit;
   font-size: inherit;
   font-weight: inherit;
 }
 
 .action-badge input::placeholder {
+  color: rgba(61, 57, 85, 0.6);
+}
+
+[data-theme="dark"] .action-badge {
+  background-color: #0D082ABF;
+  border: 1px solid var(--transparent-dark-gray-25-border);
   color: var(--text-muted);
+}
+
+[data-theme="dark"] .action-badge input {
+  color: #FFFFFF;
+}
+
+[data-theme="dark"] .action-badge input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .action-button {
@@ -632,41 +755,77 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  border: 1px solid transparent;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
   cursor: pointer;
   transition: all 0.2s;
   font-weight: 500;
   font-size: 14px;
   text-decoration: none;
+  background-color: white;
+  color: #374151;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .wallet-btn.connected {
-  background-color: #059669;
-  color: white;
+  background-color: white;
+  color: #374151;
+  border-color: rgba(0, 0, 0, 0.1);
 }
 
 .wallet-btn.connected:hover {
-  background-color: #047857;
-  border-color: rgba(255, 255, 255, 0.2);
+  background-color: #f9fafb;
+  border-color: rgba(0, 0, 0, 0.2);
 }
 
 .wallet-btn.disconnected {
-  background-color: #2563eb;
-  color: white;
+  background-color: white;
+  color: #374151;
+  border-color: rgba(0, 0, 0, 0.1);
 }
 
 .wallet-btn.disconnected:hover {
-  background-color: #1d4ed8;
-  border-color: rgba(255, 255, 255, 0.2);
+  background-color: #f9fafb;
+  border-color: rgba(0, 0, 0, 0.2);
 }
 
 .wallet-icon {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-  filter: brightness(0) saturate(100%) invert(100%);
+  opacity: 0.7;
+}
+
+.wallet-address {
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.wallet-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #10b981;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Dark theme styles for wallet button */
+[data-theme="dark"] .wallet-btn {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-theme="dark"] .wallet-btn:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+[data-theme="dark"] .wallet-icon {
+  opacity: 0.9;
 }
 
 /* Theme toggle styles */
@@ -829,16 +988,21 @@ body {
   width: 100%;
   background-color: var(--bg-danger);
   color: white;
-  border: none;
+  border: 1px solid var(--bg-danger);
   border-radius: 8px;
   padding: 12px 16px;
   font-weight: 500;
+  font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .wallet-disconnect-btn:hover {
   background-color: var(--bg-danger-hover);
+  border-color: var(--bg-danger-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 /* Disconnected state styles */

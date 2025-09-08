@@ -3,6 +3,7 @@ import dotbotLogo from '../../assets/dotbot-logo.svg';
 import iconWrite from '../../assets/icon-write.svg';
 import iconSearch from '../../assets/icon-search.svg';
 import iconTransactions from '../../assets/icon-transactions.svg';
+import fetchAiLogo from '../../assets/fetch_ai.svg';
 
 interface SidebarProps {
   onNewChat: () => void;
@@ -83,14 +84,29 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
         </ul>
       </nav>
 
-      {/* Footer - Powered by ASI.One */}
-      {isExpanded && (
-        <div className="sidebar-footer">
-          <div className="sidebar-footer-text">
-            Powered by ASI.One
+      {/* Footer */}
+      <div className="sidebar-footer">
+        {isExpanded ? (
+          <div className="sidebar-footer-expanded">
+            <img 
+              src={fetchAiLogo} 
+              alt="Fetch.ai" 
+              className="sidebar-footer-logo"
+            />
+            <div className="sidebar-footer-text">
+              Powered by ASI.One
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="sidebar-footer-collapsed">
+            <img 
+              src={fetchAiLogo} 
+              alt="Fetch.ai" 
+              className="sidebar-footer-logo-collapsed"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 };

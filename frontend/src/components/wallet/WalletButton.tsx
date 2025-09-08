@@ -37,14 +37,14 @@ const WalletButton: React.FC = () => {
         className={`wallet-btn ${isConnected ? 'connected' : 'disconnected'}`}
       >
         <img src={walletIcon} alt="Wallet" className="wallet-icon" />
-        <span>
+        <span className="wallet-address">
           {isConnected && selectedAccount 
             ? formatAddress(selectedAccount.address)
             : 'Connect Wallet'
           }
         </span>
         {isConnected && (
-          <ChevronDown style={{ width: '12px', height: '12px', opacity: 0.7 }} />
+          <div className="wallet-status-dot"></div>
         )}
       </button>
 
