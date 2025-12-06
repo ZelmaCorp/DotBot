@@ -3,12 +3,11 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { ThemeProvider } from './contexts/ThemeContext';
 import CollapsibleSidebar from './components/layout/CollapsibleSidebar';
 import MainContent from './components/layout/MainContent';
-import { createSubsystemLogger } from './config/logger';
-import { Subsystem } from './types/logging';
+import { createSubsystemLogger, Subsystem } from './lib';
 import { AgentCommunicationService } from './services/agentCommunication';
 import { AgentRequest } from './types/agents';
 import './styles/globals.css';
-import { logSystemPrompt } from './prompts/system/utils';
+import { logSystemPrompt } from './lib/prompts/system/utils';
 
 // Initialize logger for the main App
 const logger = createSubsystemLogger(Subsystem.APP);
