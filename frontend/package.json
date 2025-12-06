@@ -36,7 +36,8 @@
     "eject": "react-scripts eject",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix"
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "generate-prompt": "node scripts/generate-system-prompt.js"
   },
   "eslintConfig": {
     "extends": [

@@ -156,9 +156,47 @@ function formatContext(context?: SystemContext): string {
  * Build the complete system prompt
  * 
  * @param context Optional system context to include
+ * @param options Optional configuration
  * @returns Complete system prompt string
  */
-export function buildSystemPrompt(context?: SystemContext): string {
+export async function buildSystemPrompt(
+  context?: SystemContext
+): Promise<string> {
+  let prompt = BASE_SYSTEM_PROMPT;
+  
+  // Add context information
+  prompt += formatContext(context);
+  
+  // Add Polkadot Knowledge Base
+  prompt += formatPolkadotKnowledgeBase();
+  
+  // Add agent definitions
+  prompt += formatAgentDefinitions();
+  
+  // Add execution array instructions
+  prompt += '\n';
+  prompt += EXECUTION_ARRAY_INSTRUCTIONS;
+  
+  // Add final instructions
+  prompt += `\n\n## Important Guidelines
+
+- Always construct Execution Arrays for operations that require blockchain interaction
+- Request missing required parameters before building the execution array
+- Explain what will happen before asking for user confirmation
+- Handle errors gracefully and provide helpful error messages
+- If you're unsure about a parameter or operation, ask the user for clarification
+- Prioritize user safety and security in all operations`;
+
+  return prompt;
+}
+
+/**
+ * Build system prompt synchronously
+ * 
+ * @param context Optional system context to include
+ * @returns Complete system prompt string
+ */
+export function buildSystemPromptSync(context?: SystemContext): string {
   let prompt = BASE_SYSTEM_PROMPT;
   
   // Add context information
@@ -191,7 +229,7 @@ export function buildSystemPrompt(context?: SystemContext): string {
  * Get system prompt with minimal context (for testing or default state)
  */
 export function getDefaultSystemPrompt(): string {
-  return buildSystemPrompt();
+  return buildSystemPromptSync();
 }
 
 /**
@@ -200,8 +238,10 @@ export function getDefaultSystemPrompt(): string {
  * @param context Optional system context to include
  * @returns Versioned prompt object
  */
-export function buildVersionedSystemPrompt(context?: SystemContext) {
-  const prompt = buildSystemPrompt(context);
+export async function buildVersionedSystemPrompt(
+  context?: SystemContext
+) {
+  const prompt = await buildSystemPrompt(context);
   
   return createVersionedPrompt(prompt, context ? {
     walletConnected: context.wallet.isConnected,

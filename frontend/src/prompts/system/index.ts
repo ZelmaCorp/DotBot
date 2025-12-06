@@ -5,8 +5,8 @@
  * This module provides the interface for loading and using system prompts.
  */
 
-export { buildSystemPrompt, getDefaultSystemPrompt, buildVersionedSystemPrompt } from './loader';
-export { logSystemPrompt, getSystemPromptString, logSystemPromptWithMockContext } from './utils';
+export { buildSystemPrompt, buildSystemPromptSync, getDefaultSystemPrompt, buildVersionedSystemPrompt } from './loader';
+export { logSystemPrompt, logSystemPromptAsync, getSystemPromptString, logSystemPromptWithMockContext } from './utils';
 export { BASE_SYSTEM_PROMPT } from './base';
 export { EXECUTION_ARRAY_INSTRUCTIONS } from './execution/instructions';
 export {
