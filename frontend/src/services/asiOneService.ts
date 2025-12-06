@@ -1,8 +1,7 @@
 // ASI-One Service - Modular service for Fetch.ai ASI-One integration
 // Designed to work in frontend with localStorage, easily movable to backend
 
-import { createSubsystemLogger } from '../config/logger';
-import { Subsystem } from '../types/logging';
+import { createSubsystemLogger, Subsystem } from '../lib';
 
 // Initialize logger for ASI-One service
 const logger = createSubsystemLogger(Subsystem.AGENT_COMM);
