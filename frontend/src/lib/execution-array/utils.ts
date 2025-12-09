@@ -4,7 +4,7 @@
  * Utilities for converting between prompt system types and runtime execution types.
  */
 
-import { ExecutionStep, ExecutionArray as ExecutionArrayPlan } from '../prompts/system/execution/types';
+import { ExecutionStep, ExecutionPlan } from '../prompts/system/execution/types';
 import { ExecutionItem, ExecutionStatus } from './types';
 import { AgentResult } from '../agents/types';
 

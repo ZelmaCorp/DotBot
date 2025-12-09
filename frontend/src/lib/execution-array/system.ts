@@ -6,7 +6,7 @@
  */
 
 import { ApiPromise } from '@polkadot/api';
-import { ExecutionArray as ExecutionArrayPlan } from '../prompts/system/execution/types';
+import { ExecutionPlan } from '../prompts/system/execution/types';
 import { ExecutionOrchestrator } from './orchestrator';
 import { Executioner } from './executioner';
 import { ExecutionOptions, SigningRequest, BatchSigningRequest } from './types';
@@ -77,12 +77,12 @@ export class ExecutionSystem {
    * 3. ExecutionArray manages the queue
    * 4. Executioner handles signing and broadcasting
    * 
-   * @param plan ExecutionArrayPlan from LLM
+   * @param plan ExecutionPlan from LLM
    * @param options Execution options
    * @param callbacks Progress callbacks for LLM feedback
    */
   async execute(
-    plan: ExecutionArrayPlan,
+    plan: ExecutionPlan,
     options: ExecutionOptions = {},
     callbacks?: {
       /** Called while preparing operations */

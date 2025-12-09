@@ -75,7 +75,7 @@ export type {
 } from './prompts/system/agents/types';
 // Export prompt system execution types (for LLM planning)
 export type {
-  ExecutionArray as ExecutionArrayPlan, // Renamed to avoid conflict with runtime class
+  ExecutionPlan, // LLM's JSON plan (this is what LLM outputs)
   ExecutionStep,
   ExecutionStatus as ExecutionStatusPlan, // Renamed to avoid conflict with runtime type
   ExecutionType as ExecutionTypePlan, // Same values but different namespace

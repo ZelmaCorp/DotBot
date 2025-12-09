@@ -16,7 +16,7 @@
  */
 
 import { ApiPromise } from '@polkadot/api';
-import { ExecutionStep, ExecutionArray as ExecutionArrayPlan } from '../prompts/system/execution/types';
+import { ExecutionStep, ExecutionPlan } from '../prompts/system/execution/types';
 import { ExecutionArray } from './execution-array';
 import { AgentResult, AgentError } from '../agents/types';
 import { createAgent, getAgentByClassName } from '../agents';
@@ -88,18 +88,18 @@ export class ExecutionOrchestrator {
   /**
    * Orchestrate execution plan from LLM
    * 
-   * Takes LLM output (ExecutionArrayPlan) and automatically:
+   * Takes LLM output (ExecutionPlan) and automatically:
    * 1. Calls appropriate agents
    * 2. Gets AgentResults (with extrinsics)
    * 3. Populates ExecutionArray
    * 4. Returns ready-to-execute array
    * 
-   * @param plan ExecutionArrayPlan from LLM
+   * @param plan ExecutionPlan from LLM
    * @param options Orchestration options
    * @returns OrchestrationResult with populated ExecutionArray
    */
   async orchestrate(
-    plan: ExecutionArrayPlan,
+    plan: ExecutionPlan,
     options: OrchestrationOptions = {}
   ): Promise<OrchestrationResult> {
     this.ensureInitialized();
