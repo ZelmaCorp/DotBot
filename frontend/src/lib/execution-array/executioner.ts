@@ -638,6 +638,7 @@ export class Executioner {
     // Legacy: fall back to browser wallet
     const injector = await web3FromAddress(address);
     return await extrinsic.signAsync(address, {
+      // @ts-expect-error - Polkadot.js type mismatch between @polkadot/extension-inject and @polkadot/api versions
       signer: injector.signer,
     });
   }
@@ -668,6 +669,7 @@ export class Executioner {
     return new Promise((resolve, reject) => {
       extrinsic.signAndSend(
         address,
+        // @ts-expect-error - Polkadot.js type mismatch between @polkadot/extension-inject and @polkadot/api versions
         { signer: injector.signer },
         (result) => {
           callback(result);

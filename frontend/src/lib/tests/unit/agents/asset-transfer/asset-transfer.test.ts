@@ -14,7 +14,7 @@ jest.mock('@polkadot/util-crypto', () => {
   ];
   
   return {
-    isAddress: (address) => {
+    isAddress: (address: string) => {
       if (!address || typeof address !== 'string' || address.trim().length === 0) {
         return false;
       }
@@ -34,7 +34,7 @@ jest.mock('@polkadot/util-crypto', () => {
 
 jest.mock('@polkadot/keyring', () => {
   return {
-    decodeAddress: (address) => {
+    decodeAddress: (address: string) => {
       if (!address || address.length === 0) {
         throw new Error('Invalid address');
       }
