@@ -45,6 +45,7 @@ export class BrowserWalletSigner implements Signer {
   ): Promise<SubmittableExtrinsic<'promise'>> {
     const injector = await web3FromAddress(address);
     return await extrinsic.signAsync(address, {
+      // @ts-expect-error - Polkadot.js type mismatch between @polkadot/extension-inject and @polkadot/api versions
       signer: injector.signer,
     });
   }
