@@ -39,7 +39,6 @@ export class AssetTransferAgent extends BaseAgent {
   async transfer(params: TransferParams): Promise<AgentResult> {
     this.ensureInitialized();
     const api = this.getApi();
-    const warnings: string[] = [];
 
     console.log('💸 AssetTransferAgent.transfer() called with params:', {
       sender: params.address,
@@ -48,97 +47,14 @@ export class AssetTransferAgent extends BaseAgent {
     });
 
     try {
-      // Validate sender address
-      const senderValidation = this.validateAddress(params.address);
-      if (!senderValidation.valid) {
-        throw new AgentError(
-          `Invalid sender address: ${senderValidation.errors.join(', ')}`,
-          'INVALID_SENDER_ADDRESS',
-          { errors: senderValidation.errors }
-        );
-      }
+      this.validateTransferAddresses(params.address, params.recipient);
+      const amountBN = this.parseAndValidateAmount(params.amount);
+      await this.validateTransferBalance(params.address, amountBN, params.validateBalance);
 
-      // Validate recipient address
-      const recipientValidation = this.validateAddress(params.recipient);
-      if (!recipientValidation.valid) {
-        throw new AgentError(
-          `Invalid recipient address: ${recipientValidation.errors.join(', ')}`,
-          'INVALID_RECIPIENT_ADDRESS',
-          { errors: recipientValidation.errors }
-        );
-      }
-
-      // Check if sender and recipient are the same
-      if (params.address === params.recipient) {
-        throw new AgentError(
-          'Sender and recipient addresses cannot be the same',
-          'SAME_SENDER_RECIPIENT'
-        );
-      }
-
-      // Parse and validate amount
-      const amountBN = typeof params.amount === 'string' && params.amount.includes('.')
-        ? this.parseAmount(params.amount)
-        : new BN(params.amount);
-
-      if (amountBN.lte(new BN(0))) {
-        throw new AgentError(
-          'Transfer amount must be greater than zero',
-          'INVALID_AMOUNT'
-        );
-      }
-
-      // Validate balance if requested (default: true)
-      const validateBalance = params.validateBalance !== false;
-      if (validateBalance) {
-        const balanceCheck = await this.hasSufficientBalance(
-          params.address,
-          amountBN,
-          true // include fees
-        );
-
-        if (!balanceCheck.sufficient) {
-          throw new AgentError(
-            `Insufficient balance. Available: ${this.formatAmount(balanceCheck.available)} DOT, Required: ${this.formatAmount(balanceCheck.required)} DOT`,
-            'INSUFFICIENT_BALANCE',
-            {
-              available: balanceCheck.available,
-              required: balanceCheck.required,
-              shortfall: balanceCheck.shortfall,
-            }
-          );
-        }
-      }
-
-      // Create the appropriate extrinsic
       const keepAlive = params.keepAlive === true;
-      const extrinsicParams = {
-        recipient: params.recipient,
-        amount: amountBN.toString(),
-      };
-      const extrinsic = keepAlive
-        ? createTransferKeepAliveExtrinsic(api, extrinsicParams)
-        : createTransferExtrinsic(api, extrinsicParams);
-
-      // Estimate fee
+      const extrinsic = this.createTransferExtrinsic(api, params.recipient, amountBN, keepAlive);
       const estimatedFee = await this.estimateFee(extrinsic, params.address);
-
-      // Add warnings
-      if (keepAlive) {
-        warnings.push('Using transferKeepAlive - this ensures the sender account remains alive after transfer');
-      }
-
-      // Check if recipient account exists (optional warning)
-      try {
-        const recipientInfo = await api.query.system.account(params.recipient);
-        const recipientData = recipientInfo as any;
-        const recipientBalance = recipientData.data?.free?.toString() || '0';
-        if (recipientBalance === '0') {
-          warnings.push('Recipient account appears to be new or empty');
-        }
-      } catch {
-        // Ignore errors when checking recipient
-      }
+      const warnings = await this.collectTransferWarnings(api, params.recipient, keepAlive);
 
       const description = `Transfer ${this.formatAmount(amountBN)} DOT from ${params.address.slice(0, 8)}...${params.address.slice(-8)} to ${params.recipient.slice(0, 8)}...${params.recipient.slice(-8)}`;
 
@@ -161,120 +77,28 @@ export class AssetTransferAgent extends BaseAgent {
         }
       );
     } catch (error) {
-      if (error instanceof AgentError) {
-        throw error;
-      }
-      throw new AgentError(
-        `Transfer failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'TRANSFER_ERROR',
-        { originalError: error instanceof Error ? error.message : String(error) }
-      );
+      return this.handleTransferError(error, 'Transfer');
     }
   }
 
   /**
    * Batch transfer - transfer to multiple recipients in a single transaction
-   * 
-   * @param params Batch transfer parameters
-   * @returns AgentResult with batch transfer extrinsic
    */
   async batchTransfer(params: BatchTransferParams): Promise<AgentResult> {
     this.ensureInitialized();
     const api = this.getApi();
-    const warnings: string[] = [];
 
     try {
-      // Validate sender address
-      const senderValidation = this.validateAddress(params.address);
-      if (!senderValidation.valid) {
-        throw new AgentError(
-          `Invalid sender address: ${senderValidation.errors.join(', ')}`,
-          'INVALID_SENDER_ADDRESS',
-          { errors: senderValidation.errors }
-        );
-      }
+      this.validateSenderAddress(params.address);
+      this.validateTransfersArray(params.transfers);
 
-      // Validate transfers array
-      if (!params.transfers || params.transfers.length === 0) {
-        throw new AgentError(
-          'At least one transfer is required',
-          'NO_TRANSFERS'
-        );
-      }
+      const { validatedTransfers, totalAmount } = this.validateAndParseTransfers(
+        params.address,
+        params.transfers
+      );
 
-      if (params.transfers.length > 100) {
-        throw new AgentError(
-          'Batch transfer cannot exceed 100 transfers',
-          'TOO_MANY_TRANSFERS'
-        );
-      }
+      await this.validateTransferBalance(params.address, totalAmount, params.validateBalance);
 
-      // Validate each transfer
-      const totalAmount = new BN(0);
-      const validatedTransfers = params.transfers.map((transfer, index) => {
-        // Validate recipient
-        const recipientValidation = this.validateAddress(transfer.recipient);
-        if (!recipientValidation.valid) {
-          throw new AgentError(
-            `Invalid recipient address at index ${index}: ${recipientValidation.errors.join(', ')}`,
-            'INVALID_RECIPIENT_ADDRESS',
-            { index, errors: recipientValidation.errors }
-          );
-        }
-
-        // Check if sender and recipient are the same
-        if (params.address === transfer.recipient) {
-          throw new AgentError(
-            `Transfer ${index + 1}: Sender and recipient addresses cannot be the same`,
-            'SAME_SENDER_RECIPIENT',
-            { index }
-          );
-        }
-
-        // Parse and validate amount
-        const amountBN = typeof transfer.amount === 'string' && transfer.amount.includes('.')
-          ? this.parseAmount(transfer.amount)
-          : new BN(transfer.amount);
-
-        if (amountBN.lte(new BN(0))) {
-          throw new AgentError(
-            `Transfer ${index + 1}: Amount must be greater than zero`,
-            'INVALID_AMOUNT',
-            { index }
-          );
-        }
-
-        totalAmount.iadd(amountBN);
-
-        return {
-          recipient: transfer.recipient,
-          amount: amountBN.toString(),
-        };
-      });
-
-      // Validate balance if requested (default: true)
-      const validateBalance = params.validateBalance !== false;
-      if (validateBalance) {
-        const balanceCheck = await this.hasSufficientBalance(
-          params.address,
-          totalAmount,
-          true // include fees
-        );
-
-        if (!balanceCheck.sufficient) {
-          throw new AgentError(
-            `Insufficient balance for batch transfer. Available: ${this.formatAmount(balanceCheck.available)} DOT, Required: ${this.formatAmount(balanceCheck.required)} DOT`,
-            'INSUFFICIENT_BALANCE',
-            {
-              available: balanceCheck.available,
-              required: balanceCheck.required,
-              shortfall: balanceCheck.shortfall,
-            }
-          );
-        }
-      }
-
-      // Create batch extrinsic
       const extrinsic = createBatchTransferExtrinsic(api, {
         transfers: validatedTransfers.map(t => ({
           recipient: t.recipient,
@@ -282,15 +106,8 @@ export class AssetTransferAgent extends BaseAgent {
         })),
       });
 
-      // Estimate fee
       const estimatedFee = await this.estimateFee(extrinsic, params.address);
-
-      // Add warnings
-      warnings.push(`Batch transfer with ${params.transfers.length} recipients`);
-      if (params.transfers.length > 10) {
-        warnings.push('Large batch transfer - ensure all recipients are correct');
-      }
-
+      const warnings = this.collectBatchWarnings(params.transfers.length);
       const description = `Batch transfer: ${params.transfers.length} transfers totaling ${this.formatAmount(totalAmount)} DOT from ${params.address.slice(0, 8)}...${params.address.slice(-8)}`;
 
       return this.createResult(
@@ -316,15 +133,190 @@ export class AssetTransferAgent extends BaseAgent {
         }
       );
     } catch (error) {
-      if (error instanceof AgentError) {
-        throw error;
-      }
+      return this.handleTransferError(error, 'Batch transfer');
+    }
+  }
+
+  // Helper methods
+
+  private validateTransferAddresses(sender: string, recipient: string): void {
+    const senderValidation = this.validateAddress(sender);
+    if (!senderValidation.valid) {
       throw new AgentError(
-        `Batch transfer failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'BATCH_TRANSFER_ERROR',
-        { originalError: error instanceof Error ? error.message : String(error) }
+        `Invalid sender address: ${senderValidation.errors.join(', ')}`,
+        'INVALID_SENDER_ADDRESS',
+        { errors: senderValidation.errors }
+      );
+    }
+
+    const recipientValidation = this.validateAddress(recipient);
+    if (!recipientValidation.valid) {
+      throw new AgentError(
+        `Invalid recipient address: ${recipientValidation.errors.join(', ')}`,
+        'INVALID_RECIPIENT_ADDRESS',
+        { errors: recipientValidation.errors }
+      );
+    }
+
+    if (sender === recipient) {
+      throw new AgentError(
+        'Sender and recipient addresses cannot be the same',
+        'SAME_SENDER_RECIPIENT'
       );
     }
   }
-}
 
+  private validateSenderAddress(address: string): void {
+    const validation = this.validateAddress(address);
+    if (!validation.valid) {
+      throw new AgentError(
+        `Invalid sender address: ${validation.errors.join(', ')}`,
+        'INVALID_SENDER_ADDRESS',
+        { errors: validation.errors }
+      );
+    }
+  }
+
+  private validateTransfersArray(transfers?: Array<{ recipient: string; amount: string | number }>): void {
+    if (!transfers || transfers.length === 0) {
+      throw new AgentError('At least one transfer is required', 'NO_TRANSFERS');
+    }
+    if (transfers.length > 100) {
+      throw new AgentError('Batch transfer cannot exceed 100 transfers', 'TOO_MANY_TRANSFERS');
+    }
+  }
+
+  private validateAndParseTransfers(
+    senderAddress: string,
+    transfers: Array<{ recipient: string; amount: string | number }>
+  ): { validatedTransfers: Array<{ recipient: string; amount: string }>; totalAmount: BN } {
+    const totalAmount = new BN(0);
+    const validatedTransfers = transfers.map((transfer, index) => {
+      const recipientValidation = this.validateAddress(transfer.recipient);
+      if (!recipientValidation.valid) {
+        throw new AgentError(
+          `Invalid recipient address at index ${index}: ${recipientValidation.errors.join(', ')}`,
+          'INVALID_RECIPIENT_ADDRESS',
+          { index, errors: recipientValidation.errors }
+        );
+      }
+
+      if (senderAddress === transfer.recipient) {
+        throw new AgentError(
+          `Transfer ${index + 1}: Sender and recipient addresses cannot be the same`,
+          'SAME_SENDER_RECIPIENT',
+          { index }
+        );
+      }
+
+      const amountBN = this.parseAndValidateAmount(transfer.amount, index);
+      totalAmount.iadd(amountBN);
+
+      return {
+        recipient: transfer.recipient,
+        amount: amountBN.toString(),
+      };
+    });
+
+    return { validatedTransfers, totalAmount };
+  }
+
+  private parseAndValidateAmount(amount: string | number, index?: number): BN {
+    const amountBN = typeof amount === 'string' && amount.includes('.')
+      ? this.parseAmount(amount)
+      : new BN(amount);
+
+    if (amountBN.lte(new BN(0))) {
+      const prefix = index !== undefined ? `Transfer ${index + 1}: ` : '';
+      throw new AgentError(
+        `${prefix}Transfer amount must be greater than zero`,
+        'INVALID_AMOUNT',
+        index !== undefined ? { index } : undefined
+      );
+    }
+
+    return amountBN;
+  }
+
+  private async validateTransferBalance(
+    address: string,
+    amount: BN,
+    validateBalance?: boolean
+  ): Promise<void> {
+    if (validateBalance === false) return;
+
+    const balanceCheck = await this.hasSufficientBalance(address, amount, true);
+    if (!balanceCheck.sufficient) {
+      throw new AgentError(
+        `Insufficient balance. Available: ${this.formatAmount(balanceCheck.available)} DOT, Required: ${this.formatAmount(balanceCheck.required)} DOT`,
+        'INSUFFICIENT_BALANCE',
+        {
+          available: balanceCheck.available,
+          required: balanceCheck.required,
+          shortfall: balanceCheck.shortfall,
+        }
+      );
+    }
+  }
+
+  private createTransferExtrinsic(
+    api: any,
+    recipient: string,
+    amount: BN,
+    keepAlive: boolean
+  ): any {
+    const extrinsicParams = {
+      recipient,
+      amount: amount.toString(),
+    };
+    return keepAlive
+      ? createTransferKeepAliveExtrinsic(api, extrinsicParams)
+      : createTransferExtrinsic(api, extrinsicParams);
+  }
+
+  private async collectTransferWarnings(
+    api: any,
+    recipient: string,
+    keepAlive: boolean
+  ): Promise<string[]> {
+    const warnings: string[] = [];
+
+    if (keepAlive) {
+      warnings.push('Using transferKeepAlive - this ensures the sender account remains alive after transfer');
+    }
+
+    try {
+      const recipientInfo = await api.query.system.account(recipient);
+      const recipientData = recipientInfo as any;
+      const recipientBalance = recipientData.data?.free?.toString() || '0';
+      if (recipientBalance === '0') {
+        warnings.push('Recipient account appears to be new or empty');
+      }
+    } catch {
+      // Ignore errors when checking recipient
+    }
+
+    return warnings;
+  }
+
+  private collectBatchWarnings(transferCount: number): string[] {
+    const warnings: string[] = [
+      `Batch transfer with ${transferCount} recipients`
+    ];
+    if (transferCount > 10) {
+      warnings.push('Large batch transfer - ensure all recipients are correct');
+    }
+    return warnings;
+  }
+
+  private handleTransferError(error: unknown, operation: string): never {
+    if (error instanceof AgentError) {
+      throw error;
+    }
+    throw new AgentError(
+      `${operation} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      `${operation.toUpperCase().replace(' ', '_')}_ERROR`,
+      { originalError: error instanceof Error ? error.message : String(error) }
+    );
+  }
+}
