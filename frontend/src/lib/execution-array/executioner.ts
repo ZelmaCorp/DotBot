@@ -10,7 +10,7 @@
 import { ApiPromise } from '@polkadot/api';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { web3FromAddress } from '@polkadot/extension-dapp';
-import { ExecutionArray } from './execution-array';
+import { ExecutionArray } from './executionArray';
 import {
   ExecutionItem,
   ExecutionOptions,
@@ -20,7 +20,7 @@ import {
 } from './types';
 import { WalletAccount } from '../../types/wallet';
 import { Signer } from './signers/types';
-import { BrowserWalletSigner } from './signers/browser-signer';
+import { BrowserWalletSigner } from './signers/browserSigner';
 
 /**
  * Executioner class

@@ -6,7 +6,7 @@ import { ExecutionOrchestrator } from '../../../execution-array/orchestrator';
 import { ExecutionPlan, ExecutionStep } from '../../../prompts/system/execution/types';
 import { ApiPromise } from '@polkadot/api';
 import { AgentResult, AgentError } from '../../../agents/types';
-import { createMockAgentResult } from './fixtures.test-helpers';
+import { createMockAgentResult } from './fixturesTestHelpers';
 
 // Mock agent registry
 jest.mock('../../../agents', () => ({

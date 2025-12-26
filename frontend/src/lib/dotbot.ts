@@ -17,8 +17,11 @@
  */
 
 import { ApiPromise, WsProvider } from '@polkadot/api';
+import { decodeAddress, encodeAddress } from '@polkadot/keyring';
 import { ExecutionSystem } from './execution-array/system';
-import { BrowserWalletSigner } from './execution-array/signers/browser-signer';
+import { ExecutionArray } from './execution-array/executionArray';
+import { ExecutionArrayState, ExecutionItem } from './execution-array/types';
+import { BrowserWalletSigner } from './execution-array/signers/browserSigner';
 import { buildSystemPrompt } from './prompts/system/loader';
 import { ExecutionPlan } from './prompts/system/execution/types';
 import { SigningRequest, BatchSigningRequest, ExecutionOptions } from './execution-array/types';
@@ -75,7 +78,7 @@ export interface ChatOptions {
   executionOptions?: ExecutionOptions;
   
   /** Custom LLM function (bypass default) */
-  llm?: (message: string, systemPrompt: string) => Promise<string>;
+  llm?: (message: string, systemPrompt: string, context?: any) => Promise<string>;
 }
 
 /**
@@ -88,12 +91,48 @@ export class DotBot {
   private executionSystem: ExecutionSystem;
   private wallet: WalletAccount;
   private config: DotBotConfig;
+  private currentExecutionArray: ExecutionArray | null = null;
+  private executionArrayCallbacks: Set<(state: ExecutionArrayState) => void> = new Set();
   
   private constructor(api: ApiPromise, executionSystem: ExecutionSystem, config: DotBotConfig) {
     this.api = api;
     this.executionSystem = executionSystem;
     this.wallet = config.wallet;
     this.config = config;
+  }
+  
+  /**
+   * Subscribe to execution array state changes
+   */
+  onExecutionArrayUpdate(callback: (state: ExecutionArrayState) => void): () => void {
+    this.executionArrayCallbacks.add(callback);
+    
+    // If there's a current execution array, subscribe to it
+    if (this.currentExecutionArray) {
+      const unsubscribe = this.currentExecutionArray.onStatusUpdate(() => {
+        const state = this.currentExecutionArray!.getState();
+        this.executionArrayCallbacks.forEach(cb => cb(state));
+      });
+      
+      // Also call immediately with current state
+      callback(this.currentExecutionArray.getState());
+      
+      return () => {
+        this.executionArrayCallbacks.delete(callback);
+        unsubscribe();
+      };
+    }
+    
+    return () => {
+      this.executionArrayCallbacks.delete(callback);
+    };
+  }
+  
+  /**
+   * Get current execution array state
+   */
+  getExecutionArrayState(): ExecutionArrayState | null {
+    return this.currentExecutionArray ? this.currentExecutionArray.getState() : null;
   }
   
   /**
@@ -152,6 +191,8 @@ export class DotBot {
     
     // If no plan, just return the response
     if (!plan || plan.steps.length === 0) {
+      console.log('ℹ️ No ExecutionPlan found - returning text response only');
+      this.currentExecutionArray = null;
       return {
         response: llmResponse,
         executed: false,
@@ -161,13 +202,23 @@ export class DotBot {
       };
     }
     
-    // Execute the plan
+    console.log('✅ ExecutionPlan extracted:', {
+      id: plan.id,
+      steps: plan.steps.length,
+      stepsDetails: plan.steps.map(s => ({
+        agent: s.agentClassName,
+        function: s.functionName,
+        type: s.executionType
+      }))
+    });
+    
+    // Execute the plan with array tracking
     let completed = 0;
     let failed = 0;
     let success = true;
     
     try {
-      await this.executionSystem.execute(
+      await this.executeWithArrayTracking(
         plan,
         options?.executionOptions,
         {
@@ -180,17 +231,146 @@ export class DotBot {
       );
     } catch (error) {
       success = false;
-      throw error;
+      console.error('❌ Execution tracking failed:', error);
+      
+      // Return the error message to be shown in chat
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      return {
+        response: `❌ Unable to prepare your transaction:\n\n${errorMsg}`,
+        plan,
+        executed: false,
+        success: false,
+        completed: 0,
+        failed: 1
+      };
     }
     
+    // Generate friendly message instead of showing raw JSON
+    const friendlyMessage = this.generateFriendlyMessage(plan, completed, failed);
+    
     return {
-      response: llmResponse,
+      response: friendlyMessage,
       plan,
       executed: true,
       success,
       completed,
       failed
     };
+  }
+  
+  /**
+   * Execute plan with ExecutionArray tracking
+   */
+  private async executeWithArrayTracking(
+    plan: ExecutionPlan,
+    options?: ExecutionOptions,
+    callbacks?: {
+      onComplete?: (success: boolean, completed: number, failed: number) => void;
+    }
+  ): Promise<void> {
+    // Use orchestrator directly to get the ExecutionArray
+    const orchestrator = (this.executionSystem as any).orchestrator;
+    console.log('🎯 Orchestrating plan:', {
+      planId: plan.id,
+      steps: plan.steps.length,
+      stepDetails: plan.steps.map(s => ({
+        id: s.id,
+        agent: s.agentClassName,
+        function: s.functionName
+      }))
+    });
+    
+    let orchestrationResult;
+    try {
+      orchestrationResult = await orchestrator.orchestrate(plan);
+      console.log('✅ Orchestration completed');
+    } catch (error) {
+      console.error('❌ Orchestration failed:', error);
+      throw error;
+    }
+    
+    const { executionArray } = orchestrationResult;
+    
+    console.log('📋 Orchestration result:', {
+      hasExecutionArray: !!executionArray,
+      success: orchestrationResult.success,
+      errors: orchestrationResult.errors,
+      arrayItemCount: executionArray?.getItems?.()?.length || 0,
+      arrayState: executionArray?.getState?.(),
+      metadata: orchestrationResult.metadata
+    });
+    
+    // If orchestration failed with errors, show them to the user
+    if (!orchestrationResult.success && orchestrationResult.errors.length > 0) {
+      const errorMessages = orchestrationResult.errors.map((e: { error: string }) => `• ${e.error}`).join('\n');
+      throw new Error(`Failed to prepare transaction:\n\n${errorMessages}`);
+    }
+    
+    // Store current execution array
+    this.currentExecutionArray = executionArray;
+    
+    // Log execution array for debugging
+    const items = executionArray.getItems();
+    console.log('📋 ExecutionArray created:', {
+      itemCount: items.length,
+      items: items.map((item: ExecutionItem) => ({
+        id: item.id,
+        description: item.description,
+        status: item.status,
+        type: item.executionType
+      })),
+      state: executionArray.getState()
+    });
+    
+    // Subscribe to updates and notify callbacks
+    const unsubscribe = executionArray.onStatusUpdate((item: ExecutionItem) => {
+      const state = executionArray.getState();
+      console.log('🔄 ExecutionArray update:', {
+        item: {
+          id: item.id,
+          description: item.description,
+          status: item.status
+        },
+        state: {
+          total: state.totalItems,
+          completed: state.completedItems,
+          failed: state.failedItems,
+          executing: state.isExecuting
+        }
+      });
+      
+      // Notify all subscribers
+      this.executionArrayCallbacks.forEach(cb => cb(state));
+    });
+    
+    // Notify initial state
+    const initialState = executionArray.getState();
+    console.log('🔔 Notifying initial ExecutionArray state:', {
+      itemCount: initialState.items.length,
+      totalItems: initialState.totalItems,
+      callbackCount: this.executionArrayCallbacks.size
+    });
+    this.executionArrayCallbacks.forEach(cb => {
+      console.log('📞 Calling callback with state');
+      cb(initialState);
+    });
+    
+    try {
+      // Execute
+      const executioner = (this.executionSystem as any).executioner;
+      await executioner.execute(executionArray, options);
+      
+      const finalState = executionArray.getState();
+      if (callbacks?.onComplete) {
+        callbacks.onComplete(
+          finalState.failedItems === 0,
+          finalState.completedItems,
+          finalState.failedItems
+        );
+      }
+    } finally {
+      unsubscribe();
+    }
   }
   
   /**
@@ -201,13 +381,19 @@ export class DotBot {
     reserved: string;
     frozen: string;
   }> {
+    console.log('💰 DotBot.getBalance() - Querying address:', this.wallet.address);
     const accountInfo = await this.api.query.system.account(this.wallet.address);
     const data = accountInfo.toJSON() as any;
-    return {
-      free: data.data.free,
-      reserved: data.data.reserved,
-      frozen: data.data.frozen || data.data.miscFrozen || '0'
+    console.log('💰 DotBot.getBalance() - Raw account data:', JSON.stringify(data, null, 2));
+    
+    const balance = {
+      free: data.data?.free || '0',
+      reserved: data.data?.reserved || '0',
+      frozen: data.data?.frozen || data.data?.miscFrozen || '0'
     };
+    
+    console.log('💰 DotBot.getBalance() - Parsed balance:', balance);
+    return balance;
   }
   
   /**
@@ -249,6 +435,25 @@ export class DotBot {
     await this.api.disconnect();
   }
   
+
+  /**
+   * Generate friendly message from execution plan
+   */
+  private generateFriendlyMessage(plan: ExecutionPlan, completed: number, failed: number): string {
+    const totalSteps = plan.steps.length;
+    
+    if (totalSteps === 0) {
+      return "I've prepared your request, but there are no operations to execute.";
+    }
+    
+    if (totalSteps === 1) {
+      const step = plan.steps[0];
+      return `I've prepared your transaction:\n\n${step.description}\n\nPlease review and approve it in the execution panel below.`;
+    }
+    
+    return `I've prepared ${totalSteps} operations:\n\n${plan.steps.map((s, i) => `${i + 1}. ${s.description}`).join('\n')}\n\nPlease review and approve them in the execution panel below.`;
+  }
+
   /**
    * Build system prompt with current context
    */
@@ -263,10 +468,18 @@ export class DotBot {
       const frozenBN = BigInt(balance.frozen || '0');
       const totalBN = freeBN + reservedBN + frozenBN;
       
+      // Use original address - Polkadot API handles all SS58 formats automatically
+      // Converting would point to a different account on different networks
+      console.log('🔄 Using wallet address for system prompt:', {
+        address: this.wallet.address,
+        prefix: this.wallet.address[0],
+        note: 'Polkadot API handles all SS58 formats'
+      });
+      
       return buildSystemPrompt({
         wallet: {
           isConnected: true,
-          address: this.wallet.address,
+          address: this.wallet.address, // Use original - don't convert!
           provider: this.wallet.source
         },
         network: {
@@ -293,10 +506,11 @@ export class DotBot {
   private async callLLM(
     message: string, 
     systemPrompt: string,
-    customLLM?: (message: string, systemPrompt: string) => Promise<string>
+    customLLM?: (message: string, systemPrompt: string, context?: any) => Promise<string>
   ): Promise<string> {
     if (customLLM) {
-      return await customLLM(message, systemPrompt);
+      // Pass noHistory flag to get fresh JSON response without chat history
+      return await customLLM(message, systemPrompt, { noHistory: true });
     }
     
     // Default: Use ASI-One (if available in frontend)
@@ -311,13 +525,50 @@ export class DotBot {
    * Extract execution plan from LLM response
    */
   private extractExecutionPlan(llmResponse: string): ExecutionPlan | null {
+    console.log('🔍 Extracting ExecutionPlan from LLM response:', {
+      responseLength: llmResponse.length,
+      responsePreview: llmResponse.substring(0, 200)
+    });
+
     try {
-      // Look for JSON code block
+      // Look for JSON code block (most common format)
       const jsonMatch = llmResponse.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {
+        console.log('📦 Found JSON code block');
         const plan = JSON.parse(jsonMatch[1]);
         if (this.isValidExecutionPlan(plan)) {
+          console.log('✅ Valid ExecutionPlan extracted from JSON code block');
           return plan;
+        } else {
+          console.warn('⚠️ JSON found but invalid ExecutionPlan structure:', plan);
+        }
+      }
+      
+      // Look for JSON code block without language tag
+      const jsonBlockMatch = llmResponse.match(/```\s*([\s\S]*?)\s*```/);
+      if (jsonBlockMatch) {
+        try {
+          const plan = JSON.parse(jsonBlockMatch[1]);
+          if (this.isValidExecutionPlan(plan)) {
+            console.log('✅ Valid ExecutionPlan extracted from code block');
+            return plan;
+          }
+        } catch {
+          // Not JSON
+        }
+      }
+      
+      // Try to find JSON object in the response (might be embedded in text)
+      const jsonObjectMatch = llmResponse.match(/\{[\s\S]*"steps"[\s\S]*\}/);
+      if (jsonObjectMatch) {
+        try {
+          const plan = JSON.parse(jsonObjectMatch[0]);
+          if (this.isValidExecutionPlan(plan)) {
+            console.log('✅ Valid ExecutionPlan extracted from embedded JSON');
+            return plan;
+          }
+        } catch {
+          // Not valid JSON
         }
       }
       
@@ -325,14 +576,18 @@ export class DotBot {
       try {
         const plan = JSON.parse(llmResponse);
         if (this.isValidExecutionPlan(plan)) {
+          console.log('✅ Valid ExecutionPlan extracted from full response');
           return plan;
         }
       } catch {
         // Not JSON, that's fine
       }
       
+      console.warn('⚠️ No valid ExecutionPlan found in LLM response');
+      console.log('Full response:', llmResponse);
       return null;
-    } catch {
+    } catch (error) {
+      console.error('❌ Error extracting ExecutionPlan:', error);
       return null;
     }
   }

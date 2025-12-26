@@ -24,7 +24,7 @@
  * ```
  */
 
-export { ExecutionArray } from './execution-array';
+export { ExecutionArray } from './executionArray';
 export { Executioner } from './executioner';
 export { ExecutionOrchestrator } from './orchestrator';
 export { ExecutionSystem } from './system';

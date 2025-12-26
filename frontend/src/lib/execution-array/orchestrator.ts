@@ -17,10 +17,10 @@
 
 import { ApiPromise } from '@polkadot/api';
 import { ExecutionStep, ExecutionPlan } from '../prompts/system/execution/types';
-import { ExecutionArray } from './execution-array';
+import { ExecutionArray } from './executionArray';
 import { AgentResult, AgentError } from '../agents/types';
 import { createAgent, getAgentByClassName } from '../agents';
-import { BaseAgent } from '../agents/base-agent';
+import { BaseAgent } from '../agents/baseAgent';
 
 /**
  * Result of orchestration
@@ -104,6 +104,17 @@ export class ExecutionOrchestrator {
   ): Promise<OrchestrationResult> {
     this.ensureInitialized();
     
+    console.log('🎭 Orchestrator.orchestrate() called with plan:', {
+      planId: plan.id,
+      steps: plan.steps.length,
+      stepDetails: plan.steps.map(s => ({
+        id: s.id,
+        agent: s.agentClassName,
+        function: s.functionName,
+        params: Object.keys(s.parameters || {})
+      }))
+    });
+    
     const {
       stopOnError = false,
       validateFirst = true,
@@ -116,12 +127,21 @@ export class ExecutionOrchestrator {
     const executionArray = new ExecutionArray();
     const errors: Array<{ stepId: string; error: string; step: ExecutionStep }> = [];
     
+    console.log('📋 Created empty ExecutionArray');
+    
     // Validate all steps first
     if (validateFirst) {
+      console.log('🔍 Validating steps...');
       const validationErrors = this.validateSteps(plan.steps);
+      console.log('🔍 Validation result:', {
+        errorCount: validationErrors.length,
+        errors: validationErrors.map(e => e.error)
+      });
+      
       if (validationErrors.length > 0) {
         errors.push(...validationErrors);
         if (stopOnError) {
+          console.error('❌ Validation failed, stopping');
           return {
             executionArray,
             success: false,
@@ -133,14 +153,23 @@ export class ExecutionOrchestrator {
               duration: Date.now() - startTime,
             },
           };
+        } else {
+          console.warn('⚠️ Validation errors but continuing (stopOnError=false)');
         }
       }
     }
     
     // Process each step
+    console.log(`🔄 Processing ${plan.steps.length} steps...`);
     let successfulSteps = 0;
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
+      
+      console.log(`📍 Step ${i + 1}/${plan.steps.length}:`, {
+        id: step.id,
+        agent: step.agentClassName,
+        function: step.functionName
+      });
       
       // Notify progress
       if (onProgress) {
@@ -149,10 +178,17 @@ export class ExecutionOrchestrator {
       
       try {
         // Call agent to get extrinsic
+        console.log('🤖 Calling agent...');
         const agentResult = await this.executeStep(step);
+        console.log('✅ Agent returned result:', {
+          hasExtrinsic: !!agentResult.extrinsic,
+          description: agentResult.description
+        });
         
         // Add to execution array
+        console.log('➕ Adding to ExecutionArray...');
         executionArray.add(agentResult);
+        console.log('✅ Added to ExecutionArray, new size:', executionArray.getItems().length);
         successfulSteps++;
         
         // Notify success
@@ -208,11 +244,15 @@ export class ExecutionOrchestrator {
   async executeStep(step: ExecutionStep): Promise<AgentResult> {
     this.ensureInitialized();
     
+    console.log('🎯 ExecuteStep:', { agent: step.agentClassName, function: step.functionName });
+    
     // Get or create agent instance
     const agent = this.getAgentInstance(step.agentClassName);
+    console.log('✅ Got agent instance');
     
     // Validate function exists
     if (typeof (agent as any)[step.functionName] !== 'function') {
+      console.error('❌ Function not found on agent');
       throw new AgentError(
         `Function '${step.functionName}' not found on agent '${step.agentClassName}'`,
         'FUNCTION_NOT_FOUND',
@@ -220,13 +260,21 @@ export class ExecutionOrchestrator {
       );
     }
     
+    console.log('✅ Function exists, calling with params:', step.parameters);
+    
     // Call the agent function
     // Agent will create the extrinsic and return AgentResult
     try {
       const result = await (agent as any)[step.functionName](step.parameters);
+      console.log('✅ Agent function returned:', {
+        hasResult: !!result,
+        hasExtrinsic: !!result?.extrinsic,
+        description: result?.description
+      });
       
       // Validate result
       if (!this.isValidAgentResult(result)) {
+        console.error('❌ Invalid agent result');
         throw new AgentError(
           `Agent function '${step.agentClassName}.${step.functionName}' did not return a valid AgentResult`,
           'INVALID_AGENT_RESULT',
@@ -234,6 +282,7 @@ export class ExecutionOrchestrator {
         );
       }
       
+      console.log('✅ Result validated, returning');
       return result;
       
     } catch (error) {
@@ -263,9 +312,12 @@ export class ExecutionOrchestrator {
     const errors: Array<{ stepId: string; error: string; step: ExecutionStep }> = [];
     
     for (const step of steps) {
+      console.log('🔍 Validating step:', { agent: step.agentClassName, function: step.functionName });
+      
       // Check if agent exists in registry
       const agentEntry = getAgentByClassName(step.agentClassName);
       if (!agentEntry) {
+        console.error('❌ Agent not found in registry:', step.agentClassName);
         errors.push({
           stepId: step.id,
           error: `Agent '${step.agentClassName}' not found in registry`,
@@ -273,14 +325,18 @@ export class ExecutionOrchestrator {
         });
         continue;
       }
+      console.log('✅ Agent found in registry');
       
       // Validate parameters exist
       if (!step.parameters || Object.keys(step.parameters).length === 0) {
+        console.warn('⚠️ No parameters provided');
         errors.push({
           stepId: step.id,
           error: `No parameters provided for ${step.agentClassName}.${step.functionName}`,
           step,
         });
+      } else {
+        console.log('✅ Parameters validated:', Object.keys(step.parameters));
       }
     }
     

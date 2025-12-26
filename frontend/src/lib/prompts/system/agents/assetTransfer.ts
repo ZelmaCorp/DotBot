@@ -31,12 +31,12 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
           name: 'address',
           type: 'string (SS58 Address)',
           required: true,
-          description: 'The sender account address',
+          description: 'The sender account address - MUST use the wallet address from the Current Context section above. Do NOT use a different address or format.',
           examples: [
             '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
             '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
           ],
-          constraints: 'Must be a valid SS58 address',
+          constraints: 'Must be a valid SS58 address. MUST match the wallet address shown in Current Context exactly.',
         },
         {
           name: 'recipient',

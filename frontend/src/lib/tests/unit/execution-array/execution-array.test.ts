@@ -2,14 +2,14 @@
  * Unit tests for ExecutionArray
  */
 
-import { ExecutionArray } from '../../../execution-array/execution-array';
+import { ExecutionArray } from '../../../execution-array/executionArray';
 import { ExecutionStatus, ExecutionItem } from '../../../execution-array/types';
 import { AgentResult } from '../../../agents/types';
 import {
   createMockAgentResult,
   createMockAgentResults,
   wait,
-} from './fixtures.test-helpers';
+} from './fixturesTestHelpers';
 
 describe('ExecutionArray', () => {
   let executionArray: ExecutionArray;

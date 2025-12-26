@@ -3,14 +3,14 @@
  */
 
 import { Executioner } from '../../../execution-array/executioner';
-import { ExecutionArray } from '../../../execution-array/execution-array';
+import { ExecutionArray } from '../../../execution-array/executionArray';
 import { Signer } from '../../../execution-array/signers/types';
 import { ApiPromise } from '@polkadot/api';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import {
   createMockAgentResult,
   createMockAgentResults,
-} from './fixtures.test-helpers';
+} from './fixturesTestHelpers';
 
 // Mock Polkadot API
 jest.mock('@polkadot/api', () => ({

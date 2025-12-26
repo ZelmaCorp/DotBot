@@ -75,7 +75,13 @@ export abstract class BaseAgent {
    */
   protected async getBalance(address: string): Promise<BalanceInfo> {
     const api = this.getApi();
+    console.log('💰 Getting balance for address:', address);
     const accountInfo = await api.query.system.account(address);
+    console.log('💰 Account info retrieved:', {
+      hasData: !!accountInfo,
+      free: (accountInfo as any).data?.free?.toString(),
+      reserved: (accountInfo as any).data?.reserved?.toString()
+    });
     
     // Type assertion for account data
     const accountData = accountInfo as any;

@@ -10,7 +10,7 @@ import { buildAgentRegistry } from './agents';
 import { EXECUTION_ARRAY_INSTRUCTIONS } from './execution/instructions';
 import { SystemContext } from './context/types';
 import { createVersionedPrompt } from './version';
-import { formatPolkadotKnowledgeBase } from './knowledge/dot-knowledge';
+import { formatPolkadotKnowledgeBase } from './knowledge/dotKnowledge';
 
 /**
  * Format agent definitions for inclusion in system prompt
@@ -128,6 +128,8 @@ function formatContext(context?: SystemContext): string {
   // Wallet context
   if (context.wallet.isConnected && context.wallet.address) {
     prompt += `**Wallet**: Connected (${context.wallet.address})\n`;
+    prompt += `⚠️ **IMPORTANT**: When creating ExecutionPlans, you MUST use this exact wallet address: \`${context.wallet.address}\`\n`;
+    prompt += `Do NOT use a different address format. Use the address exactly as shown above.\n`;
     if (context.wallet.provider) {
       prompt += `**Provider**: ${context.wallet.provider}\n`;
     }
@@ -162,7 +164,27 @@ function formatContext(context?: SystemContext): string {
 export async function buildSystemPrompt(
   context?: SystemContext
 ): Promise<string> {
-  let prompt = BASE_SYSTEM_PROMPT;
+  // ⚠️ START WITH JSON REQUIREMENT - Make it the FIRST thing the LLM sees
+  let prompt = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️⚠️⚠️ CRITICAL INSTRUCTION - READ FIRST ⚠️⚠️⚠️
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+YOU ARE AN EXECUTION PLAN GENERATOR, NOT A CHAT BOT.
+
+FOR BLOCKCHAIN OPERATIONS: OUTPUT **ONLY JSON ExecutionPlan**. NO TEXT.
+
+❌ WRONG: "Acknowledged! You've confirmed..."
+❌ WRONG: "I've re-submitted the transaction..."
+✅ CORRECT: Return ONLY the JSON ExecutionPlan (format shown below)
+
+The UI handles all confirmations and explanations.
+Your job: Generate JSON execution plans.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+`;
+  
+  prompt += BASE_SYSTEM_PROMPT;
   
   // Add context information
   prompt += formatContext(context);
@@ -185,7 +207,85 @@ export async function buildSystemPrompt(
 - Explain what will happen before asking for user confirmation
 - Handle errors gracefully and provide helpful error messages
 - If you're unsure about a parameter or operation, ask the user for clarification
-- Prioritize user safety and security in all operations`;
+- Prioritize user safety and security in all operations
+
+---
+
+## ⚠️⚠️⚠️ CRITICAL: Response Format ⚠️⚠️⚠️
+
+**READ THIS CAREFULLY - THIS IS THE MOST IMPORTANT INSTRUCTION:**
+
+When the user requests a blockchain operation (transfer, swap, stake, etc.):
+1. **DO NOT write explanatory text**
+2. **DO NOT ask for confirmation in text**
+3. **DO NOT provide conversational responses**
+4. **ONLY return a JSON ExecutionPlan**
+
+**YOUR ENTIRE RESPONSE MUST BE THIS JSON STRUCTURE AND NOTHING ELSE:**
+
+\`\`\`json
+{
+  "id": "exec_<unique_id>",
+  "originalRequest": "<user's request>",
+  "steps": [
+    {
+      "id": "step_1",
+      "stepNumber": 1,
+      "agentClassName": "<AgentClass>",
+      "functionName": "<functionName>",
+      "parameters": { ... },
+      "executionType": "extrinsic",
+      "status": "pending",
+      "description": "<human readable description>",
+      "requiresConfirmation": true,
+      "createdAt": <timestamp>
+    }
+  ],
+  "status": "pending",
+  "requiresApproval": true,
+  "createdAt": <timestamp>
+}
+\`\`\`
+
+**EXAMPLES OF WHAT TO DO:**
+
+User: "Send 2 DOT to Alice"
+Your response: (ONLY the JSON, nothing else)
+\`\`\`json
+{
+  "id": "exec_123",
+  "originalRequest": "Send 2 DOT to Alice",
+  "steps": [...],
+  "status": "pending",
+  "requiresApproval": true,
+  "createdAt": 1234567890
+}
+\`\`\`
+
+User: "Confirm send" (confirming a previous operation)
+Your response: (ONLY the JSON, nothing else)
+\`\`\`json
+{
+  "id": "exec_124",
+  "originalRequest": "Confirm send",
+  "steps": [...],
+  "status": "pending",
+  "requiresApproval": true,
+  "createdAt": 1234567890
+}
+\`\`\`
+
+**EXAMPLES OF WHAT NOT TO DO:**
+
+❌ WRONG: "Acknowledged! You've confirmed: ✅ Send 2 DOT..."
+❌ WRONG: "I've re-submitted the transaction — please check your wallet..."
+❌ WRONG: Any text explanation or conversational response
+
+**FINAL REMINDER:**
+- Conversational responses = ❌ WRONG
+- JSON ExecutionPlan = ✅ CORRECT
+- If the user is requesting a blockchain operation, respond with ONLY JSON
+- The UI will handle confirmations and explanations - you don't need to`;
 
   return prompt;
 }
@@ -220,7 +320,40 @@ export function buildSystemPromptSync(context?: SystemContext): string {
 - Explain what will happen before asking for user confirmation
 - Handle errors gracefully and provide helpful error messages
 - If you're unsure about a parameter or operation, ask the user for clarification
-- Prioritize user safety and security in all operations`;
+- Prioritize user safety and security in all operations
+
+## CRITICAL: Response Format
+
+**YOU MUST ALWAYS RETURN A JSON ExecutionPlan** for operations that require blockchain interaction.
+
+Your response MUST include a JSON code block with the ExecutionPlan structure:
+
+\`\`\`json
+{
+  "id": "exec_<unique_id>",
+  "originalRequest": "<user's request>",
+  "steps": [
+    {
+      "id": "step_1",
+      "stepNumber": 1,
+      "agentClassName": "<AgentClass>",
+      "functionName": "<functionName>",
+      "parameters": { ... },
+      "executionType": "extrinsic",
+      "status": "pending",
+      "description": "<human readable description>",
+      "requiresConfirmation": true,
+      "createdAt": <timestamp>
+    }
+  ],
+  "status": "pending",
+  "requiresApproval": true,
+  "createdAt": <timestamp>
+}
+\`\`\`
+
+If the user's request doesn't require blockchain interaction (e.g., just asking a question), you can respond with text only.
+But for ANY operation that needs to be executed (transfers, swaps, staking, etc.), you MUST return the JSON ExecutionPlan.`;
 
   return prompt;
 }

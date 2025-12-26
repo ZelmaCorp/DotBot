@@ -18,7 +18,7 @@ export {
   COMMON_PATTERNS,
   ECOSYSTEM_CHANGES,
   SAFETY_GUIDELINES,
-} from './knowledge/dot-knowledge';
+} from './knowledge/dotKnowledge';
 export type {
   ParachainInfo,
   TokenInfo,

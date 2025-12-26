@@ -5,6 +5,16 @@
  * This library provides agents, system prompts, and execution capabilities.
  */
 
+// ============================================================================
+// OUT OF THE BOX INTERFACE - Start here!
+// ============================================================================
+export { DotBot } from './dotbot';
+export type { DotBotConfig, ChatResult, ChatOptions } from './dotbot';
+
+// ============================================================================
+// Advanced/Modular Exports (for custom implementations)
+// ============================================================================
+
 // Export agents (runtime agent classes and registry)
 export * from './agents';
 export type { AgentClass, AgentRegistryEntry } from './agents';
@@ -39,7 +49,7 @@ export {
   COMMON_PATTERNS,
   ECOSYSTEM_CHANGES,
   SAFETY_GUIDELINES,
-} from './prompts/system/knowledge/dot-knowledge';
+} from './prompts/system/knowledge/dotKnowledge';
 export type {
   ParachainInfo,
   TokenInfo,

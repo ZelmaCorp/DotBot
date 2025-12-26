@@ -5,12 +5,12 @@
  * Handles standard transfers, keep-alive transfers, and batch transfers.
  */
 
-import { BaseAgent } from '../base-agent';
+import { BaseAgent } from '../baseAgent';
 import { AgentResult, AgentError } from '../types';
 import { TransferParams, BatchTransferParams } from './types';
 import { createTransferExtrinsic } from './extrinsics/transfer';
-import { createTransferKeepAliveExtrinsic } from './extrinsics/transfer-keep-alive';
-import { createBatchTransferExtrinsic } from './extrinsics/batch-transfer';
+import { createTransferKeepAliveExtrinsic } from './extrinsics/transferKeepAlive';
+import { createBatchTransferExtrinsic } from './extrinsics/batchTransfer';
 import { BN } from '@polkadot/util';
 
 /**

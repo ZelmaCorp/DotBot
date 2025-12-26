@@ -58,7 +58,7 @@ import {
   createMockExtrinsic,
   createMockBalanceData,
   createMockInsufficientBalance,
-} from './fixtures.test-helpers';
+} from './fixturesTestHelpers';
 
 describe('AssetTransferAgent', () => {
   let agent: AssetTransferAgent;
@@ -409,3 +409,4 @@ describe('AssetTransferAgent', () => {
     });
   });
 });
+
