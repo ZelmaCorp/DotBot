@@ -127,7 +127,7 @@ await executioner.execute(executionArray);
 **Why?**
 - Frontend doesn't need to interpret LLM output
 - Automatic agent calling based on ExecutionStep[]
-- Turnkey solution - minimal wiring
+- Used by DotBot (turnkey solution) for automatic execution
 - Library handles everything
 
 ### 2. Executioner is Separate ✅
@@ -157,7 +157,27 @@ await executioner.execute(executionArray);
 
 ## Example Usage
 
-### Turnkey Usage (Recommended)
+### Turnkey Usage (Recommended - Use DotBot)
+
+```typescript
+import { DotBot } from '@dotbot/lib';
+
+// 1. Setup - ONE TIME
+const dotbot = await DotBot.create({
+  wallet: account,
+  endpoint: 'wss://rpc.polkadot.io',
+  onSigningRequest: showSigningModal
+});
+
+// 2. Chat with DotBot - THAT'S IT!
+// DotBot handles: LLM integration, system prompts, orchestration, execution
+const result = await dotbot.chat("Send 5 DOT to Alice");
+
+// Automatic: LLM → ExecutionPlan → orchestration + agent calls + execution
+// DotBot provides execution array state updates via onExecutionArrayUpdate()
+```
+
+### Advanced Usage (If you already have an ExecutionPlan)
 
 ```typescript
 import { ApiPromise } from '@polkadot/api';
@@ -171,12 +191,11 @@ const system = new ExecutionSystem();
 system.initialize(api, account);
 system.setSigningHandler(showSigningModal);
 
-// 2. Execute LLM plan - THAT'S IT!
-// LLM returns ExecutionArrayPlan (JSON)
-const llmPlan = await getLLMResponse("Send 5 DOT to Alice");
+// 2. Execute LLM plan - You already have the ExecutionPlan
+const executionPlan = /* ... from your LLM ... */;
 
 // Automatic: orchestration + agent calls + execution
-await system.execute(llmPlan, {}, {
+await system.execute(executionPlan, {}, {
   onPreparingStep: (desc, current, total) => {
     // LLM feedback: "Preparing step 1 of 1: Transfer 5 DOT..."
   },

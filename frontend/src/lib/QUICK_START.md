@@ -2,7 +2,7 @@
 
 ## For Frontend Developers
 
-This library handles **everything** automatically. You just need 4 lines of setup and 1 line to execute.
+**DotBot** is the turnkey solution that handles **everything** automatically. You just need to create a DotBot instance and call `chat()`.
 
 ---
 
@@ -16,44 +16,42 @@ yarn add @dotbot/lib
 
 ---
 
-## Basic Usage (Browser)
+## Basic Usage (Browser) - Turnkey Solution
 
 ```typescript
-import { ExecutionSystem, BrowserWalletSigner } from '@dotbot/lib';
-import { ApiPromise, WsProvider } from '@polkadot/api';
+import { DotBot } from '@dotbot/lib';
 
-// 1. Create API connection
-const api = await ApiPromise.create({
-  provider: new WsProvider('wss://rpc.polkadot.io')
+// 1. Create DotBot instance (ONE TIME)
+// DotBot handles: API connection, system prompts, LLM integration, execution
+const dotbot = await DotBot.create({
+  wallet: {
+    address: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+    name: 'My Account',
+    source: 'polkadot-js'
+  },
+  endpoint: 'wss://rpc.polkadot.io',
+  onSigningRequest: (request) => {
+    // Show your signing modal
+    showSigningModal({
+      description: request.description,
+      fee: request.estimatedFee,
+      warnings: request.warnings,
+      onApprove: () => request.resolve(true),
+      onReject: () => request.resolve(false)
+    });
+  }
 });
 
-// 2. Get user account (from wallet)
-const account = {
-  address: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
-  name: 'My Account',
-  source: 'polkadot-js'
-};
+// 2. Chat with DotBot (EVERY REQUEST)
+// DotBot handles: LLM call, system prompt building, execution plan extraction, execution
+const result = await dotbot.chat("Send 5 DOT to Alice");
+console.log(result.response); // Friendly message
+console.log(result.executed); // true if transaction was executed
 
-// 3. Setup execution system (ONE TIME)
-const system = new ExecutionSystem();
-const signer = new BrowserWalletSigner();
-
-system.initialize(api, account, signer);
-system.setSigningHandler((request) => {
-  // Show your signing modal
-  showSigningModal({
-    description: request.description,
-    fee: request.estimatedFee,
-    warnings: request.warnings,
-    onApprove: () => request.resolve(true),
-    onReject: () => request.resolve(false)
-  });
+// 3. Subscribe to execution state updates (optional)
+dotbot.onExecutionArrayUpdate((state) => {
+  console.log('Execution progress:', state);
 });
-
-// 4. Execute LLM plans (EVERY REQUEST)
-const userMessage = "Send 5 DOT to Alice";
-const llmResponse = await callLLM(userMessage); // Your LLM call
-await system.execute(llmResponse); // That's it! ✅
 ```
 
 ---
@@ -278,7 +276,20 @@ system.initialize(api, account, signer);
 
 ## Summary
 
-**Minimal frontend code:**
+**Turnkey solution (Browser) - Minimal frontend code:**
+```typescript
+// Setup (once)
+const dotbot = await DotBot.create({
+  wallet: account,
+  endpoint: 'wss://rpc.polkadot.io',
+  onSigningRequest: showModal
+});
+
+// Execute (every request)
+await dotbot.chat("Send 2 DOT to Bob");
+```
+
+**Advanced usage (if you have ExecutionPlan):**
 ```typescript
 // Setup (once)
 const system = new ExecutionSystem();
@@ -286,8 +297,8 @@ system.initialize(api, account, signer);
 system.setSigningHandler(showModal);
 
 // Execute (every request)
-await system.execute(llmPlan);
+await system.execute(executionPlan);
 ```
 
-**That's it!** The system handles everything else automatically. 🎉
+**That's it!** DotBot handles everything automatically: LLM integration, system prompts, execution plans, and blockchain operations. 🎉
 

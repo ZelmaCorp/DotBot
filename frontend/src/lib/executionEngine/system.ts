@@ -1,8 +1,14 @@
 /**
- * Complete Execution System
+ * Execution System
  * 
- * Turnkey solution that requires minimal frontend wiring.
- * Frontend just passes LLM output and everything is handled automatically.
+ * Lower-level execution system for advanced use cases.
+ * For most users, use DotBot instead - it's the turnkey solution that handles
+ * everything including LLM integration, system prompts, and execution.
+ * 
+ * Use ExecutionSystem when you:
+ * - Already have an ExecutionPlan from an LLM
+ * - Want to execute plans without LLM integration
+ * - Need fine-grained control over the execution flow
  */
 
 import { ApiPromise } from '@polkadot/api';
@@ -14,10 +20,12 @@ import { WalletAccount } from '../../types/wallet';
 import { Signer } from './signers/types';
 
 /**
- * Complete Execution System
+ * Execution System
  * 
- * This is the recommended way to use the execution system.
- * Handles everything from LLM output to blockchain execution.
+ * Lower-level execution system for advanced use cases.
+ * Handles execution of ExecutionPlans (from LLM) to blockchain operations.
+ * 
+ * For turnkey usage, see DotBot class instead.
  * 
  * @example
  * ```typescript

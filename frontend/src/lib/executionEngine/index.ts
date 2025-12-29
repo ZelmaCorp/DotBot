@@ -1,18 +1,28 @@
 /**
- * Execution Array Module
+ * Execution Engine Module
  * 
  * Complete, portable execution system that works ANYWHERE:
- * ✅ Browser (with wallet extensions)
- * ✅ Terminal/CLI (with keyring)
- * ✅ Backend services
- * ✅ Tests
+ *  - Browser (with wallet extensions)
+ *  - Terminal/CLI (with keyring)
+ *  - Backend services
+ *  - Tests
  * 
- * **Turnkey Usage** (Recommended):
+ * **Turnkey Usage** (Recommended - Use DotBot):
+ * ```typescript
+ * const dotbot = await DotBot.create({
+ *   wallet: account,
+ *   endpoint: 'wss://rpc.polkadot.io',
+ *   onSigningRequest: showModal
+ * });
+ * await dotbot.chat("Send 2 DOT to Bob"); // That's it!
+ * ```
+ * 
+ * **Advanced Usage** (If you already have an ExecutionPlan):
  * ```typescript
  * const system = new ExecutionSystem();
  * system.initialize(api, account);
  * system.setSigningHandler(showModal);
- * await system.execute(llmPlan); // That's it!
+ * await system.execute(executionPlan);
  * ```
  * 
  * **Terminal/CLI Usage**:

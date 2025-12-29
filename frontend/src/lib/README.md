@@ -5,9 +5,10 @@ Core library for Polkadot operations through natural language.
 ## Overview
 
 This library provides:
+- **DotBot**: Turnkey solution - natural language to blockchain operations in one class
 - **Agents**: Specialized classes for creating Polkadot extrinsics (transfers, staking, governance, etc.)
 - **System Prompts**: LLM system prompt generation for natural language interaction
-- **Execution Arrays**: Structured execution plans for sequential operations
+- **Execution Engine**: Runtime system for executing operations (orchestration, execution, signing)
 - **Types**: Shared types and interfaces
 
 ## Installation
@@ -18,7 +19,30 @@ npm install @dotbot/core
 
 ## Usage
 
-### Basic Setup
+### Turnkey Usage (Recommended)
+
+```typescript
+import { DotBot } from '@dotbot/lib';
+
+// Create DotBot instance - handles everything automatically
+const dotbot = await DotBot.create({
+  wallet: selectedAccount,
+  endpoint: 'wss://rpc.polkadot.io',
+  onSigningRequest: (request) => showSigningModal(request)
+});
+
+// Chat with DotBot - natural language to blockchain operations
+const result = await dotbot.chat("Send 2 DOT to Bob");
+console.log(result.response); // Friendly message
+console.log(result.executed); // true if transaction was executed
+
+// Subscribe to execution state updates
+dotbot.onExecutionArrayUpdate((state) => {
+  console.log('Execution state:', state);
+});
+```
+
+### Advanced Usage (Direct Agent Access)
 
 ```typescript
 // Currently in this project:

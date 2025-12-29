@@ -103,7 +103,7 @@ export {
   ExecutionArray,
   Executioner,
   ExecutionOrchestrator,
-  ExecutionSystem, // Recommended: Turnkey solution
+  ExecutionSystem, // Advanced: For executing ExecutionPlans directly (use DotBot for turnkey)
   BrowserWalletSigner, // For browser environments
   KeyringSigner, // For terminal/backend/tests
 } from './executionEngine';
