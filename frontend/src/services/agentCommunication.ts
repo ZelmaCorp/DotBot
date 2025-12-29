@@ -2,7 +2,7 @@
 
 import { AgentRequest, AgentResponse, AgentInfo, AgentStatus } from '../types/agents';
 import { getASIOneService, ASIOneService } from './asiOneService';
-import { createSubsystemLogger, Subsystem } from '../lib';
+import { createSubsystemLogger, Subsystem } from './logger';
 
 export class AgentCommunicationService {
   private agents: Map<string, AgentInfo> = new Map();

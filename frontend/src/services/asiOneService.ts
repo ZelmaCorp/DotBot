@@ -1,7 +1,7 @@
 // ASI-One Service - Modular service for Fetch.ai ASI-One integration
 // Designed to work in frontend with localStorage, easily movable to backend
 
-import { createSubsystemLogger, Subsystem } from '../lib';
+import { createSubsystemLogger, Subsystem } from './logger';
 
 // Initialize logger for ASI-One service
 const logger = createSubsystemLogger(Subsystem.AGENT_COMM);
@@ -81,42 +81,61 @@ export class ASIOneService {
     try {
       logger.info({ 
         message: userMessage.substring(0, 100) + '...',
-        conversationId: this.conversationId 
+        conversationId: this.conversationId,
+        noHistory: context?.noHistory || false
       }, 'Sending message to ASI-One');
 
-      // Add user message to conversation history
-      const userMsg: ASIOneMessage = {
-        role: 'user',
-        content: userMessage,
-        timestamp: Date.now()
-      };
-      this.conversationHistory.push(userMsg);
-
-      // Prepare the request
+      // Prepare the request with current user message
       const request: ASIOneRequest = {
         model: this.config.model,
-        messages: this.buildContextualMessages(context),
+        messages: this.buildContextualMessages(context, userMessage), // Pass current message
         temperature: this.config.temperature,
         max_tokens: this.config.maxTokens,
         stream: false
       };
+      
+      console.log('📤 Request to ASI-One:', {
+        model: request.model,
+        messageCount: request.messages.length,
+        temperature: request.temperature,
+        max_tokens: request.max_tokens
+      });
 
       // Make the API call
+      console.log('🌐 Calling ASI-One API...');
       const response = await this.callASIOneAPI(request);
+      console.log('✅ ASI-One API response received:', {
+        choices: response.choices?.length,
+        firstChoice: response.choices?.[0]?.message?.content?.substring(0, 100)
+      });
       
       // Extract the assistant's response
       const assistantMessage = response.choices[0]?.message?.content || 'Sorry, I could not generate a response.';
       
-      // Add assistant response to conversation history
-      const assistantMsg: ASIOneMessage = {
-        role: 'assistant',
-        content: assistantMessage,
-        timestamp: Date.now()
-      };
-      this.conversationHistory.push(assistantMsg);
+      // Add user and assistant messages to conversation history (unless noHistory is set)
+      if (!context?.noHistory) {
+        const userMsg: ASIOneMessage = {
+          role: 'user',
+          content: userMessage,
+          timestamp: Date.now()
+        };
+        const assistantMsg: ASIOneMessage = {
+          role: 'assistant',
+          content: assistantMessage,
+          timestamp: Date.now()
+        };
+        this.conversationHistory.push(userMsg, assistantMsg);
+        console.log('📝 Added to conversation history:', { 
+          userMessage: userMessage.substring(0, 50), 
+          assistantPreview: assistantMessage.substring(0, 50),
+          historyLength: this.conversationHistory.length 
+        });
 
-      // Save updated conversation history
-      this.saveConversationHistory();
+        // Save updated conversation history
+        this.saveConversationHistory();
+      } else {
+        console.log('🚫 NOT saving to history (noHistory=true)');
+      }
 
       logger.info({
         responseLength: assistantMessage.length,
@@ -127,37 +146,95 @@ export class ASIOneService {
       return assistantMessage;
 
     } catch (error) {
+      console.error('❌ ASI-One API Error:', error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        error: error
+      });
+      
       logger.error({ 
         error: error instanceof Error ? error.message : 'Unknown error',
         conversationId: this.conversationId 
       }, 'Error sending message to ASI-One');
       
       // Return a fallback response
-      return this.getFallbackResponse(userMessage, error);
+      const fallback = this.getFallbackResponse(userMessage, error);
+      console.log('⚠️ Returning fallback response:', fallback.substring(0, 100));
+      return fallback;
     }
   }
 
   /**
    * Build contextual messages for the API request
+   * @param context - Context object (may include noHistory flag)
+   * @param currentUserMessage - The current user message to include
    */
-  private buildContextualMessages(context?: any): ASIOneMessage[] {
+  private buildContextualMessages(context?: any, currentUserMessage?: string): ASIOneMessage[] {
     const messages: ASIOneMessage[] = [];
 
-    // Add system message with DotBot context
+    // Use provided systemPrompt from context if available (from DotBot)
+    // Otherwise fall back to default
+    const systemPrompt = context?.systemPrompt || this.getSystemPrompt(context);
+    
+    // Log which prompt is being used
+    console.log('🔍 ASIOneService - Building messages with context:', {
+      hasSystemPrompt: !!context?.systemPrompt,
+      noHistory: context?.noHistory,
+      promptLength: systemPrompt.length,
+      historyLength: this.conversationHistory.length,
+      willIncludeHistory: !context?.noHistory,
+      hasCurrentMessage: !!currentUserMessage
+    });
+    
+    if (context?.systemPrompt) {
+      logger.info({ 
+        promptLength: systemPrompt.length,
+        preview: systemPrompt.substring(0, 200),
+        includeHistory: !context?.noHistory
+      }, 'Using provided systemPrompt from DotBot');
+    } else {
+      logger.info({ includeHistory: !context?.noHistory }, 'Using default systemPrompt (no systemPrompt in context)');
+    }
+    
+    // Add system message
     messages.push({
       role: 'system',
-      content: this.getSystemPrompt(context)
+      content: systemPrompt
     });
 
-    // Add conversation history (limit to last 10 messages to avoid token limits)
-    const recentHistory = this.conversationHistory.slice(-10);
-    messages.push(...recentHistory);
+    // Add conversation history ONLY if noHistory is not set
+    // This allows DotBot to request fresh JSON responses without chat context
+    if (!context?.noHistory) {
+      // Add conversation history (limit to last 10 messages to avoid token limits)
+      const recentHistory = this.conversationHistory.slice(-10);
+      messages.push(...recentHistory);
+      console.log('📜 Including conversation history:', recentHistory.length, 'messages');
+    } else {
+      console.log('🚫 Skipping conversation history (noHistory=true)');
+    }
+
+    // ALWAYS add the current user message (this was the bug!)
+    if (currentUserMessage) {
+      messages.push({
+        role: 'user',
+        content: currentUserMessage
+      });
+      console.log('✅ Added current user message to request');
+    }
+
+    console.log('📤 Final message array to LLM:', {
+      totalMessages: messages.length,
+      systemPromptLength: messages[0]?.content.length,
+      systemPromptPreview: messages[0]?.content.substring(0, 300),
+      lastMessage: messages[messages.length - 1]
+    });
 
     return messages;
   }
 
   /**
-   * Get system prompt for DotBot context
+   * Get system prompt for DotBot context (fallback if not provided)
    */
   private getSystemPrompt(context?: any): string {
     return `You are DotBot, a specialized AI assistant for the Polkadot ecosystem. You help users interact with Polkadot through natural language commands.
@@ -186,6 +263,13 @@ Keep responses concise but informative. Use bullet points for multiple options a
   private async callASIOneAPI(request: ASIOneRequest): Promise<ASIOneResponse> {
     const url = process.env.REACT_APP_ASI_ONE_API_URL || `${this.config.baseUrl}/chat/completions`;
     
+    console.log('📡 Fetching from ASI-One:', {
+      url,
+      method: 'POST',
+      messageCount: request.messages.length,
+      model: request.model
+    });
+    
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -196,12 +280,24 @@ Keep responses concise but informative. Use bullet points for multiple options a
       body: JSON.stringify(request)
     });
 
+    console.log('📡 ASI-One HTTP response:', {
+      status: response.status,
+      ok: response.ok,
+      statusText: response.statusText
+    });
+
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('❌ ASI-One API error response:', errorText);
       throw new Error(`ASI-One API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log('📦 ASI-One API data:', {
+      hasChoices: !!data.choices,
+      choicesLength: data.choices?.length,
+      firstMessageLength: data.choices?.[0]?.message?.content?.length
+    });
     return data as ASIOneResponse;
   }
 
