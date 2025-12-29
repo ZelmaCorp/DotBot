@@ -324,7 +324,7 @@ export class Executioner {
     executionArray.updateStatus(item.id, 'broadcasting');
     
     // Broadcast and monitor
-    const result = await this.broadcastAndMonitor(extrinsic, timeout);
+    const result = await this.broadcastAndMonitor(signedExtrinsic, timeout);
     
     if (result.success) {
       executionArray.updateStatus(item.id, 'finalized');
@@ -385,7 +385,7 @@ export class Executioner {
     });
     
     // Broadcast and monitor
-    const result = await this.broadcastAndMonitor(batchExtrinsic, timeout);
+    const result = await this.broadcastAndMonitor(signedBatchExtrinsic, timeout);
     
     if (result.success) {
       items.forEach(item => {

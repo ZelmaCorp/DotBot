@@ -12,9 +12,7 @@
  * 5. Orchestrator adds AgentResult to ExecutionArray
  * 6. ExecutionArray is ready for Executioner
  * 
- * Note: For turnkey usage, use DotBot class which handles LLM integration,
- * system prompts, and execution automatically. This orchestrator is used
- * internally by DotBot and ExecutionSystem.
+ * This makes the library turnkey: Frontend just passes LLM output to Orchestrator!
  */
 
 import { ApiPromise } from '@polkadot/api';
