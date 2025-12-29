@@ -29,25 +29,25 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
       parameters: [
         {
           name: 'address',
-          type: 'string (SS58 Address)',
+          type: 'string (Polkadot Address)',
           required: true,
-          description: 'The sender account address - MUST use the wallet address from the Current Context section above. Do NOT use a different address or format.',
+          description: 'The sender account address. Should use the wallet address from the Current Context section above to ensure the transaction can be signed by the connected wallet.',
           examples: [
-            '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
-            '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
+            '1FRMM8PEiWXYax7rpS6X4XZX1aAAxSWx1CrKTyrVYhV24fg',
+            '15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5',
           ],
-          constraints: 'Must be a valid SS58 address. MUST match the wallet address shown in Current Context exactly.',
+          constraints: 'Must be a valid Polkadot address. Should match the wallet address shown in Current Context to ensure successful signing.',
         },
         {
           name: 'recipient',
-          type: 'string (SS58 Address)',
+          type: 'string (Polkadot Address)',
           required: true,
           description: 'The recipient account address',
           examples: [
-            '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
-            '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            '15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5',
+            '1FRMM8PEiWXYax7rpS6X4XZX1aAAxSWx1CrKTyrVYhV24fg',
           ],
-          constraints: 'Must be a valid SS58 address, cannot be the same as sender',
+          constraints: 'Must be a valid Polkadot address, cannot be the same as sender',
         },
         {
           name: 'amount',
@@ -90,7 +90,7 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
       },
       examples: [
         'Transfer 5 DOT to Alice',
-        'Send 1.5 DOT to 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
+        'Send 1.5 DOT to 15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5',
         'Transfer 10 DOT to Bob with keepAlive',
         'Send 0.1 DOT to Charlie',
       ],
@@ -107,20 +107,20 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
       parameters: [
         {
           name: 'address',
-          type: 'string (SS58 Address)',
+          type: 'string (Polkadot Address)',
           required: true,
           description: 'The sender account address',
           examples: [
-            '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
-            '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
+            '1FRMM8PEiWXYax7rpS6X4XZX1aAAxSWx1CrKTyrVYhV24fg',
+            '15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5',
           ],
-          constraints: 'Must be a valid SS58 address',
+          constraints: 'Must be a valid Polkadot address',
         },
         {
           name: 'transfers',
           type: 'Array<{ recipient: string, amount: string | number }>',
           required: true,
-          description: 'Array of transfers, each with recipient and amount. Example: [{ recipient: "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty", amount: "1.0" }, { recipient: "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY", amount: "2.5" }]',
+          description: 'Array of transfers, each with recipient and amount. Example: [{ recipient: "15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5", amount: "1.0" }, { recipient: "1FRMM8PEiWXYax7rpS6X4XZX1aAAxSWx1CrKTyrVYhV24fg", amount: "2.5" }]',
           constraints: 'Must have at least 1 transfer, maximum 100 transfers',
         },
         {
@@ -166,7 +166,7 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
   prerequisites: [
     'Polkadot API instance must be initialized',
     'Sender account must have sufficient balance (including fees)',
-    'Valid SS58 addresses for sender and recipient(s)',
+    'Valid Polkadot addresses for sender and recipient(s)',
   ],
   
   networks: ['polkadot', 'kusama', 'all'],
