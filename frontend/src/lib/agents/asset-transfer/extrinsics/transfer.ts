@@ -1,7 +1,8 @@
 /**
  * Transfer Extrinsic Builder
  * 
- * Creates a transfer extrinsic for DOT or tokens.
+ * Creates a transfer extrinsic for DOT or tokens using transferAllowDeath.
+ * This allows the sender's account to be reaped if balance falls below ED.
  */
 
 import { ApiPromise } from '@polkadot/api';
@@ -16,7 +17,11 @@ export interface TransferExtrinsicParams {
 }
 
 /**
- * Create a transfer extrinsic
+ * Create a transfer extrinsic using balances.transferAllowDeath
+ * 
+ * Note: This was formerly called balances.transfer in older Polkadot.js versions.
+ * Transfers liquid free balance to another account. If the sender's balance falls 
+ * below the Existential Deposit (ED) as a result, the account is reaped.
  * 
  * @param api Polkadot API instance
  * @param params Transfer parameters
@@ -38,6 +43,7 @@ export function createTransferExtrinsic(
     throw new Error('Transfer amount must be greater than zero');
   }
 
-  return api.tx.balances.transfer(recipient, amount);
+  // Use transferAllowDeath (renamed from transfer in Polkadot.js v10+)
+  return api.tx.balances.transferAllowDeath(recipient, amount);
 }
 

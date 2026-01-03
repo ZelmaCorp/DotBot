@@ -76,13 +76,18 @@ export interface OrchestrationOptions {
  */
 export class ExecutionOrchestrator {
   private api: ApiPromise | null = null;
+  private assetHubApi: ApiPromise | null = null;
   private agentInstances: Map<string, BaseAgent> = new Map();
   
   /**
    * Initialize with Polkadot API
+   * 
+   * @param api Polkadot Relay Chain API
+   * @param assetHubApi Optional Asset Hub API (recommended for DOT transfers)
    */
-  initialize(api: ApiPromise): void {
+  initialize(api: ApiPromise, assetHubApi?: ApiPromise | null): void {
     this.api = api;
+    this.assetHubApi = assetHubApi || null;
   }
   
   /**
@@ -362,9 +367,9 @@ export class ExecutionOrchestrator {
       );
     }
     
-    // Initialize with API
+    // Initialize with API (and Asset Hub API if available)
     if (agent.initialize) {
-      agent.initialize(this.api!);
+      agent.initialize(this.api!, this.assetHubApi);
     }
     
     // Cache

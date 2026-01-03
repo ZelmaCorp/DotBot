@@ -2,48 +2,47 @@
  * Execution Flow Component
  * 
  * Visual representation of the ExecutionArray.
- * Shows each operation, its status, and handles approvals visually.
+ * Shows all steps that will happen and provides a single "Accept and Start" button.
  */
 
-import React, { useState, useEffect } from 'react';
-import { CheckCircle2, XCircle, Clock, Loader2, AlertTriangle, ChevronRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { CheckCircle2, XCircle, Clock, Loader2, AlertTriangle, ChevronRight, Play, X } from 'lucide-react';
 import { ExecutionItem, ExecutionArrayState } from '../../lib/executionEngine/types';
 import '../../styles/execution-flow.css';
 
 export interface ExecutionFlowProps {
   state: ExecutionArrayState | null;
-    onApprove?: (itemId: string) => void;
-    onReject?: (itemId: string) => void;
-    onApproveAll?: () => void;
-    onCancel?: () => void;
-    show?: boolean;
+  onAcceptAndStart?: () => void;
+  onCancel?: () => void;
+  show?: boolean;
 }
 
 const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   state,
-  onApprove,
-  onReject,
-  onApproveAll,
+  onAcceptAndStart,
   onCancel,
   show = true
 }) => {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
 
-  // Auto-expand first pending item
-  useEffect(() => {
-    if (state && state.items.length > 0) {
-      const firstPending = state.items.find(item => 
-        item.status === 'pending' || item.status === 'ready'
-      );
-      if (firstPending) {
-        setExpandedItems(new Set([firstPending.id]));
-      }
-    }
-  }, [state]);
-
   if (!show || !state || state.items.length === 0) {
     return null;
   }
+
+  // Check if flow is waiting for user approval (all items are pending/ready)
+  const isWaitingForApproval = state.items.every(item => 
+    item.status === 'pending' || item.status === 'ready'
+  );
+  
+  // Check if flow is executing
+  const isExecuting = state.isExecuting || state.items.some(item => 
+    item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting'
+  );
+  
+  // Check if flow is complete
+  const isComplete = !isExecuting && state.items.every(item => 
+    item.status === 'completed' || item.status === 'finalized' || item.status === 'failed' || item.status === 'cancelled'
+  );
 
   const toggleExpand = (itemId: string) => {
     const newExpanded = new Set(expandedItems);
@@ -112,72 +111,43 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
     }
   };
 
-  const pendingItems = state.items.filter(item => 
-    item.status === 'pending' || item.status === 'ready'
-  );
-  const executingItems = state.items.filter(item => 
-    item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting'
-  );
-  const completedItems = state.items.filter(item => 
-    item.status === 'completed' || item.status === 'finalized'
-  );
-  const failedItems = state.items.filter(item => item.status === 'failed');
-
   return (
     <div className="execution-flow-container">
       {/* Header */}
       <div className="execution-flow-header">
         <div className="execution-flow-title">
-          <h3>Execution Flow</h3>
+          <h3>{isWaitingForApproval ? 'Review Transaction Flow' : 'Execution Flow'}</h3>
           <span className="execution-flow-count">
-            {state.totalItems} operation{state.totalItems !== 1 ? 's' : ''}
+            {state.totalItems} step{state.totalItems !== 1 ? 's' : ''}
           </span>
         </div>
         
-        {/* Summary */}
-        <div className="execution-flow-summary">
-          {pendingItems.length > 0 && (
-            <span className="summary-badge summary-pending">
-              {pendingItems.length} pending
-            </span>
-          )}
-          {executingItems.length > 0 && (
-            <span className="summary-badge summary-executing">
-              {executingItems.length} executing
-            </span>
-          )}
-          {completedItems.length > 0 && (
-            <span className="summary-badge summary-success">
-              {completedItems.length} completed
-            </span>
-          )}
-          {failedItems.length > 0 && (
-            <span className="summary-badge summary-error">
-              {failedItems.length} failed
-            </span>
-          )}
-        </div>
+        {!isWaitingForApproval && (
+          <div className="execution-flow-summary">
+            {state.completedItems > 0 && (
+              <span className="summary-badge summary-success">
+                {state.completedItems} completed
+              </span>
+            )}
+            {isExecuting && (
+              <span className="summary-badge summary-executing">
+                <Loader2 className="animate-spin inline mr-1" size={12} />
+                executing
+              </span>
+            )}
+            {state.failedItems > 0 && (
+              <span className="summary-badge summary-error">
+                {state.failedItems} failed
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Actions */}
-      {pendingItems.length > 0 && (
-        <div className="execution-flow-actions">
-          {onApproveAll && pendingItems.length > 1 && (
-            <button
-              onClick={onApproveAll}
-              className="execution-action-btn execution-approve-all-btn"
-            >
-              Approve All ({pendingItems.length})
-            </button>
-          )}
-          {onCancel && (
-            <button
-              onClick={onCancel}
-              className="execution-action-btn execution-cancel-btn"
-            >
-              Cancel
-            </button>
-          )}
+      {/* Approval message */}
+      {isWaitingForApproval && (
+        <div className="execution-flow-intro">
+          <p>Review the steps below. Once you accept, your wallet will ask you to sign each transaction.</p>
         </div>
       )}
 
@@ -185,10 +155,9 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
       <div className="execution-flow-items">
         {state.items.map((item, index) => {
           const isExpanded = expandedItems.has(item.id);
-          const needsApproval = item.status === 'pending' || item.status === 'ready';
-          const isExecuting = item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting';
-          const isCompleted = item.status === 'completed' || item.status === 'finalized';
-          const isFailed = item.status === 'failed';
+          const isItemExecuting = item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting';
+          const isItemCompleted = item.status === 'completed' || item.status === 'finalized';
+          const isItemFailed = item.status === 'failed';
 
           return (
             <div
@@ -206,7 +175,9 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
                   <div className="execution-item-content">
                     <div className="execution-item-description">{item.description}</div>
                     <div className="execution-item-meta">
-                      <span className="execution-item-type">{item.executionType}</span>
+                      {item.estimatedFee && (
+                        <span className="execution-item-fee">Fee: {item.estimatedFee}</span>
+                      )}
                       <span
                         className="execution-item-status"
                         style={{ color: getStatusColor(item.status) }}
@@ -216,34 +187,22 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
                     </div>
                   </div>
                 </div>
-                <ChevronRight
-                  className={`execution-item-chevron ${isExpanded ? 'expanded' : ''}`}
-                />
+                {(item.warnings?.length || item.metadata) && (
+                  <ChevronRight
+                    className={`execution-item-chevron ${isExpanded ? 'expanded' : ''}`}
+                  />
+                )}
               </div>
 
               {/* Item Details (Expanded) */}
               {isExpanded && (
                 <div className="execution-item-details">
-                  {/* Description */}
-                  <div className="execution-detail-section">
-                    <div className="execution-detail-label">Description</div>
-                    <div className="execution-detail-value">{item.description}</div>
-                  </div>
-
-                  {/* Estimated Fee */}
-                  {item.estimatedFee && (
-                    <div className="execution-detail-section">
-                      <div className="execution-detail-label">Estimated Fee</div>
-                      <div className="execution-detail-value">{item.estimatedFee}</div>
-                    </div>
-                  )}
-
                   {/* Warnings */}
                   {item.warnings && item.warnings.length > 0 && (
                     <div className="execution-detail-section">
                       <div className="execution-detail-label">
-                        <AlertTriangle className="warning-icon" />
-                        Warnings
+                        <AlertTriangle className="warning-icon" size={14} />
+                        Information
                       </div>
                       <ul className="execution-warnings-list">
                         {item.warnings.map((warning, idx) => (
@@ -253,55 +212,60 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
                     </div>
                   )}
 
-                  {/* Error */}
-                  {isFailed && item.error && (
+                  {/* Metadata */}
+                  {item.metadata && Object.keys(item.metadata).length > 0 && (
                     <div className="execution-detail-section">
+                      <div className="execution-detail-label">Details</div>
+                      <div className="execution-metadata">
+                        {Object.entries(item.metadata).map(([key, value]) => {
+                          // Skip some internal fields
+                          if (['amount', 'formattedAmount', 'transferCount'].includes(key)) {
+                            return null;
+                          }
+                          return (
+                            <div key={key} className="metadata-row">
+                              <span className="metadata-key">{key}:</span>
+                              <span className="metadata-value">
+                                {typeof value === 'string' ? value : JSON.stringify(value)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error */}
+                  {isItemFailed && item.error && (
+                    <div className="execution-detail-section execution-detail-error">
                       <div className="execution-detail-label">Error</div>
-                      <div className="execution-detail-value execution-error">{item.error}</div>
+                      <div className="execution-detail-value">{item.error}</div>
                     </div>
                   )}
 
                   {/* Result */}
-                  {isCompleted && item.result && (
-                    <div className="execution-detail-section">
+                  {isItemCompleted && item.result && (
+                    <div className="execution-detail-section execution-detail-success">
                       <div className="execution-detail-label">Result</div>
                       <div className="execution-detail-value">
                         {item.result.txHash && (
-                          <div>Transaction Hash: {item.result.txHash}</div>
+                          <div className="result-hash">
+                            <span>Tx:</span> {item.result.txHash.slice(0, 10)}...{item.result.txHash.slice(-8)}
+                          </div>
                         )}
                         {item.result.blockHash && (
-                          <div>Block Hash: {item.result.blockHash}</div>
+                          <div className="result-hash">
+                            <span>Block:</span> {item.result.blockHash.slice(0, 10)}...{item.result.blockHash.slice(-8)}
+                          </div>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* Actions */}
-                  {needsApproval && (
-                    <div className="execution-item-actions">
-                      {onApprove && (
-                        <button
-                          onClick={() => onApprove(item.id)}
-                          className="execution-approve-btn"
-                        >
-                          Approve
-                        </button>
-                      )}
-                      {onReject && (
-                        <button
-                          onClick={() => onReject(item.id)}
-                          className="execution-reject-btn"
-                        >
-                          Reject
-                        </button>
-                      )}
-                    </div>
-                  )}
-
                   {/* Executing indicator */}
-                  {isExecuting && (
+                  {isItemExecuting && (
                     <div className="execution-item-executing">
-                      <Loader2 className="animate-spin" />
+                      <Loader2 className="animate-spin" size={16} />
                       <span>Processing...</span>
                     </div>
                   )}
@@ -314,19 +278,45 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
 
       {/* Footer */}
       <div className="execution-flow-footer">
-        <div className="execution-flow-progress">
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{
-                width: `${(state.completedItems / state.totalItems) * 100}%`
-              }}
-            />
+        {isWaitingForApproval ? (
+          /* Approval Actions */
+          <div className="execution-flow-approval-actions">
+            {onCancel && (
+              <button
+                onClick={onCancel}
+                className="execution-cancel-btn"
+              >
+                <X size={16} />
+                Cancel
+              </button>
+            )}
+            {onAcceptAndStart && (
+              <button
+                onClick={onAcceptAndStart}
+                className="execution-accept-btn"
+              >
+                <Play size={16} />
+                Accept and Start
+              </button>
+            )}
           </div>
-          <div className="progress-text">
-            {state.completedItems} / {state.totalItems} completed
+        ) : (
+          /* Progress Bar */
+          <div className="execution-flow-progress">
+            <div className="progress-bar">
+              <div
+                className="progress-fill"
+                style={{
+                  width: `${(state.completedItems / state.totalItems) * 100}%`
+                }}
+              />
+            </div>
+            <div className="progress-text">
+              {state.completedItems} / {state.totalItems} completed
+              {isComplete && state.failedItems === 0 && ' ✓'}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

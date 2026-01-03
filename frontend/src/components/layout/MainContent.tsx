@@ -26,6 +26,7 @@ interface MainContentProps {
   showWelcomeScreen: boolean;
   disabled?: boolean;
   placeholder?: string;
+  executionFlow?: React.ReactNode;
 }
 
 const MainContent: React.FC<MainContentProps> = ({
@@ -37,7 +38,8 @@ const MainContent: React.FC<MainContentProps> = ({
   isTyping,
   showWelcomeScreen,
   disabled = false,
-  placeholder = "Type your message..."
+  placeholder = "Type your message...",
+  executionFlow
 }) => {
   const [welcomeInputValue, setWelcomeInputValue] = useState('');
   const welcomeInputRef = useRef<HTMLTextAreaElement>(null);
@@ -203,6 +205,7 @@ const MainContent: React.FC<MainContentProps> = ({
             isTyping={isTyping}
             disabled={disabled}
             placeholder={placeholder}
+            executionFlow={executionFlow}
           />
         )}
       </div>

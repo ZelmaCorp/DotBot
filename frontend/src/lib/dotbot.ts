@@ -16,7 +16,7 @@
  * ```
  */
 
-import { ApiPromise, WsProvider } from '@polkadot/api';
+import { ApiPromise } from '@polkadot/api';
 import { ExecutionSystem } from './executionEngine/system';
 import { ExecutionArray } from './executionEngine/executionArray';
 import { ExecutionArrayState, ExecutionItem } from './executionEngine/types';
@@ -231,9 +231,8 @@ export class DotBot {
       signer.setBatchSigningRequestHandler(config.onBatchSigningRequest);
     }
     
-    // Create and initialize execution system
+    // Create execution system
     const executionSystem = new ExecutionSystem();
-    executionSystem.initialize(api, config.wallet, signer);
     
     const dotbot = new DotBot(api, executionSystem, config, relayChainManager, assetHubManager);
     
@@ -244,6 +243,9 @@ export class DotBot {
     } catch (err) {
       console.warn('⚠️ Asset Hub connection failed, continuing without it:', err instanceof Error ? err.message : err);
     }
+    
+    // Initialize execution system with both APIs (after Asset Hub is connected)
+    executionSystem.initialize(api, config.wallet, signer, dotbot.getAssetHubApi());
     
     return dotbot;
   }
@@ -584,6 +586,13 @@ export class DotBot {
    */
   getApi(): ApiPromise {
     return this.api;
+  }
+  
+  /**
+   * Get Asset Hub API (for advanced usage)
+   */
+  getAssetHubApi(): ApiPromise | null {
+    return this.assetHubApi;
   }
   
   /**

@@ -50,7 +50,8 @@ export function createBatchTransferExtrinsic(
       throw new Error(`Transfer ${index + 1}: Amount must be greater than zero`);
     }
 
-    return api.tx.balances.transfer(transfer.recipient, transfer.amount);
+    // Use transferAllowDeath (renamed from transfer in Polkadot.js v10+)
+    return api.tx.balances.transferAllowDeath(transfer.recipient, transfer.amount);
   });
 
   return api.tx.utility.batch(transferExtrinsics);

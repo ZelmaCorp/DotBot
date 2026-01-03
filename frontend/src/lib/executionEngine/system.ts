@@ -53,12 +53,13 @@ export class ExecutionSystem {
   /**
    * Initialize the system
    * 
-   * @param api Polkadot API instance
+   * @param api Polkadot Relay Chain API instance
    * @param account Account information
    * @param signer Optional: Pluggable signer (for portability)
+   * @param assetHubApi Optional: Asset Hub API instance (recommended for DOT transfers)
    */
-  initialize(api: ApiPromise, account: WalletAccount, signer?: Signer): void {
-    this.orchestrator.initialize(api);
+  initialize(api: ApiPromise, account: WalletAccount, signer?: Signer, assetHubApi?: ApiPromise | null): void {
+    this.orchestrator.initialize(api, assetHubApi);
     this.executioner.initialize(api, account, signer);
   }
   

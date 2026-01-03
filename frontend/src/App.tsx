@@ -10,7 +10,6 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { ThemeProvider } from './contexts/ThemeContext';
 import CollapsibleSidebar from './components/layout/CollapsibleSidebar';
 import MainContent from './components/layout/MainContent';
-import SigningModal from './components/signing/SigningModal';
 import ExecutionFlow from './components/execution/ExecutionFlow';
 import { DotBot, ExecutionArrayState, ConversationMessage } from './lib';
 import { useWalletStore } from './stores/walletStore';
@@ -246,34 +245,30 @@ const App: React.FC = () => {
                 ? "Initializing DotBot (connecting to Polkadot networks)..."
                 : "Type your message..."
             }
-          />
-
-          {/* Execution Flow - Visual representation of operations */}
-          <ExecutionFlow
-            state={executionArrayState}
-            onApprove={(itemId) => {
-              console.log('✅ Approving item:', itemId);
-              // The signing modal will handle the actual approval
-              // This is for future: direct approval from flow
-            }}
-            onReject={(itemId) => {
-              console.log('❌ Rejecting item:', itemId);
-              // Handle rejection
-            }}
-            onApproveAll={() => {
-              console.log('✅ Approving all items');
-              // Handle approve all
-            }}
-            onCancel={() => {
-              console.log('🚫 Cancelling execution');
-              setExecutionArrayState(null);
-            }}
-            show={!!executionArrayState && executionArrayState.items.length > 0}
-          />
-
-          <SigningModal
-            request={signingRequest}
-            onClose={() => setSigningRequest(null)}
+            executionFlow={
+              /* Execution Flow - Visual representation and approval */
+              <ExecutionFlow
+                state={executionArrayState}
+                onAcceptAndStart={() => {
+                  console.log('✅ Accepting and starting execution flow');
+                  // Auto-approve the signing request
+                  if (signingRequest) {
+                    signingRequest.resolve(true);
+                    setSigningRequest(null);
+                  }
+                }}
+                onCancel={() => {
+                  console.log('🚫 Cancelling execution');
+                  // Reject signing request if exists
+                  if (signingRequest) {
+                    signingRequest.resolve(false);
+                    setSigningRequest(null);
+                  }
+                  setExecutionArrayState(null);
+                }}
+                show={!!executionArrayState && executionArrayState.items.length > 0}
+              />
+            }
           />
         </div>
       </ThemeProvider>

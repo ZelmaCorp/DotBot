@@ -38,7 +38,6 @@ export class AssetTransferAgent extends BaseAgent {
    */
   async transfer(params: TransferParams): Promise<AgentResult> {
     this.ensureInitialized();
-    const api = this.getApi();
 
     console.log('💸 AssetTransferAgent.transfer() called with params:', {
       sender: params.address,
@@ -49,14 +48,29 @@ export class AssetTransferAgent extends BaseAgent {
     try {
       this.validateTransferAddresses(params.address, params.recipient);
       const amountBN = this.parseAndValidateAmount(params.amount);
-      await this.validateTransferBalance(params.address, amountBN, params.validateBalance);
+      
+      // Check DOT balance on Asset Hub first, then relay chain
+      const { balance: dotBalance, chain } = await this.getDotBalance(params.address);
+      await this.validateDotBalance(dotBalance, amountBN, params.validateBalance);
+
+      // Use the appropriate API based on where DOT is located
+      const api = chain === 'assetHub' && this.assetHubApi ? this.assetHubApi : this.getApi();
+      const chainName = chain === 'assetHub' ? 'Asset Hub' : 'Relay Chain';
+      console.log(`💎 Using ${chainName} for DOT transfer`);
 
       const keepAlive = params.keepAlive === true;
       const extrinsic = this.createTransferExtrinsic(api, params.recipient, amountBN, keepAlive);
       const estimatedFee = await this.estimateFee(extrinsic, params.address);
       const warnings = await this.collectTransferWarnings(api, params.recipient, keepAlive);
 
-      const description = `Transfer ${this.formatAmount(amountBN)} DOT from ${params.address.slice(0, 8)}...${params.address.slice(-8)} to ${params.recipient.slice(0, 8)}...${params.recipient.slice(-8)}`;
+      // Add chain info to warnings
+      if (chain === 'assetHub') {
+        warnings.unshift('✅ Using Asset Hub (recommended for DOT transfers)');
+      } else {
+        warnings.unshift('ℹ️ Using Relay Chain (Asset Hub balance is 0 or unavailable)');
+      }
+
+      const description = `Transfer ${this.formatAmount(amountBN)} DOT from ${params.address.slice(0, 8)}...${params.address.slice(-8)} to ${params.recipient.slice(0, 8)}...${params.recipient.slice(-8)} via ${chainName}`;
 
       return this.createResult(
         description,
@@ -70,6 +84,7 @@ export class AssetTransferAgent extends BaseAgent {
             recipient: params.recipient,
             sender: params.address,
             keepAlive,
+            chain: chainName,
           },
           resultType: 'extrinsic',
           requiresConfirmation: true,
@@ -254,6 +269,30 @@ export class AssetTransferAgent extends BaseAgent {
           available: balanceCheck.available,
           required: balanceCheck.required,
           shortfall: balanceCheck.shortfall,
+        }
+      );
+    }
+  }
+
+  private async validateDotBalance(
+    balance: { free: string; reserved: string; frozen: string; available: string },
+    amount: BN,
+    validateBalance?: boolean
+  ): Promise<void> {
+    if (validateBalance === false) return;
+
+    const availableBN = new BN(balance.available);
+    const feeBuffer = new BN(10_000_000_000); // 0.01 DOT
+    const totalRequired = amount.add(feeBuffer);
+
+    if (availableBN.lt(totalRequired)) {
+      throw new AgentError(
+        `Insufficient balance. Available: ${this.formatAmount(availableBN)} DOT, Required: ${this.formatAmount(totalRequired)} DOT`,
+        'INSUFFICIENT_BALANCE',
+        {
+          available: availableBN.toString(),
+          required: totalRequired.toString(),
+          shortfall: totalRequired.sub(availableBN).toString(),
         }
       );
     }

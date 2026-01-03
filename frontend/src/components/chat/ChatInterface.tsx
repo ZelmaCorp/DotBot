@@ -15,6 +15,7 @@ interface ChatInterfaceProps {
   isTyping?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  executionFlow?: React.ReactNode;
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({
@@ -22,7 +23,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   messages,
   isTyping = false,
   disabled = false,
-  placeholder = "Type your message..."
+  placeholder = "Type your message...",
+  executionFlow
 }) => {
   const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -97,6 +99,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </div>
           </div>
         )}
+        
+        {/* Execution Flow - appears after messages */}
+        {executionFlow}
         
         <div ref={messagesEndRef} />
       </div>

@@ -13,12 +13,17 @@ import { AgentResult, AgentError, ValidationResult, BalanceInfo } from './types'
 
 export abstract class BaseAgent {
   protected api: ApiPromise | null = null;
+  protected assetHubApi: ApiPromise | null = null;
 
   /**
    * Initialize the agent with a Polkadot API instance
+   * 
+   * @param api Polkadot Relay Chain API instance
+   * @param assetHubApi Optional Asset Hub API instance (recommended for DOT operations)
    */
-  initialize(api: ApiPromise): void {
+  initialize(api: ApiPromise, assetHubApi?: ApiPromise | null): void {
     this.api = api;
+    this.assetHubApi = assetHubApi || null;
   }
 
   /**
@@ -71,7 +76,7 @@ export abstract class BaseAgent {
   }
 
   /**
-   * Get account balance information
+   * Get account balance information (defaults to relay chain)
    */
   protected async getBalance(address: string): Promise<BalanceInfo> {
     const api = this.getApi();
@@ -96,6 +101,64 @@ export abstract class BaseAgent {
       frozen,
       available,
     };
+  }
+
+  /**
+   * Get account balance from Asset Hub
+   */
+  protected async getAssetHubBalance(address: string): Promise<BalanceInfo | null> {
+    if (!this.assetHubApi) {
+      console.log('ℹ️ Asset Hub API not available');
+      return null;
+    }
+
+    console.log('💰 Getting Asset Hub balance for address:', address);
+    try {
+      const accountInfo = await this.assetHubApi.query.system.account(address);
+      console.log('💰 Asset Hub account info retrieved:', {
+        hasData: !!accountInfo,
+        free: (accountInfo as any).data?.free?.toString(),
+        reserved: (accountInfo as any).data?.reserved?.toString()
+      });
+      
+      // Type assertion for account data
+      const accountData = accountInfo as any;
+      const free = accountData.data?.free?.toString() || '0';
+      const reserved = accountData.data?.reserved?.toString() || '0';
+      const frozen = accountData.data?.frozen?.toString() || '0';
+      const available = new BN(free).sub(new BN(frozen)).toString();
+
+      return {
+        free,
+        reserved,
+        frozen,
+        available,
+      };
+    } catch (error) {
+      console.warn('⚠️ Failed to fetch Asset Hub balance:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get DOT balance from the most appropriate chain
+   * (Asset Hub is preferred for DOT transfers after the migration)
+   */
+  protected async getDotBalance(address: string): Promise<{
+    balance: BalanceInfo;
+    chain: 'relay' | 'assetHub';
+  }> {
+    // Try Asset Hub first (preferred for DOT after migration)
+    const assetHubBalance = await this.getAssetHubBalance(address);
+    if (assetHubBalance && new BN(assetHubBalance.available).gt(new BN(0))) {
+      console.log('💰 Using Asset Hub balance (has DOT available)');
+      return { balance: assetHubBalance, chain: 'assetHub' };
+    }
+
+    // Fall back to relay chain
+    console.log('💰 Using Relay Chain balance');
+    const relayBalance = await this.getBalance(address);
+    return { balance: relayBalance, chain: 'relay' };
   }
 
   /**
