@@ -5,13 +5,21 @@
  * Handles standard transfers, keep-alive transfers, and batch transfers.
  */
 
+import { ApiPromise } from '@polkadot/api';
+import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { BaseAgent } from '../baseAgent';
-import { AgentResult, AgentError } from '../types';
+import { AgentResult, AgentError, DryRunResult } from '../types';
 import { TransferParams, BatchTransferParams } from './types';
 import { createTransferExtrinsic } from './extrinsics/transfer';
 import { createTransferKeepAliveExtrinsic } from './extrinsics/transferKeepAlive';
 import { createBatchTransferExtrinsic } from './extrinsics/batchTransfer';
 import { BN } from '@polkadot/util';
+import { 
+  analyzeError, 
+  getRetryStrategy, 
+  formatErrorForUser,
+  ErrorAnalysis 
+} from '../errorAnalyzer';
 
 /**
  * Agent for handling asset transfers
@@ -33,58 +41,95 @@ export class AssetTransferAgent extends BaseAgent {
   /**
    * Transfer DOT or tokens
    * 
+   * ROBUST FLOW with comprehensive retry:
+   * 1. Validate addresses and amount (fail fast on user errors)
+   * 2. Try simulation with intelligent retry:
+   *    - Reviews ALL adjustable parameters (chain, keepAlive, etc.)
+   *    - Analyzes errors (user error vs configuration error)
+   *    - Systematically tries different combinations
+   *    - Does NOT change user intent (amount, recipient, sender)
+   * 3. Check balance on successful configuration
+   * 4. Final validation (amount + fees)
+   * 5. Return validated extrinsic with correct API and parameters
+   * 
    * @param params Transfer parameters
    * @returns AgentResult with transfer extrinsic
    */
   async transfer(params: TransferParams): Promise<AgentResult> {
     this.ensureInitialized();
 
-    console.log('💸 AssetTransferAgent.transfer() called with params:', {
-      sender: params.address,
-      recipient: params.recipient,
-      amount: params.amount
-    });
+    // Transfer request received
 
     try {
+      // Step 1: Validate addresses (fail fast on user errors)
       this.validateTransferAddresses(params.address, params.recipient);
       const amountBN = this.parseAndValidateAmount(params.amount);
-      
-      // Check DOT balance on Asset Hub first, then relay chain
-      const { balance: dotBalance, chain } = await this.getDotBalance(params.address);
-      await this.validateDotBalance(dotBalance, amountBN, params.validateBalance);
-
-      // Use the appropriate API based on where DOT is located
-      const api = chain === 'assetHub' && this.assetHubApi ? this.assetHubApi : this.getApi();
-      const chainName = chain === 'assetHub' ? 'Asset Hub' : 'Relay Chain';
-      console.log(`💎 Using ${chainName} for DOT transfer`);
-
       const keepAlive = params.keepAlive === true;
-      const extrinsic = this.createTransferExtrinsic(api, params.recipient, amountBN, keepAlive);
-      const estimatedFee = await this.estimateFee(extrinsic, params.address);
-      const warnings = await this.collectTransferWarnings(api, params.recipient, keepAlive);
-
-      // Add chain info to warnings
-      if (chain === 'assetHub') {
-        warnings.unshift('✅ Using Asset Hub (recommended for DOT transfers)');
-      } else {
-        warnings.unshift('ℹ️ Using Relay Chain (Asset Hub balance is 0 or unavailable)');
+      
+      // Step 2: Robust dry-run with retry logic
+      const { dryRun, api, extrinsic, chainName, keepAlive: finalKeepAlive, attemptLog } = await this.dryRunWithRetry(
+        { 
+          address: params.address, 
+          chain: params.chain,
+          keepAlive: keepAlive,
+          recipient: params.recipient,
+          amount: amountBN
+        },
+        (apiInstance, keepAliveFlag) => this.createTransferExtrinsic(apiInstance, params.recipient, amountBN, keepAliveFlag)
+      );
+      
+      // Step 3: Check balance on the successful chain
+      const targetChain = chainName === 'Asset Hub' ? 'assetHub' : 'relay';
+      const balance = await this.getBalanceOnChain(targetChain, params.address);
+      
+      // Step 4: Validate balance (amount + fees on successful chain)
+      const estimatedFeeBN = new BN(dryRun.estimatedFee);
+      const totalRequired = amountBN.add(estimatedFeeBN);
+      const availableBN = new BN(balance.available);
+      
+      if (params.validateBalance !== false && availableBN.lt(totalRequired)) {
+        throw new AgentError(
+          `Insufficient balance on ${chainName}. Available: ${this.formatAmount(availableBN)} DOT, Required: ${this.formatAmount(totalRequired)} DOT (including ${this.formatAmount(estimatedFeeBN)} DOT fees)`,
+          'INSUFFICIENT_BALANCE',
+          {
+            chain: chainName,
+            available: availableBN.toString(),
+            required: totalRequired.toString(),
+            amount: amountBN.toString(),
+            fees: estimatedFeeBN.toString(),
+            shortfall: totalRequired.sub(availableBN).toString(),
+            attemptLog: attemptLog.join('\n'),
+          }
+        );
       }
-
-      const description = `Transfer ${this.formatAmount(amountBN)} DOT from ${params.address.slice(0, 8)}...${params.address.slice(-8)} to ${params.recipient.slice(0, 8)}...${params.recipient.slice(-8)} via ${chainName}`;
+      
+      // Step 5: Collect warnings
+      const warnings = await this.collectTransferWarnings(api, params.recipient, finalKeepAlive, chainName);
+      
+      // Add retry info to warnings if multiple attempts were needed
+      if (attemptLog.length > 2) { // More than just "Attempt 1" and "Success"
+        warnings.push(`ℹ️ Required ${Math.ceil(attemptLog.length / 2)} attempt(s) to find correct chain`);
+      }
+      
+      // Step 6: Return validated extrinsic
+      const description = `Transfer ${this.formatAmount(amountBN)} DOT from ${params.address.slice(0, 8)}...${params.address.slice(-8)} to ${params.recipient.slice(0, 8)}...${params.recipient.slice(-8)} on ${chainName}`;
 
       return this.createResult(
         description,
         extrinsic,
         {
-          estimatedFee,
+          estimatedFee: dryRun.estimatedFee,
           warnings: warnings.length > 0 ? warnings : undefined,
           metadata: {
             amount: amountBN.toString(),
             formattedAmount: this.formatAmount(amountBN),
             recipient: params.recipient,
             sender: params.address,
-            keepAlive,
+            keepAlive: finalKeepAlive,
             chain: chainName,
+            attemptLog: attemptLog.join('\n'),
+            // Store the API instance that created this extrinsic (CRITICAL!)
+            apiInstance: api,
           },
           resultType: 'extrinsic',
           requiresConfirmation: true,
@@ -98,12 +143,21 @@ export class AssetTransferAgent extends BaseAgent {
 
   /**
    * Batch transfer - transfer to multiple recipients in a single transaction
+   * 
+   * ROBUST FLOW with intelligent retry:
+   * 1. Validate all recipients and amounts (fail fast on user errors)
+   * 2. Try simulation with retry logic (same as transfer)
+   * 3. Check balance on successful chain
+   * 4. Final validation (total + fees)
+   * 5. Return validated batch extrinsic
    */
   async batchTransfer(params: BatchTransferParams): Promise<AgentResult> {
     this.ensureInitialized();
-    const api = this.getApi();
+
+    // Batch transfer request received
 
     try {
+      // Step 1: Validate sender and transfers array (fail fast on user errors)
       this.validateSenderAddress(params.address);
       this.validateTransfersArray(params.transfers);
 
@@ -112,30 +166,72 @@ export class AssetTransferAgent extends BaseAgent {
         params.transfers
       );
 
-      await this.validateTransferBalance(params.address, totalAmount, params.validateBalance);
+      // Step 2: Robust dry-run with retry logic
+      // Note: Batch transfers don't support keepAlive, so we only retry chain
+      const { dryRun, api, extrinsic, chainName, keepAlive: finalKeepAlive, attemptLog } = await this.dryRunWithRetry(
+        { 
+          address: params.address, 
+          chain: params.chain,
+          keepAlive: false,
+          recipient: validatedTransfers[0]?.recipient || '',
+          amount: totalAmount
+        },
+        (apiInstance, keepAliveFlag) => createBatchTransferExtrinsic(apiInstance, {
+          transfers: validatedTransfers.map(t => ({
+            recipient: t.recipient,
+            amount: t.amount,
+          })),
+        })
+      );
 
-      const extrinsic = createBatchTransferExtrinsic(api, {
-        transfers: validatedTransfers.map(t => ({
-          recipient: t.recipient,
-          amount: t.amount,
-        })),
-      });
+      // Step 3: Check balance on the successful chain
+      const targetChain = chainName === 'Asset Hub' ? 'assetHub' : 'relay';
+      const balance = await this.getBalanceOnChain(targetChain, params.address);
 
-      const estimatedFee = await this.estimateFee(extrinsic, params.address);
-      const warnings = this.collectBatchWarnings(params.transfers.length);
-      const description = `Batch transfer: ${params.transfers.length} transfers totaling ${this.formatAmount(totalAmount)} DOT from ${params.address.slice(0, 8)}...${params.address.slice(-8)}`;
+      // Step 4: Validate total balance (amount + fees)
+      const estimatedFeeBN = new BN(dryRun.estimatedFee);
+      const totalRequired = totalAmount.add(estimatedFeeBN);
+      const availableBN = new BN(balance.available);
+      
+      if (params.validateBalance !== false && availableBN.lt(totalRequired)) {
+        throw new AgentError(
+          `Insufficient balance on ${chainName}. Available: ${this.formatAmount(availableBN)} DOT, Required: ${this.formatAmount(totalRequired)} DOT (including ${this.formatAmount(estimatedFeeBN)} DOT fees)`,
+          'INSUFFICIENT_BALANCE',
+          {
+            chain: chainName,
+            available: availableBN.toString(),
+            required: totalRequired.toString(),
+            totalAmount: totalAmount.toString(),
+            fees: estimatedFeeBN.toString(),
+            shortfall: totalRequired.sub(availableBN).toString(),
+            attemptLog: attemptLog.join('\n'),
+          }
+        );
+      }
+
+      const warnings = this.collectBatchWarnings(params.transfers.length, chainName);
+      
+      // Add retry info to warnings if multiple attempts were needed
+      if (attemptLog.length > 2) {
+        warnings.push(`ℹ️ Required ${Math.ceil(attemptLog.length / 2)} attempt(s) to find correct chain`);
+      }
+      
+      const description = `Batch transfer: ${params.transfers.length} transfers totaling ${this.formatAmount(totalAmount)} DOT from ${params.address.slice(0, 8)}...${params.address.slice(-8)} on ${chainName}`;
 
       return this.createResult(
         description,
         extrinsic,
         {
-          estimatedFee,
+          estimatedFee: dryRun.estimatedFee,
           warnings: warnings.length > 0 ? warnings : undefined,
           metadata: {
             transferCount: params.transfers.length,
             totalAmount: totalAmount.toString(),
             formattedTotalAmount: this.formatAmount(totalAmount),
             sender: params.address,
+            chain: chainName,
+            attemptLog: attemptLog.join('\n'),
+            apiInstance: api, // Store API instance
             transfers: validatedTransfers.map(t => ({
               recipient: t.recipient,
               amount: t.amount,
@@ -152,7 +248,187 @@ export class AssetTransferAgent extends BaseAgent {
     }
   }
 
-  // Helper methods
+  // ===== ROBUST SIMULATION WITH RETRY LOGIC =====
+
+  /**
+   * Robust dry-run with intelligent retry mechanism
+   * 
+   * Reviews and adjusts ALL adjustable parameters:
+   * - Chain selection (assetHub/relay)
+   * - Keep-alive flag (transferKeepAlive vs transferAllowDeath)
+   * - Any other configurable parameters
+   * 
+   * Does NOT change user intent (amount, recipient, sender)
+   * 
+   * @param params Transfer parameters including all adjustable options
+   * @param extrinsicCreator Function to create extrinsic with current parameters
+   * @returns Successful dry-run result with correct API and extrinsic
+   */
+  private async dryRunWithRetry(
+    params: { 
+      address: string; 
+      chain?: 'assetHub' | 'relay';
+      keepAlive?: boolean;
+      recipient: string;
+      amount: BN;
+    },
+    extrinsicCreator: (api: ApiPromise, keepAlive: boolean) => SubmittableExtrinsic<'promise'>
+  ): Promise<{
+    dryRun: DryRunResult;
+    api: ApiPromise;
+    extrinsic: SubmittableExtrinsic<'promise'>;
+    chainName: string;
+    keepAlive: boolean;
+    attemptLog: string[];
+  }> {
+    const maxAttempts = 5;
+    const attemptLog: string[] = [];
+    let currentChain = params.chain || 'assetHub';
+    let currentKeepAlive = params.keepAlive !== undefined ? params.keepAlive : false;
+    let lastError: ErrorAnalysis | null = null;
+    const triedCombinations = new Set<string>();
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const chainName = currentChain === 'assetHub' ? 'Asset Hub' : 'Relay Chain';
+      const combinationKey = `${currentChain}-${currentKeepAlive}`;
+      
+      if (triedCombinations.has(combinationKey)) {
+        attemptLog.push(`Skipping duplicate: ${chainName}, keepAlive=${currentKeepAlive}`);
+        break;
+      }
+      triedCombinations.add(combinationKey);
+      
+      attemptLog.push(`Attempt ${attempt}/${maxAttempts}: ${chainName}, keepAlive=${currentKeepAlive}`);
+
+      try {
+        const api = this.getApiForChain(currentChain);
+        const extrinsic = extrinsicCreator(api, currentKeepAlive);
+        const rpcEndpoint = this.getRpcEndpointForChain(currentChain);
+        const dryRun = await this.dryRunExtrinsic(api, extrinsic, params.address, rpcEndpoint);
+        
+        if (dryRun.success) {
+          attemptLog.push(`Success`);
+          return {
+            dryRun,
+            api,
+            extrinsic,
+            chainName,
+            keepAlive: currentKeepAlive,
+            attemptLog,
+          };
+        }
+        
+        attemptLog.push(`Failed: ${dryRun.error}`);
+        const errorAnalysis = analyzeError(dryRun.error || 'Unknown error');
+        lastError = errorAnalysis;
+        attemptLog.push(`Error category: ${errorAnalysis.category}`);
+        
+        if (errorAnalysis.category === 'USER_ERROR') {
+          attemptLog.push(`User error - not retrying`);
+          throw new AgentError(
+            errorAnalysis.userMessage,
+            'USER_ERROR',
+            {
+              category: errorAnalysis.category,
+              technicalDetails: errorAnalysis.technicalDetails,
+              attemptLog: attemptLog.join('\n'),
+            }
+          );
+        }
+        
+        const retryStrategy = getRetryStrategy(
+          errorAnalysis, 
+          attempt, 
+          currentChain,
+          currentKeepAlive
+        );
+        
+        if (!retryStrategy) {
+          attemptLog.push(`No retry strategy available`);
+          break;
+        }
+        
+        if (retryStrategy.tryAlternateChain) {
+          const newChain = currentChain === 'assetHub' ? 'relay' : 'assetHub';
+          attemptLog.push(`Switching chain: ${currentChain} -> ${newChain}`);
+          currentChain = newChain;
+        }
+        
+        if (retryStrategy.tryKeepAlive !== undefined) {
+          attemptLog.push(`Switching keepAlive: ${currentKeepAlive} -> ${retryStrategy.tryKeepAlive}`);
+          currentKeepAlive = retryStrategy.tryKeepAlive;
+        }
+        
+        if (!retryStrategy.tryAlternateChain && retryStrategy.tryKeepAlive === undefined) {
+          attemptLog.push(`Retrying same configuration`);
+        }
+        
+      } catch (error) {
+        attemptLog.push(`Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+        
+        if (error instanceof AgentError) {
+          throw error;
+        }
+        
+        const errorAnalysis = analyzeError(error instanceof Error ? error : String(error));
+        lastError = errorAnalysis;
+        
+        if (errorAnalysis.category === 'USER_ERROR') {
+          throw new AgentError(
+            errorAnalysis.userMessage,
+            'USER_ERROR',
+            {
+              technicalDetails: errorAnalysis.technicalDetails,
+              attemptLog: attemptLog.join('\n'),
+            }
+          );
+        }
+        
+        if (attempt === maxAttempts) {
+          break;
+        }
+      }
+    }
+    
+    // All attempts failed
+    attemptLog.push(`All ${maxAttempts} attempts failed`);
+    
+    const errorMessage = lastError 
+      ? formatErrorForUser(lastError, maxAttempts, maxAttempts)
+      : 'Transaction validation failed after multiple attempts';
+    
+    throw new AgentError(
+      errorMessage,
+      'VALIDATION_FAILED_ALL_ATTEMPTS',
+      {
+        attempts: maxAttempts,
+        lastError: lastError?.technicalDetails,
+        attemptLog: attemptLog.join('\n'),
+      }
+    );
+  }
+
+  // ===== HELPER METHODS =====
+
+  /**
+   * Get RPC endpoint for a specific chain
+   */
+  private getRpcEndpointForChain(chain: 'assetHub' | 'relay'): string[] {
+    if (chain === 'assetHub') {
+      return [
+        'wss://polkadot-asset-hub-rpc.polkadot.io',
+        'wss://statemint-rpc.dwellir.com',
+        'wss://statemint.api.onfinality.io/public-ws',
+      ];
+    }
+    
+    // Relay Chain
+    return [
+      'wss://rpc.polkadot.io',
+      'wss://polkadot-rpc.dwellir.com',
+      'wss://polkadot.api.onfinality.io/public-ws',
+    ];
+  }
 
   private validateTransferAddresses(sender: string, recipient: string): void {
     const senderValidation = this.validateAddress(sender);
@@ -316,9 +592,17 @@ export class AssetTransferAgent extends BaseAgent {
   private async collectTransferWarnings(
     api: any,
     recipient: string,
-    keepAlive: boolean
+    keepAlive: boolean,
+    chainName: string
   ): Promise<string[]> {
     const warnings: string[] = [];
+
+    // Add chain info
+    if (chainName === 'Asset Hub') {
+      warnings.push('✅ Using Asset Hub (recommended for DOT transfers)');
+    } else {
+      warnings.push('ℹ️ Using Relay Chain');
+    }
 
     if (keepAlive) {
       warnings.push('Using transferKeepAlive - this ensures the sender account remains alive after transfer');
@@ -338,13 +622,22 @@ export class AssetTransferAgent extends BaseAgent {
     return warnings;
   }
 
-  private collectBatchWarnings(transferCount: number): string[] {
-    const warnings: string[] = [
-      `Batch transfer with ${transferCount} recipients`
-    ];
+  private collectBatchWarnings(transferCount: number, chainName: string): string[] {
+    const warnings: string[] = [];
+    
+    // Add chain info
+    if (chainName === 'Asset Hub') {
+      warnings.push('✅ Using Asset Hub (recommended for DOT transfers)');
+    } else {
+      warnings.push('ℹ️ Using Relay Chain');
+    }
+    
+    warnings.push(`Batch transfer with ${transferCount} recipients`);
+    
     if (transferCount > 10) {
       warnings.push('Large batch transfer - ensure all recipients are correct');
     }
+    
     return warnings;
   }
 

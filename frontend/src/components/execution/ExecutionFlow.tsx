@@ -13,8 +13,8 @@ import '../../styles/execution-flow.css';
 export interface ExecutionFlowProps {
   state: ExecutionArrayState | null;
   onAcceptAndStart?: () => void;
-  onCancel?: () => void;
-  show?: boolean;
+    onCancel?: () => void;
+    show?: boolean;
 }
 
 const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
@@ -123,24 +123,24 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
         </div>
         
         {!isWaitingForApproval && (
-          <div className="execution-flow-summary">
+        <div className="execution-flow-summary">
             {state.completedItems > 0 && (
               <span className="summary-badge summary-success">
                 {state.completedItems} completed
-              </span>
-            )}
+            </span>
+          )}
             {isExecuting && (
-              <span className="summary-badge summary-executing">
+            <span className="summary-badge summary-executing">
                 <Loader2 className="animate-spin inline mr-1" size={12} />
                 executing
-              </span>
-            )}
+            </span>
+          )}
             {state.failedItems > 0 && (
-              <span className="summary-badge summary-error">
+            <span className="summary-badge summary-error">
                 {state.failedItems} failed
-              </span>
-            )}
-          </div>
+            </span>
+          )}
+        </div>
         )}
       </div>
 
@@ -188,9 +188,9 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
                   </div>
                 </div>
                 {(item.warnings?.length || item.metadata) && (
-                  <ChevronRight
-                    className={`execution-item-chevron ${isExpanded ? 'expanded' : ''}`}
-                  />
+                <ChevronRight
+                  className={`execution-item-chevron ${isExpanded ? 'expanded' : ''}`}
+                />
                 )}
               </div>
 
@@ -218,16 +218,27 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
                       <div className="execution-detail-label">Details</div>
                       <div className="execution-metadata">
                         {Object.entries(item.metadata).map(([key, value]) => {
-                          // Skip some internal fields
-                          if (['amount', 'formattedAmount', 'transferCount'].includes(key)) {
+                          // Skip internal fields and API instance
+                          if (['amount', 'formattedAmount', 'transferCount', 'apiInstance'].includes(key)) {
                             return null;
                           }
+                          // Skip complex objects that might have circular references
+                          if (value && typeof value === 'object' && value.constructor && value.constructor.name !== 'Object' && value.constructor.name !== 'Array') {
+                            return null;
+                          }
+                          
+                          // Safe stringify
+                          let displayValue: string;
+                          try {
+                            displayValue = typeof value === 'string' ? value : JSON.stringify(value);
+                          } catch (e) {
+                            displayValue = '[Complex Object]';
+                          }
+                          
                           return (
                             <div key={key} className="metadata-row">
                               <span className="metadata-key">{key}:</span>
-                              <span className="metadata-value">
-                                {typeof value === 'string' ? value : JSON.stringify(value)}
-                              </span>
+                              <span className="metadata-value">{displayValue}</span>
                             </div>
                           );
                         })}
@@ -302,17 +313,17 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
           </div>
         ) : (
           /* Progress Bar */
-          <div className="execution-flow-progress">
-            <div className="progress-bar">
-              <div
-                className="progress-fill"
-                style={{
-                  width: `${(state.completedItems / state.totalItems) * 100}%`
-                }}
-              />
-            </div>
-            <div className="progress-text">
-              {state.completedItems} / {state.totalItems} completed
+        <div className="execution-flow-progress">
+          <div className="progress-bar">
+            <div
+              className="progress-fill"
+              style={{
+                width: `${(state.completedItems / state.totalItems) * 100}%`
+              }}
+            />
+          </div>
+          <div className="progress-text">
+            {state.completedItems} / {state.totalItems} completed
               {isComplete && state.failedItems === 0 && ' ✓'}
             </div>
           </div>

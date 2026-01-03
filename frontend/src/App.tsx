@@ -247,8 +247,8 @@ const App: React.FC = () => {
             }
             executionFlow={
               /* Execution Flow - Visual representation and approval */
-              <ExecutionFlow
-                state={executionArrayState}
+          <ExecutionFlow
+            state={executionArrayState}
                 onAcceptAndStart={() => {
                   console.log('✅ Accepting and starting execution flow');
                   // Auto-approve the signing request
@@ -256,18 +256,18 @@ const App: React.FC = () => {
                     signingRequest.resolve(true);
                     setSigningRequest(null);
                   }
-                }}
-                onCancel={() => {
-                  console.log('🚫 Cancelling execution');
+            }}
+            onCancel={() => {
+              console.log('🚫 Cancelling execution');
                   // Reject signing request if exists
                   if (signingRequest) {
                     signingRequest.resolve(false);
                     setSigningRequest(null);
                   }
-                  setExecutionArrayState(null);
-                }}
-                show={!!executionArrayState && executionArrayState.items.length > 0}
-              />
+              setExecutionArrayState(null);
+            }}
+            show={!!executionArrayState && executionArrayState.items.length > 0}
+          />
             }
           />
         </div>

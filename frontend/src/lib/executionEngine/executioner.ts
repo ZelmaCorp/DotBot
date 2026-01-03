@@ -307,6 +307,10 @@ export class Executioner {
       throw new Error('Executioner not initialized');
     }
     
+    // Get the API instance that was used to create this extrinsic
+    // If not specified, fall back to the default API
+    const apiForExtrinsic = (agentResult.metadata?.apiInstance as ApiPromise) || this.api;
+    
     // Request user signature (unless auto-approve is enabled)
     if (!autoApprove) {
       const approved = await this.requestSignature(item, extrinsic);
@@ -323,8 +327,8 @@ export class Executioner {
     
     executionArray.updateStatus(item.id, 'broadcasting');
     
-    // Broadcast and monitor
-    const result = await this.broadcastAndMonitor(signedExtrinsic, timeout);
+    // Broadcast and monitor using the correct API
+    const result = await this.broadcastAndMonitor(signedExtrinsic, timeout, apiForExtrinsic, true);
     
     if (result.success) {
       executionArray.updateStatus(item.id, 'finalized');
@@ -385,7 +389,10 @@ export class Executioner {
     });
     
     // Broadcast and monitor
-    const result = await this.broadcastAndMonitor(signedBatchExtrinsic, timeout);
+    // For batch, use the first item's API (they should all be on the same chain)
+    const apiForBatch = (items[0]?.agentResult?.metadata?.apiInstance as ApiPromise) || this.api;
+    
+    const result = await this.broadcastAndMonitor(signedBatchExtrinsic, timeout, apiForBatch, true);
     
     if (result.success) {
       items.forEach(item => {
@@ -547,18 +554,51 @@ export class Executioner {
    */
   private async broadcastAndMonitor(
     extrinsic: SubmittableExtrinsic<'promise'>,
-    timeout: number
+    timeout: number,
+    apiToUse?: ApiPromise,
+    alreadySigned?: boolean
   ): Promise<ExecutionResult> {
     if (!this.api || !this.account) {
       throw new Error('Executioner not initialized');
     }
+    
+    // Use the provided API or fall back to default
+    const api = apiToUse || this.api;
     
     return new Promise<ExecutionResult>((resolve, reject) => {
       const timeoutHandle = setTimeout(() => {
         reject(new Error('Transaction timeout'));
       }, timeout);
       
+      // If already signed, just send it. Otherwise, sign and send.
+      if (alreadySigned) {
+        extrinsic.send((result) => {
+          this.handleTransactionResult(result, api, extrinsic, timeoutHandle, resolve);
+        }).catch((error: Error) => {
+          clearTimeout(timeoutHandle);
+          reject(error);
+        });
+      } else {
       this.signAndSendTransaction(extrinsic, this.account!.address, (result) => {
+          this.handleTransactionResult(result, api, extrinsic, timeoutHandle, resolve);
+        }).catch((error: Error) => {
+          clearTimeout(timeoutHandle);
+          reject(error);
+        });
+      }
+    });
+  }
+  
+  /**
+   * Handle transaction result
+   */
+  private handleTransactionResult(
+    result: any,
+    api: ApiPromise,
+    extrinsic: SubmittableExtrinsic<'promise'>,
+    timeoutHandle: NodeJS.Timeout,
+    resolve: (value: ExecutionResult) => void
+  ): void {
         if (result.status.isInBlock) {
           // Transaction is in a block
         }
@@ -566,9 +606,9 @@ export class Executioner {
         if (result.status.isFinalized) {
           clearTimeout(timeoutHandle);
           
-          // Check if transaction succeeded
+      // Check if transaction succeeded (use the correct API)
           const failedEvent = result.events.find(({ event }: any) => {
-            return this.api!.events.system.ExtrinsicFailed.is(event);
+        return api.events.system.ExtrinsicFailed.is(event);
           });
           
           if (failedEvent) {
@@ -590,11 +630,6 @@ export class Executioner {
             });
           }
         }
-      }).catch((error: Error) => {
-        clearTimeout(timeoutHandle);
-        reject(error);
-      });
-    });
   }
   
   /**

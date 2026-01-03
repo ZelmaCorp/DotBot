@@ -81,3 +81,32 @@ export interface BalanceInfo {
   available: string; // free - frozen
 }
 
+/**
+ * Dry-run result for extrinsic validation
+ */
+export interface DryRunResult {
+  /** Whether the dry-run succeeded */
+  success: boolean;
+  
+  /** Error message if failed */
+  error?: string;
+  
+  /** Estimated fee in Planck */
+  estimatedFee: string;
+  
+  /** Whether the transaction would succeed on-chain */
+  wouldSucceed: boolean;
+  
+  /** Validation method used */
+  validationMethod?: 'chopsticks' | 'paymentInfo';
+  
+  /** Additional runtime information */
+  runtimeInfo?: Record<string, any>;
+  
+  /** Balance changes (from Chopsticks simulation) */
+  balanceChanges?: Array<{
+    value: string;
+    change: 'send' | 'receive';
+  }>;
+}
+
