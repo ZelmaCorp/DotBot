@@ -70,6 +70,15 @@ export interface ChatResult {
   failed: number;
 }
 
+/**
+ * Conversation message for maintaining chat history
+ */
+export interface ConversationMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp?: number;
+}
+
 export interface ChatOptions {
   /** Custom system prompt override */
   systemPrompt?: string;
@@ -79,6 +88,27 @@ export interface ChatOptions {
   
   /** Custom LLM function (bypass default) */
   llm?: (message: string, systemPrompt: string, context?: any) => Promise<string>;
+  
+  /** 
+   * Conversation history for context
+   * 
+   * Pass previous messages so the LLM remembers the conversation.
+   * The frontend should maintain this array and pass it with each message.
+   * 
+   * @example
+   * ```typescript
+   * const history: ConversationMessage[] = [];
+   * 
+   * // First message
+   * const result1 = await dotbot.chat("Hello", { llm, conversationHistory: history });
+   * history.push({ role: 'user', content: "Hello" });
+   * history.push({ role: 'assistant', content: result1.response });
+   * 
+   * // Second message - LLM will remember the first
+   * const result2 = await dotbot.chat("What did we talk about?", { llm, conversationHistory: history });
+   * ```
+   */
+  conversationHistory?: ConversationMessage[];
 }
 
 /**
@@ -192,8 +222,8 @@ export class DotBot {
     // Build system prompt with current context
     const systemPrompt = options?.systemPrompt || await this.buildContextualSystemPrompt();
     
-    // Send to LLM
-    let llmResponse = await this.callLLM(message, systemPrompt, options?.llm);
+    // Send to LLM (with conversation history if provided)
+    let llmResponse = await this.callLLM(message, systemPrompt, options?.llm, options?.conversationHistory);
     
     // Process system queries if enabled (future feature)
     if (areSystemQueriesEnabled() && options?.llm) {
@@ -201,7 +231,7 @@ export class DotBot {
         llmResponse,
         systemPrompt,
         message,
-        async (msg, prompt) => this.callLLM(msg, prompt, options.llm)
+        async (msg, prompt) => this.callLLM(msg, prompt, options.llm, options.conversationHistory)
       );
     }
     
@@ -544,18 +574,21 @@ export class DotBot {
   private async callLLM(
     message: string, 
     systemPrompt: string,
-    customLLM?: (message: string, systemPrompt: string, context?: any) => Promise<string>
+    customLLM?: (message: string, systemPrompt: string, context?: any) => Promise<string>,
+    conversationHistory?: ConversationMessage[]
   ): Promise<string> {
     if (customLLM) {
-      // Pass noHistory flag to get fresh JSON response without chat history
-      return await customLLM(message, systemPrompt, { noHistory: true });
+      // Pass conversation history to LLM for context
+      return await customLLM(message, systemPrompt, { 
+        conversationHistory: conversationHistory || []
+      });
     }
     
     // Default: Use ASI-One (if available in frontend)
     // For now, throw error if no custom LLM provided
     throw new Error(
       'No LLM configured. Pass a custom LLM function in chat options:\n' +
-      'dotbot.chat(message, { llm: async (msg, prompt) => { /* your LLM call */ } })'
+      'dotbot.chat(message, { llm: async (msg, prompt, context) => { /* your LLM call */ } })'
     );
   }
   

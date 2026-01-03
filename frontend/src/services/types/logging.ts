@@ -47,4 +47,5 @@ export enum ErrorType {
   COMPONENT_ERROR = 'componentError',
 
   // TODO: Rethink error types
-} 
+}
+

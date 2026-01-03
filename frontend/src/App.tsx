@@ -12,7 +12,7 @@ import CollapsibleSidebar from './components/layout/CollapsibleSidebar';
 import MainContent from './components/layout/MainContent';
 import SigningModal from './components/signing/SigningModal';
 import ExecutionFlow from './components/execution/ExecutionFlow';
-import { DotBot, ExecutionArrayState } from './lib';
+import { DotBot, ExecutionArrayState, ConversationMessage } from './lib';
 import { useWalletStore } from './stores/walletStore';
 import { ASIOneService } from './services/asiOneService';
 import { SigningRequest, BatchSigningRequest } from './lib';
@@ -37,6 +37,7 @@ interface Message {
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
@@ -126,17 +127,22 @@ const App: React.FC = () => {
         throw new Error('Please connect your wallet first');
       }
 
-      // Use DotBot - just call chat()!
+      // Use DotBot - call chat() with conversation history!
       console.log('💬 Sending message to DotBot:', message);
+      console.log('💬 Conversation history length:', conversationHistory.length);
+      
       const result = await dotbot.chat(message, {
+        conversationHistory, // Pass conversation history!
         llm: async (msg, systemPrompt, llmContext) => {
           console.log('🤖 Calling LLM with system prompt length:', systemPrompt.length);
           console.log('🤖 System prompt preview:', systemPrompt.substring(0, 500));
           console.log('🤖 LLM context:', llmContext);
-          // Pass systemPrompt and context (including noHistory) to ASIOneService
+          console.log('🤖 Conversation history in context:', llmContext?.conversationHistory?.length || 0);
+          
+          // Pass systemPrompt and context (including conversationHistory) to ASIOneService
           const response = await asiOne.sendMessage(msg, { 
             systemPrompt,  // This will be used by ASIOneService
-            ...llmContext,  // This includes { noHistory: true }
+            ...llmContext,  // This includes conversationHistory
             walletAddress: selectedAccount?.address,
             network: 'Polkadot'
           });
@@ -145,6 +151,14 @@ const App: React.FC = () => {
           return response;
         }
       });
+      
+      // Update conversation history after receiving response
+      setConversationHistory(prev => [
+        ...prev,
+        { role: 'user', content: message, timestamp: Date.now() },
+        { role: 'assistant', content: result.response, timestamp: Date.now() }
+      ]);
+      console.log('📝 Updated conversation history, new length:', conversationHistory.length + 2);
       
       console.log('📊 DotBot result:', {
         executed: result.executed,
@@ -190,8 +204,8 @@ const App: React.FC = () => {
 
   const handleNewChat = () => {
     setMessages([]);
+    setConversationHistory([]); // Clear conversation history
     setShowWelcomeScreen(true);
-    asiOne.startNewConversation();
   };
 
   const handleCheckBalance = () => handleSendMessage("Please check my DOT balance");

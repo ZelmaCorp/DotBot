@@ -9,7 +9,7 @@
 // OUT OF THE BOX INTERFACE - Start here!
 // ============================================================================
 export { DotBot } from './dotbot';
-export type { DotBotConfig, ChatResult, ChatOptions } from './dotbot';
+export type { DotBotConfig, ChatResult, ChatOptions, ConversationMessage } from './dotbot';
 
 // ============================================================================
 // Advanced/Modular Exports (for custom implementations)

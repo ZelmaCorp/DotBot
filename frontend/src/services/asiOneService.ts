@@ -43,52 +43,43 @@ export interface ASIOneConfig {
   model: string;
   temperature: number;
   maxTokens: number;
-  conversationId?: string;
 }
 
 export class ASIOneService {
   private config: ASIOneConfig;
-  private conversationHistory: ASIOneMessage[] = [];
-  private conversationId: string;
 
   constructor(config?: Partial<ASIOneConfig>) {
-    this.conversationId = this.generateConversationId();
-    
     this.config = {
       apiKey: config?.apiKey || process.env.REACT_APP_ASI_ONE_API_KEY || 'sk_55aa3a95dcd341c6a2e13a4244e612f550f0520ca67342d88e0ad81812909ad5',
       baseUrl: config?.baseUrl || process.env.REACT_APP_ASI_ONE_BASE_URL || 'https://api.asi1.ai/v1',
       model: config?.model || process.env.REACT_APP_ASI_ONE_MODEL || 'asi1-mini',
       temperature: config?.temperature || 0.7,
       maxTokens: config?.maxTokens || parseInt(process.env.REACT_APP_ASI_ONE_MAX_TOKENS || '2048'),
-      conversationId: this.conversationId,
       ...config
     };
-
-    // Load conversation history from localStorage
-    this.loadConversationHistory();
     
     logger.info({
       baseUrl: this.config.baseUrl,
-      model: this.config.model,
-      conversationId: this.conversationId
+      model: this.config.model
     }, 'ASI-One service initialized');
   }
 
   /**
    * Send a message to ASI-One and get a response
+   * 
+   * This is now a STATELESS service - conversation history is managed by the caller (frontend)
    */
   async sendMessage(userMessage: string, context?: any): Promise<string> {
     try {
       logger.info({ 
         message: userMessage.substring(0, 100) + '...',
-        conversationId: this.conversationId,
-        noHistory: context?.noHistory || false
+        hasConversationHistory: !!context?.conversationHistory
       }, 'Sending message to ASI-One');
 
       // Prepare the request with current user message
       const request: ASIOneRequest = {
         model: this.config.model,
-        messages: this.buildContextualMessages(context, userMessage), // Pass current message
+        messages: this.buildContextualMessages(context, userMessage),
         temperature: this.config.temperature,
         max_tokens: this.config.maxTokens,
         stream: false
@@ -109,37 +100,14 @@ export class ASIOneService {
         firstChoice: response.choices?.[0]?.message?.content?.substring(0, 100)
       });
       
-      // Extract the assistant's response
+      // Extract and return the assistant's response
       const assistantMessage = response.choices[0]?.message?.content || 'Sorry, I could not generate a response.';
       
-      // Add user and assistant messages to conversation history (unless noHistory is set)
-      if (!context?.noHistory) {
-        const userMsg: ASIOneMessage = {
-          role: 'user',
-          content: userMessage,
-          timestamp: Date.now()
-        };
-        const assistantMsg: ASIOneMessage = {
-          role: 'assistant',
-          content: assistantMessage,
-          timestamp: Date.now()
-        };
-        this.conversationHistory.push(userMsg, assistantMsg);
-        console.log('📝 Added to conversation history:', { 
-          userMessage: userMessage.substring(0, 50), 
-          assistantPreview: assistantMessage.substring(0, 50),
-          historyLength: this.conversationHistory.length 
-        });
-
-        // Save updated conversation history
-        this.saveConversationHistory();
-      } else {
-        console.log('🚫 NOT saving to history (noHistory=true)');
-      }
+      // NOTE: We don't save history here - that's the frontend's job now
+      console.log('📝 Response ready - frontend will manage history');
 
       logger.info({
         responseLength: assistantMessage.length,
-        conversationId: this.conversationId,
         usage: response.usage
       }, 'Received response from ASI-One');
 
@@ -154,8 +122,7 @@ export class ASIOneService {
       });
       
       logger.error({ 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        conversationId: this.conversationId 
+        error: error instanceof Error ? error.message : 'Unknown error'
       }, 'Error sending message to ASI-One');
       
       // Return a fallback response
@@ -167,7 +134,10 @@ export class ASIOneService {
 
   /**
    * Build contextual messages for the API request
-   * @param context - Context object (may include noHistory flag)
+   * 
+   * This is now STATELESS - history comes from context (managed by frontend)
+   * 
+   * @param context - Context object with conversationHistory from DotBot/frontend
    * @param currentUserMessage - The current user message to include
    */
   private buildContextualMessages(context?: any, currentUserMessage?: string): ASIOneMessage[] {
@@ -177,13 +147,13 @@ export class ASIOneService {
     // Otherwise fall back to default
     const systemPrompt = context?.systemPrompt || this.getSystemPrompt(context);
     
-    // Log which prompt is being used
-    console.log('🔍 ASIOneService - Building messages with context:', {
+    // Get conversation history from context (provided by frontend)
+    const conversationHistory = context?.conversationHistory || [];
+    
+    console.log('🔍 ASIOneService - Building messages:', {
       hasSystemPrompt: !!context?.systemPrompt,
-      noHistory: context?.noHistory,
       promptLength: systemPrompt.length,
-      historyLength: this.conversationHistory.length,
-      willIncludeHistory: !context?.noHistory,
+      historyLength: conversationHistory.length,
       hasCurrentMessage: !!currentUserMessage
     });
     
@@ -191,10 +161,12 @@ export class ASIOneService {
       logger.info({ 
         promptLength: systemPrompt.length,
         preview: systemPrompt.substring(0, 200),
-        includeHistory: !context?.noHistory
+        historyLength: conversationHistory.length
       }, 'Using provided systemPrompt from DotBot');
     } else {
-      logger.info({ includeHistory: !context?.noHistory }, 'Using default systemPrompt (no systemPrompt in context)');
+      logger.info({ 
+        historyLength: conversationHistory.length
+      }, 'Using default systemPrompt');
     }
     
     // Add system message
@@ -203,18 +175,17 @@ export class ASIOneService {
       content: systemPrompt
     });
 
-    // Add conversation history ONLY if noHistory is not set
-    // This allows DotBot to request fresh JSON responses without chat context
-    if (!context?.noHistory) {
-      // Add conversation history (limit to last 10 messages to avoid token limits)
-      const recentHistory = this.conversationHistory.slice(-10);
+    // Add conversation history (from context/frontend)
+    if (conversationHistory.length > 0) {
+      // Limit to last 20 messages to avoid token limits
+      const recentHistory = conversationHistory.slice(-20);
       messages.push(...recentHistory);
-      console.log('📜 Including conversation history:', recentHistory.length, 'messages');
+      console.log('📜 Including conversation history from frontend:', recentHistory.length, 'messages');
     } else {
-      console.log('🚫 Skipping conversation history (noHistory=true)');
+      console.log('📜 No conversation history provided');
     }
 
-    // ALWAYS add the current user message (this was the bug!)
+    // ALWAYS add the current user message
     if (currentUserMessage) {
       messages.push({
         role: 'user',
@@ -226,8 +197,8 @@ export class ASIOneService {
     console.log('📤 Final message array to LLM:', {
       totalMessages: messages.length,
       systemPromptLength: messages[0]?.content.length,
-      systemPromptPreview: messages[0]?.content.substring(0, 300),
-      lastMessage: messages[messages.length - 1]
+      historyMessages: conversationHistory.length,
+      currentMessage: currentUserMessage?.substring(0, 50)
     });
 
     return messages;
@@ -323,76 +294,13 @@ Keep responses concise but informative. Use bullet points for multiple options a
   }
 
   /**
-   * Load conversation history from localStorage
+   * NOTE: History management has been removed from this service.
+   * 
+   * The frontend (App.tsx) now manages conversation history as React state.
+   * This service is now STATELESS - it just makes API calls.
+   * 
+   * History is passed via context.conversationHistory from the frontend.
    */
-  private loadConversationHistory(): void {
-    try {
-      const stored = localStorage.getItem(`dotbot_conversation_${this.conversationId}`);
-      if (stored) {
-        this.conversationHistory = JSON.parse(stored);
-        logger.info({ 
-          messageCount: this.conversationHistory.length,
-          conversationId: this.conversationId 
-        }, 'Loaded conversation history');
-      }
-    } catch (error) {
-      logger.warn({ error }, 'Failed to load conversation history');
-      this.conversationHistory = [];
-    }
-  }
-
-  /**
-   * Save conversation history to localStorage
-   */
-  private saveConversationHistory(): void {
-    try {
-      localStorage.setItem(
-        `dotbot_conversation_${this.conversationId}`, 
-        JSON.stringify(this.conversationHistory)
-      );
-    } catch (error) {
-      logger.warn({ error }, 'Failed to save conversation history');
-    }
-  }
-
-  /**
-   * Generate a unique conversation ID
-   */
-  private generateConversationId(): string {
-    return `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  /**
-   * Start a new conversation
-   */
-  startNewConversation(): void {
-    this.conversationId = this.generateConversationId();
-    this.conversationHistory = [];
-    logger.info({ conversationId: this.conversationId }, 'Started new conversation');
-  }
-
-  /**
-   * Get current conversation history
-   */
-  getConversationHistory(): ASIOneMessage[] {
-    return [...this.conversationHistory];
-  }
-
-  /**
-   * Get current conversation ID
-   */
-  getConversationId(): string {
-    return this.conversationId;
-  }
-
-  /**
-   * Clear conversation history
-   */
-  clearConversationHistory(): void {
-    this.conversationHistory = [];
-    localStorage.removeItem(`dotbot_conversation_${this.conversationId}`);
-    logger.info({ conversationId: this.conversationId }, 'Cleared conversation history');
-  }
 
   /**
    * Update configuration

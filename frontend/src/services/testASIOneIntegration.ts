@@ -27,17 +27,22 @@ export class ASIOneIntegrationTester {
     console.log('🔍 Testing ASI-One Service...');
     
     try {
-      // Test basic message sending
-      const response = await this.asiOneService.sendMessage("Hello, this is a test message");
+      // Test basic message sending with conversation history
+      const testHistory = [
+        { role: 'user' as const, content: 'Hello', timestamp: Date.now() },
+        { role: 'assistant' as const, content: 'Hi there!', timestamp: Date.now() }
+      ];
+      
+      const response = await this.asiOneService.sendMessage("This is a test message", {
+        conversationHistory: testHistory
+      });
       console.log('✅ ASI-One service response:', response.substring(0, 100) + '...');
       
-      // Test conversation ID
-      const conversationId = this.asiOneService.getConversationId();
-      console.log('✅ Conversation ID:', conversationId);
+      // Test without conversation history
+      const response2 = await this.asiOneService.sendMessage("Another test message");
+      console.log('✅ ASI-One service response (no history):', response2.substring(0, 100) + '...');
       
-      // Test conversation history
-      const history = this.asiOneService.getConversationHistory();
-      console.log('✅ Conversation history length:', history.length);
+      console.log('✅ ASI-One service is now STATELESS - history managed by frontend');
       
     } catch (error) {
       console.error('❌ ASI-One service test failed:', error);
@@ -71,23 +76,10 @@ export class ASIOneIntegrationTester {
   async testConversationManagement(): Promise<void> {
     console.log('🔍 Testing Conversation Management...');
     
-    try {
-      // Test new conversation
-      this.agentService.startNewConversation();
-      console.log('✅ Started new conversation');
-      
-      // Test conversation history
-      const history = this.agentService.getConversationHistory();
-      console.log('✅ Conversation history after new conversation:', history.length);
-      
-      // Test clearing history
-      this.agentService.clearConversationHistory();
-      const clearedHistory = this.agentService.getConversationHistory();
-      console.log('✅ Conversation history after clear:', clearedHistory.length);
-      
-    } catch (error) {
-      console.error('❌ Conversation management test failed:', error);
-    }
+    console.log('ℹ️ Conversation management is now handled by the frontend (App.tsx)');
+    console.log('ℹ️ ASIOneService is STATELESS - it receives history via context');
+    console.log('ℹ️ Frontend maintains conversationHistory in React state');
+    console.log('✅ Architecture updated - no service-level conversation management needed');
   }
 
   async testErrorHandling(): Promise<void> {
@@ -130,8 +122,7 @@ export class ASIOneIntegrationTester {
           agentId,
           message,
           context: {
-            conversationId: this.agentService.getASIOneService().getConversationId(),
-            previousMessages: [],
+            conversationHistory: [], // Now using conversationHistory instead of conversationId
             userWallet: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
             network: 'Polkadot'
           }

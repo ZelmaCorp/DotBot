@@ -133,7 +133,7 @@ export class AgentCommunicationService {
         agentId: request.agentId,
         walletAddress: request.context?.userWallet,
         network: request.context?.network || 'Polkadot',
-        conversationId: request.context?.conversationId
+        conversationHistory: request.context?.conversationHistory || []
       });
 
       // Create agent response
@@ -299,22 +299,14 @@ export class AgentCommunicationService {
     return availability;
   }
 
-  // Start a new conversation
-  startNewConversation(): void {
-    this.asiOneService.startNewConversation();
-    this.logger.info({}, 'Started new conversation');
-  }
-
-  // Get conversation history
-  getConversationHistory() {
-    return this.asiOneService.getConversationHistory();
-  }
-
-  // Clear conversation history
-  clearConversationHistory(): void {
-    this.asiOneService.clearConversationHistory();
-    this.logger.info({}, 'Cleared conversation history');
-  }
+  /**
+   * NOTE: Conversation management has been moved to the frontend (App.tsx).
+   * 
+   * ASIOneService is now stateless - conversation history is managed by the frontend
+   * and passed via context when calling sendMessage().
+   * 
+   * The frontend maintains conversationHistory in React state.
+   */
 
   // Get ASI-One service instance (for direct access if needed)
   getASIOneService(): ASIOneService {
