@@ -1,7 +1,7 @@
 import { web3Accounts, web3Enable, web3FromAddress } from '@polkadot/extension-dapp';
 import { signatureVerify, cryptoWaitReady } from '@polkadot/util-crypto';
 import { decodeAddress } from '@polkadot/keyring';
-import { WalletAccount } from '../../types/wallet';
+import { WalletAccount } from '../types/wallet';
 
 // const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
 

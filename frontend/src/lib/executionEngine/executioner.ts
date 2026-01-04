@@ -17,7 +17,7 @@ import {
   SigningRequest,
   BatchSigningRequest,
 } from './types';
-import { WalletAccount } from '../../types/wallet';
+import { WalletAccount } from '../types/wallet';
 import { Signer } from './signers/types';
 import { BrowserWalletSigner } from './signers/browserSigner';
 import { RpcManager } from '../rpcManager';

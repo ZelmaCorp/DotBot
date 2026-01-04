@@ -16,7 +16,7 @@ import { ExecutionPlan } from '../prompts/system/execution/types';
 import { ExecutionOrchestrator } from './orchestrator';
 import { Executioner } from './executioner';
 import { ExecutionOptions, SigningRequest, BatchSigningRequest } from './types';
-import { WalletAccount } from '../../types/wallet';
+import { WalletAccount } from '../types/wallet';
 import { Signer } from './signers/types';
 import type { RpcManager } from '../rpcManager';
 import { SimulationStatusCallback } from '../agents/types';

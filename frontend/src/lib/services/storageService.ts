@@ -1,7 +1,7 @@
 // Local storage service - provides persistence without backend
 
 import { ChatSession, Message } from '../../types/chat';
-import { WalletAccount } from '../../types/wallet';
+import { WalletAccount } from '../types/wallet';
 
 export class StorageService {
   private readonly STORAGE_KEYS = {
