@@ -74,7 +74,7 @@ export function createMockExtrinsic(
 /**
  * Create a mock Polkadot API instance
  */
-export function createMockApi(): Partial<ApiPromise> {
+export function createMockApi(isAssetHub: boolean = false): Partial<ApiPromise> {
   const mockTransfer = createMockExtrinsic('transfer', 'balances');
   const mockTransferKeepAlive = createMockExtrinsic('transferKeepAlive', 'balances');
   const mockBatch = createMockExtrinsic('batch', 'utility');
@@ -87,6 +87,9 @@ export function createMockApi(): Partial<ApiPromise> {
       frozen: new BN(0),
     },
   };
+
+  const chainName = isAssetHub ? 'Polkadot Asset Hub' : 'Polkadot';
+  const specName = isAssetHub ? 'statemint' : 'polkadot';
 
   return {
     tx: {
@@ -103,6 +106,32 @@ export function createMockApi(): Partial<ApiPromise> {
         account: jest.fn().mockResolvedValue(mockAccountData),
       },
     },
+    registry: {
+      chainTokens: ['DOT'],
+      chainDecimals: [10],
+      chainSS58: 0,
+    },
+    runtimeChain: {
+      toString: () => chainName,
+    },
+    consts: {
+      balances: {
+        existentialDeposit: new BN(100000000), // 0.01 DOT
+      },
+    },
+    runtimeVersion: {
+      specName: { toString: () => specName },
+      specVersion: { toNumber: () => 1000 },
+    },
+    rpc: {
+      state: {
+        getRuntimeVersion: jest.fn().mockResolvedValue({
+          specName: { toString: () => specName },
+          specVersion: { toNumber: () => 1000 },
+        }),
+      },
+    },
+    isReady: Promise.resolve(),
   } as any;
 }
 

@@ -70,11 +70,13 @@ import {
 describe('AssetTransferAgent', () => {
   let agent: AssetTransferAgent;
   let mockApi: Partial<ApiPromise>;
+  let mockAssetHubApi: Partial<ApiPromise>;
 
   beforeEach(() => {
     agent = new AssetTransferAgent();
-    mockApi = createMockApi();
-    agent.initialize(mockApi as ApiPromise);
+    mockApi = createMockApi(false); // Relay chain
+    mockAssetHubApi = createMockApi(true); // Asset Hub
+    agent.initialize(mockApi as ApiPromise, mockAssetHubApi as ApiPromise);
   });
 
   describe('transfer()', () => {
