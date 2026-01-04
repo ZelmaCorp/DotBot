@@ -214,6 +214,11 @@ export class DotBot {
    * This is the only setup you need!
    */
   static async create(config: DotBotConfig): Promise<DotBot> {
+    // Validate required configuration
+    if (!config.wallet) {
+      throw new Error('Wallet is required. Please provide a wallet account in the config.');
+    }
+    
     // Use pre-initialized RPC managers if provided, otherwise create new ones
     const relayChainManager = config.relayChainManager || createRelayChainManager();
     const assetHubManager = config.assetHubManager || createAssetHubManager();
