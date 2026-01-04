@@ -76,28 +76,85 @@ export async function simulateTransaction(
     storage = new ChopsticksDatabase(dbName);
     
     updateStatus('forking', 'Fetching current blockchain state...', 30);
-    const blockHash = await api.rpc.chain.getBlockHash();
-    const blockNumber = await api.rpc.chain.getHeader(blockHash);
     
-    const endpoints = Array.isArray(rpcEndpoints) ? rpcEndpoints : [rpcEndpoints];
-    updateStatus('forking', `Creating chain fork at block #${blockNumber.number.toNumber()}...`, 40, `Block: ${blockHash.toHex().slice(0, 12)}...`);
+    // Filter to only WebSocket endpoints (wss:// or ws://) - Chopsticks requires WebSocket
+    const allEndpoints = Array.isArray(rpcEndpoints) ? rpcEndpoints : [rpcEndpoints];
+    const endpoints = allEndpoints.filter(endpoint => 
+      typeof endpoint === 'string' && (endpoint.startsWith('wss://') || endpoint.startsWith('ws://'))
+    );
+    
+    if (endpoints.length === 0) {
+      throw new Error('No valid WebSocket endpoints provided. Chopsticks requires WebSocket (wss://) endpoints, not HTTP (https://)');
+    }
+    
+    if (endpoints.length < allEndpoints.length) {
+      console.warn(`[Chopsticks] Filtered out ${allEndpoints.length - endpoints.length} HTTP endpoint(s), using ${endpoints.length} WebSocket endpoint(s)`);
+    }
+    
+    // Try to get block hash from the provided API, but with timeout handling
+    // If that fails, we'll use the endpoints directly in setup (which will fetch it)
+    let blockHash: any = null;
+    let blockNumber: any = null;
+    
+    try {
+      // Use Promise.race to add a timeout
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('getBlockHash timeout after 30s')), 30000)
+      );
+      
+      blockHash = await Promise.race([
+        api.rpc.chain.getBlockHash(),
+        timeoutPromise
+      ]);
+      blockNumber = await Promise.race([
+        api.rpc.chain.getHeader(blockHash),
+        timeoutPromise
+      ]);
+    } catch (apiError) {
+      console.warn('[Chopsticks] Failed to get block hash from API, will fetch from endpoint:', apiError);
+      // If API call fails, setup() will fetch the block hash from the endpoint
+      blockHash = null;
+      blockNumber = null;
+    }
+    
+    if (blockHash && blockNumber) {
+      updateStatus('forking', `Creating chain fork at block #${blockNumber.number.toNumber()}...`, 40, `Block: ${blockHash.toHex().slice(0, 12)}...`);
+    } else {
+      updateStatus('forking', 'Creating chain fork (fetching latest block from endpoint)...', 40);
+    }
     
     chain = await setup({
       endpoint: endpoints,
-      block: blockHash.toHex(),
+      block: blockHash ? blockHash.toHex() : undefined, // If blockHash is null, setup will use latest
       buildBlockMode: BuildBlockMode.Batch,
       mockSignatureHost: true,
       db: storage,
     });
     
+    // If we didn't get block info from API, get it from the chain after setup
+    if (!blockHash || !blockNumber) {
+      try {
+        const chainBlockHash = await chain.head;
+        const chainBlockNumber = await chain.api.rpc.chain.getHeader(chainBlockHash);
+        blockHash = chainBlockHash;
+        blockNumber = chainBlockNumber;
+        updateStatus('forking', `Chain fork created at block #${chainBlockNumber.number.toNumber()}...`, 45, `Block: ${chainBlockHash.toHex().slice(0, 12)}...`);
+      } catch (err) {
+        console.warn('[Chopsticks] Could not get block info from chain:', err);
+      }
+    }
+    
     updateStatus('executing', 'Simulating transaction execution...', 60, 'Running on forked chain state');
+    
+    // Use the block hash we got (either from API or from chain after setup)
+    const finalBlockHash = blockHash || await chain.head;
     
     const { outcome, storageDiff } = await chain.dryRunExtrinsic(
       {
         call: extrinsic.method.toHex(),
         address: senderAddress,
       },
-      blockHash.toHex()
+      typeof finalBlockHash === 'string' ? finalBlockHash : finalBlockHash.toHex()
     );
     
     updateStatus('analyzing', 'Analyzing simulation results...', 80);
@@ -116,12 +173,18 @@ export async function simulateTransaction(
       const feeInfo = await extrinsic.paymentInfo(senderAddress);
       fee = feeInfo.partialFee.toString();
     } catch (feeError) {
-      console.warn('[Chopsticks] Fee estimation failed:', feeError);
+      // paymentInfo can fail with wasm trap if the extrinsic has issues
+      // But simulation already passed, so we can proceed without fee estimate
+      const errorMessage = feeError instanceof Error ? feeError.message : String(feeError);
+      console.warn('[Chopsticks] Fee estimation failed (simulation passed, proceeding without fee):', errorMessage);
+      // Keep fee as '0' - caller can estimate separately if needed
     }
     
     // Cleanup
     try {
-      await storage.deleteBlock(blockHash.toHex());
+      const cleanupBlockHash = blockHash || await chain.head;
+      const cleanupBlockHashHex = typeof cleanupBlockHash === 'string' ? cleanupBlockHash : cleanupBlockHash.toHex();
+      await storage.deleteBlock(cleanupBlockHashHex);
       await storage.close();
       await chain.close();
     } catch (cleanupError) {

@@ -219,7 +219,7 @@ export class DotBot {
     
     // Connect to Polkadot Relay Chain with automatic failover
     console.log('🔗 Connecting to Polkadot Relay Chain...');
-    const api = await relayChainManager.connect();
+    const api = await relayChainManager.getReadApi();
     console.log(`✅ Connected to Relay Chain via: ${relayChainManager.getCurrentEndpoint()}`);
     
     // Create signer
@@ -261,7 +261,7 @@ export class DotBot {
     console.log('🔗 Connecting to Asset Hub with automatic failover...');
     
     try {
-      this.assetHubApi = await this.assetHubManager.connect();
+      this.assetHubApi = await this.assetHubManager.getReadApi();
       console.log(`✅ Asset Hub connected via: ${this.assetHubManager.getCurrentEndpoint()}`);
     } catch (error) {
       console.error('❌ Asset Hub connection failed on all endpoints:', error);
@@ -474,20 +474,12 @@ export class DotBot {
       this.executionArrayCallbacks.forEach(cb => cb(state));
     });
     
-    // Notify initial state
-    const initialState = executionArray.getState();
-    console.log('🔔 Notifying initial ExecutionArray state:', {
-      itemCount: initialState.items.length,
-      totalItems: initialState.totalItems,
-      callbackCount: this.executionArrayCallbacks.size
-    });
-    this.executionArrayCallbacks.forEach(cb => {
-      console.log('📞 Calling callback with state');
-      cb(initialState);
-    });
+    // DON'T notify initial state - wait until simulation completes
+    // The status update callback will notify when items become 'ready' (after simulation)
+    // This prevents showing "Review Transaction" UI before simulation runs
     
     try {
-      // Execute
+      // Execute (this will run simulation first, then request approval)
       const executioner = (this.executionSystem as any).executioner;
       await executioner.execute(executionArray, options);
       

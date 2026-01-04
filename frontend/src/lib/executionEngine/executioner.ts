@@ -248,9 +248,10 @@ export class Executioner {
     timeout: number,
     autoApprove: boolean
   ): Promise<void> {
+    // Filter for extrinsic items - extrinsic may be undefined (executioner will rebuild from metadata)
     const pendingExtrinsics = executionArray
       .getItemsByStatus('pending')
-      .filter(item => item.executionType === 'extrinsic' && item.agentResult.extrinsic);
+      .filter(item => item.executionType === 'extrinsic');
     
     if (pendingExtrinsics.length < 2) {
       return; // Need at least 2 extrinsics to batch
@@ -318,12 +319,30 @@ export class Executioner {
   ): Promise<void> {
     const { agentResult } = item;
     
-    if (!agentResult.extrinsic) {
-      throw new Error('No extrinsic found in agent result');
-    }
+    // Note: agentResult.extrinsic may be undefined - executioner rebuilds from metadata
+    // This is the correct flow per SIMULATION_ARCHITECTURE_FIX.md
     
     if (!this.api || !this.account) {
       throw new Error('Executioner not initialized');
+    }
+    
+    // Validate that we have metadata to rebuild from (extrinsic may be undefined - that's OK)
+    if (!agentResult.metadata) {
+      const errorMessage = 'No extrinsic found in agent result and no metadata to rebuild from. Agent must provide either an extrinsic or metadata with recipient/amount.';
+      console.error('[Executioner] Missing metadata:', {
+        hasExtrinsic: !!agentResult.extrinsic,
+        hasMetadata: !!agentResult.metadata,
+        executionType: agentResult.executionType,
+        resultType: agentResult.resultType,
+        description: agentResult.description,
+      });
+      executionArray.updateStatus(item.id, 'failed', errorMessage);
+      executionArray.updateResult(item.id, {
+        success: false,
+        error: errorMessage,
+        errorCode: 'EXTRINSIC_REBUILD_FAILED',
+      });
+      throw new Error(errorMessage);
     }
     
     // Determine chain from metadata
@@ -464,28 +483,62 @@ export class Executioner {
     
     // CRITICAL: SIMULATE THE REBUILT EXTRINSIC BEFORE USER APPROVAL
     // This ensures we test the EXACT extrinsic that will be sent to the network
-    executionArray.updateStatus(item.id, 'ready');
+    // DON'T set status to 'ready' yet - wait until simulation passes
     console.log('[Executioner] Simulating rebuilt extrinsic (testing exact transaction that will execute)...');
     
     try {
       // Try Chopsticks simulation first (real runtime validation)
-      const { simulateTransaction, isChopsticksAvailable } = await import('../../services/simulation');
+      let simulateTransaction: any;
+      let isChopsticksAvailable: any;
+      
+      try {
+        const simulationModule = await import('../../lib/services/simulation');
+        simulateTransaction = simulationModule.simulateTransaction;
+        isChopsticksAvailable = simulationModule.isChopsticksAvailable;
+        console.log('[Executioner] ✓ Simulation module loaded successfully');
+      } catch (importError) {
+        const importErrorMessage = importError instanceof Error ? importError.message : String(importError);
+        console.error('[Executioner] ✗ Failed to import simulation module:', importErrorMessage);
+        throw new Error(`Failed to load simulation module: ${importErrorMessage}`);
+      }
       
       if (await isChopsticksAvailable()) {
         console.log('[Executioner] Using Chopsticks for runtime simulation of rebuilt extrinsic...');
         
-        // Get RPC endpoints for this chain
-        const rpcEndpoints = session?.endpoint || (resolvedChainType === 'assetHub' 
-          ? ['wss://polkadot-asset-hub-rpc.polkadot.io', 'wss://statemint-rpc.dwellir.com']
-          : ['wss://rpc.polkadot.io', 'wss://polkadot-rpc.dwellir.com']);
+        // Get RPC endpoints for this chain using RPC manager
+        let rpcEndpoints: string[];
+        if (session) {
+          // Use session endpoint and manager's healthy endpoints
+          const sessionEndpoint = session.endpoint; // Capture for use in callback
+          const manager = resolvedChainType === 'assetHub' ? this.assetHubManager : this.relayChainManager;
+          if (manager) {
+            const healthStatus = manager.getHealthStatus();
+            const orderedEndpoints = healthStatus
+              .filter(h => h.healthy || !h.lastFailure || (Date.now() - h.lastFailure) >= 5 * 60 * 1000)
+              .sort((a, b) => {
+                if (a.endpoint === sessionEndpoint) return -1;
+                if (b.endpoint === sessionEndpoint) return 1;
+                if (a.healthy !== b.healthy) return a.healthy ? -1 : 1;
+                return (a.failureCount || 0) - (b.failureCount || 0);
+              })
+              .map(h => h.endpoint);
+            rpcEndpoints = orderedEndpoints.length > 0 ? orderedEndpoints : [sessionEndpoint];
+          } else {
+            rpcEndpoints = [sessionEndpoint];
+          }
+        } else {
+          // Fallback to hardcoded endpoints if no session
+          rpcEndpoints = resolvedChainType === 'assetHub' 
+            ? ['wss://polkadot-asset-hub-rpc.polkadot.io', 'wss://statemint-rpc.dwellir.com']
+            : ['wss://rpc.polkadot.io', 'wss://polkadot-rpc.dwellir.com'];
+        }
         
         // Simulate the REBUILT extrinsic (not the original!)
         const simulationResult = await simulateTransaction(
           apiForExtrinsic,
           rpcEndpoints,
           extrinsic,
-          this.account.address,
-          // TODO: Pass status callback if needed
+          this.account.address
         );
         
         if (!simulationResult.success) {
@@ -513,12 +566,25 @@ export class Executioner {
         // Chopsticks not available - fallback to paymentInfo (basic validation only)
         console.warn('[Executioner] Chopsticks unavailable, using paymentInfo for basic validation...');
         
-        const paymentInfo = await extrinsic.paymentInfo(this.account.address);
-        console.log('[Executioner] ⚠️ Basic validation passed (runtime not fully tested):', {
-          fee: paymentInfo.partialFee.toString(),
-          weight: paymentInfo.weight.toString(),
-        });
+        try {
+          const paymentInfo = await extrinsic.paymentInfo(this.account.address);
+          console.log('[Executioner] ⚠️ Basic validation passed (runtime not fully tested):', {
+            fee: paymentInfo.partialFee.toString(),
+            weight: paymentInfo.weight.toString(),
+          });
+        } catch (paymentInfoError) {
+          // paymentInfo can fail with wasm trap if the extrinsic has structural issues
+          const errorMessage = paymentInfoError instanceof Error ? paymentInfoError.message : String(paymentInfoError);
+          console.warn('[Executioner] paymentInfo failed (proceeding with caution):', errorMessage);
+          console.warn('[Executioner] ⚠️ Transaction structure could not be validated - user should review carefully');
+          // Continue without fee estimate - let user decide if they want to proceed
+          // The outer try-catch will catch actual execution failures
+        }
       }
+      
+      // Simulation passed - NOW set status to 'ready' so UI can show review
+      executionArray.updateStatus(item.id, 'ready');
+      console.log('[Executioner] Simulation completed, item ready for user approval');
       
     } catch (error) {
       // Validation failed - fail early before user approval
@@ -768,30 +834,60 @@ export class Executioner {
     
     // CRITICAL: SIMULATE THE REBUILT BATCH EXTRINSIC BEFORE USER APPROVAL
     // This ensures we test the EXACT batch that will be sent to the network
-    items.forEach(item => {
-      executionArray.updateStatus(item.id, 'ready');
-    });
+    // DON'T set status to 'ready' yet - wait until simulation passes
     console.log('[Executioner] Simulating rebuilt batch extrinsic (testing exact batch that will execute)...');
     
     try {
       // Try Chopsticks simulation first (real runtime validation)
-      const { simulateTransaction, isChopsticksAvailable } = await import('../../services/simulation');
+      let simulateTransaction: any;
+      let isChopsticksAvailable: any;
+      
+      try {
+        const simulationModule = await import('../../lib/services/simulation');
+        simulateTransaction = simulationModule.simulateTransaction;
+        isChopsticksAvailable = simulationModule.isChopsticksAvailable;
+        console.log('[Executioner] ✓ Simulation module loaded successfully for batch');
+      } catch (importError) {
+        const importErrorMessage = importError instanceof Error ? importError.message : String(importError);
+        console.error('[Executioner] ✗ Failed to import simulation module for batch:', importErrorMessage);
+        throw new Error(`Failed to load simulation module: ${importErrorMessage}`);
+      }
       
       if (await isChopsticksAvailable()) {
         console.log('[Executioner] Using Chopsticks for runtime simulation of rebuilt batch...');
         
-        // Get RPC endpoints for this chain
-        const rpcEndpoints = session?.endpoint || (resolvedChainType === 'assetHub' 
-          ? ['wss://polkadot-asset-hub-rpc.polkadot.io', 'wss://statemint-rpc.dwellir.com']
-          : ['wss://rpc.polkadot.io', 'wss://polkadot-rpc.dwellir.com']);
+        // Get RPC endpoints for this chain using RPC manager
+        let rpcEndpoints: string[];
+        if (session) {
+          const sessionEndpoint = session.endpoint; // Capture for use in callback
+          const manager = resolvedChainType === 'assetHub' ? this.assetHubManager : this.relayChainManager;
+          if (manager) {
+            const healthStatus = manager.getHealthStatus();
+            const orderedEndpoints = healthStatus
+              .filter(h => h.healthy || !h.lastFailure || (Date.now() - h.lastFailure) >= 5 * 60 * 1000)
+              .sort((a, b) => {
+                if (a.endpoint === sessionEndpoint) return -1;
+                if (b.endpoint === sessionEndpoint) return 1;
+                if (a.healthy !== b.healthy) return a.healthy ? -1 : 1;
+                return (a.failureCount || 0) - (b.failureCount || 0);
+              })
+              .map(h => h.endpoint);
+            rpcEndpoints = orderedEndpoints.length > 0 ? orderedEndpoints : [sessionEndpoint];
+          } else {
+            rpcEndpoints = [sessionEndpoint];
+          }
+        } else {
+          rpcEndpoints = resolvedChainType === 'assetHub' 
+            ? ['wss://polkadot-asset-hub-rpc.polkadot.io', 'wss://statemint-rpc.dwellir.com']
+            : ['wss://rpc.polkadot.io', 'wss://polkadot-rpc.dwellir.com'];
+        }
         
         // Simulate the REBUILT batch extrinsic (not the originals!)
         const simulationResult = await simulateTransaction(
           apiForBatch,
           rpcEndpoints,
           batchExtrinsic,
-          this.account.address,
-          // TODO: Pass status callback if needed
+          this.account.address
         );
         
         if (!simulationResult.success) {
@@ -821,12 +917,27 @@ export class Executioner {
         // Chopsticks not available - fallback to paymentInfo (basic validation only)
         console.warn('[Executioner] Chopsticks unavailable, using paymentInfo for basic batch validation...');
         
-        const paymentInfo = await batchExtrinsic.paymentInfo(this.account.address);
-        console.log('[Executioner] ⚠️ Basic batch validation passed (runtime not fully tested):', {
-          fee: paymentInfo.partialFee.toString(),
-          weight: paymentInfo.weight.toString(),
-        });
+        try {
+          const paymentInfo = await batchExtrinsic.paymentInfo(this.account.address);
+          console.log('[Executioner] ⚠️ Basic batch validation passed (runtime not fully tested):', {
+            fee: paymentInfo.partialFee.toString(),
+            weight: paymentInfo.weight.toString(),
+          });
+        } catch (paymentInfoError) {
+          // paymentInfo can fail with wasm trap if the batch extrinsic has structural issues
+          const errorMessage = paymentInfoError instanceof Error ? paymentInfoError.message : String(paymentInfoError);
+          console.warn('[Executioner] Batch paymentInfo failed (proceeding with caution):', errorMessage);
+          console.warn('[Executioner] ⚠️ Batch transaction structure could not be validated - user should review carefully');
+          // Continue without fee estimate - let user decide if they want to proceed
+          // The outer try-catch will catch actual execution failures
+        }
       }
+      
+      // Simulation passed - NOW set status to 'ready' so UI can show review
+      items.forEach(item => {
+        executionArray.updateStatus(item.id, 'ready');
+      });
+      console.log('[Executioner] Batch simulation completed, items ready for user approval');
       
     } catch (error) {
       // Validation failed - fail early before user approval

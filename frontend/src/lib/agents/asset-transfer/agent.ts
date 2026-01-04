@@ -255,8 +255,6 @@ export class AssetTransferAgent extends BaseAgent {
   // NOTE: Agent no longer simulates - that's done by executioner after rebuild!
   // This simplifies the agent and ensures we simulate what we execute.
 
-  // ===== HELPER METHODS =====
-
   /**
    * Get RPC endpoints for a specific chain (uses RPC manager if available)
    */

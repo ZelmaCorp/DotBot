@@ -304,20 +304,46 @@ export class RpcManager {
       console.log(`🔗 Attempting connection to: ${endpoint}`);
       
       const provider = new WsProvider(endpoint);
-      const timeoutHandle = setTimeout(() => {
+      
+      // Use a shorter timeout for API initialization (20 seconds instead of default 60)
+      const apiInitTimeout = 20000;
+      let apiInitTimeoutHandle: NodeJS.Timeout | null = null;
+      
+      const connectionTimeoutHandle = setTimeout(() => {
         provider.disconnect();
+        if (apiInitTimeoutHandle) clearTimeout(apiInitTimeoutHandle);
         reject(new Error(`Connection timeout (${this.connectionTimeout}ms)`));
       }, this.connectionTimeout);
       
       provider.on('connected', async () => {
-        clearTimeout(timeoutHandle);
+        clearTimeout(connectionTimeoutHandle);
         try {
-          const api = await ApiPromise.create({ provider });
+          // Wrap ApiPromise.create with a timeout to fail faster
+          // ApiPromise.create() has a default 60s timeout, but we want to fail faster
+          const apiPromise = ApiPromise.create({ provider });
+          
+          // Race between API creation and timeout
+          const timeoutPromise = new Promise<never>((_, timeoutReject) => {
+            apiInitTimeoutHandle = setTimeout(() => {
+              provider.disconnect();
+              timeoutReject(new Error(`API initialization timeout (${apiInitTimeout}ms) - endpoint may be slow or unresponsive`));
+            }, apiInitTimeout);
+          });
+          
+          const api = await Promise.race([apiPromise, timeoutPromise]);
+          
+          // Clear timeout on success
+          if (apiInitTimeoutHandle) {
+            clearTimeout(apiInitTimeoutHandle);
+            apiInitTimeoutHandle = null;
+          }
+          
           const responseTime = Date.now() - startTime;
           console.log(`✅ Connected to ${endpoint} (${responseTime}ms)`);
           this.markEndpointHealthy(endpoint, responseTime);
           resolve(api);
         } catch (error) {
+          if (apiInitTimeoutHandle) clearTimeout(apiInitTimeoutHandle);
           provider.disconnect();
           console.error(`❌ Failed to connect to ${endpoint}:`, error instanceof Error ? error.message : String(error));
           reject(error);
@@ -325,7 +351,8 @@ export class RpcManager {
       });
       
       provider.on('error', (error) => {
-        clearTimeout(timeoutHandle);
+        clearTimeout(connectionTimeoutHandle);
+        if (apiInitTimeoutHandle) clearTimeout(apiInitTimeoutHandle);
         provider.disconnect();
         console.error(`❌ Failed to connect to ${endpoint}:`, error.message);
         reject(error);
@@ -579,16 +606,23 @@ export class RpcManager {
  */
 export const RpcEndpoints = {
   RELAY_CHAIN: [
-    'wss://rpc.polkadot.io',
-    'wss://polkadot.api.onfinality.io/public-ws',
-    'wss://polkadot-rpc.dwellir.com',
-    'wss://polkadot.public.curie.radiumblock.io/ws',
+    'wss://polkadot.api.onfinality.io/public-ws',        // OnFinality (public)
+    'wss://polkadot-rpc.dwellir.com',                    // Dwellir public WS
+    'wss://polkadot-rpc-tn.dwellir.com',                 // Dwellir (Tunisia)
+    'wss://rpc.ibp.network/polkadot',                    // IBP network
+    'wss://polkadot.dotters.network',                    // Dotters network
+    'wss://rpc-polkadot.luckyfriday.io',                 // LuckyFriday
+    'wss://dot-rpc.stakeworld.io',                       // Stakeworld
+    'wss://polkadot.public.curie.radiumblock.co/ws',     // RadiumBlock
+    'wss://rockx-dot.w3node.com/polka-public-dot/ws',    // RockX public WS
+    'wss://polkadot.rpc.subquery.network/public/ws',     // SubQuery network
   ],
   ASSET_HUB: [
-    'wss://sys.dotters.network/statemint',
-    'wss://statemint.api.onfinality.io/public-ws',
-    'wss://sys.ibp.network/statemint',
-    'wss://statemint-rpc.dwellir.com',
+    'wss://statemint.api.onfinality.io/public-ws',       // OnFinality Asset Hub public WS
+    'wss://statemint-rpc.dwellir.com',                   // Dwellir Asset Hub WS (API key ideally)
+    'wss://dot-rpc.stakeworld.io/assethub',              // Stakeworld Asset Hub
+    'wss://api-asset-hub-polkadot.n.dwellir.com/YOUR_API_KEY', // Dwellir hub (requires API key)
+    'wss://rpc.ibp.network/assethub',                    // IBP network Asset Hub
   ]
 };
 

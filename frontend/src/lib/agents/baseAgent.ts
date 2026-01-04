@@ -137,7 +137,7 @@ export abstract class BaseAgent {
       // Try to reconnect if we have the manager
       if (this.assetHubManager) {
         try {
-          this.assetHubApi = await this.assetHubManager.connect();
+          this.assetHubApi = await this.assetHubManager.getReadApi();
         } catch (error) {
           console.error('Failed to reconnect to Asset Hub for balance check:', error);
           return null;
@@ -274,7 +274,7 @@ export abstract class BaseAgent {
     // Try Chopsticks simulation first (real runtime execution)
     try {
       const { simulateTransaction, isChopsticksAvailable } = await import(
-        '../../services/simulation'
+        '../services/simulation'
       );
       
       if (await isChopsticksAvailable()) {
@@ -532,7 +532,7 @@ export abstract class BaseAgent {
         if (this.assetHubManager) {
           console.log('🔄 Asset Hub API not available, attempting to reconnect...');
           try {
-            this.assetHubApi = await this.assetHubManager.connect();
+            this.assetHubApi = await this.assetHubManager.getReadApi();
             console.log(`✅ Asset Hub reconnected via: ${this.assetHubManager.getCurrentEndpoint()}`);
             return this.assetHubApi;
           } catch (error) {

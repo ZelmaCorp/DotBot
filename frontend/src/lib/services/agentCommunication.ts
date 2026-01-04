@@ -1,6 +1,6 @@
 // Agent communication service - works independently of backend
 
-import { AgentRequest, AgentResponse, AgentInfo, AgentStatus } from '../types/agents';
+import { AgentRequest, AgentResponse, AgentInfo, AgentStatus } from '../../types/agents';
 import { getASIOneService, ASIOneService } from './asiOneService';
 import { createSubsystemLogger, Subsystem } from './logger';
 

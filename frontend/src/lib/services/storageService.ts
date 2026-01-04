@@ -1,7 +1,7 @@
 // Local storage service - provides persistence without backend
 
-import { ChatSession, Message } from '../types/chat';
-import { WalletAccount } from '../types/wallet';
+import { ChatSession, Message } from '../../types/chat';
+import { WalletAccount } from '../../types/wallet';
 
 export class StorageService {
   private readonly STORAGE_KEYS = {
@@ -226,5 +226,9 @@ export class StorageService {
   }
 }
 
-// Singleton instance
-export const storageService = new StorageService();
+// Singleton instance - all components use this same instance
+const storageService = new StorageService();
+
+// Export both default and named for flexibility
+export default storageService;
+export { storageService };
