@@ -4,6 +4,10 @@
  * Central export point for all knowledge base functionality
  */
 
+import type { Network, PolkadotKnowledge } from './types';
+import { STATIC_KNOWLEDGE_BASE, formatPolkadotKnowledgeBase } from './dotKnowledge';
+import { WESTEND_KNOWLEDGE_BASE, formatWestendKnowledgeBase } from './westendKnowledge';
+
 // Types
 export type {
   Network,
@@ -71,10 +75,6 @@ export {
 /**
  * Get knowledge base for a specific network
  */
-import type { Network, PolkadotKnowledge } from './types';
-import { STATIC_KNOWLEDGE_BASE } from './dotKnowledge';
-import { WESTEND_KNOWLEDGE_BASE } from './westendKnowledge';
-
 export function getKnowledgeBaseForNetwork(network: Network): PolkadotKnowledge {
   switch (network) {
     case 'polkadot':
@@ -91,9 +91,6 @@ export function getKnowledgeBaseForNetwork(network: Network): PolkadotKnowledge 
 /**
  * Format knowledge base for system prompt (network-aware)
  */
-import { formatPolkadotKnowledgeBase } from './dotKnowledge';
-import { formatWestendKnowledgeBase } from './westendKnowledge';
-
 export function formatKnowledgeBaseForNetwork(network: Network): string {
   switch (network) {
     case 'polkadot':
