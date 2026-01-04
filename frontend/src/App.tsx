@@ -11,7 +11,6 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import CollapsibleSidebar from './components/layout/CollapsibleSidebar';
 import MainContent from './components/layout/MainContent';
 import ExecutionFlow from './components/execution/ExecutionFlow';
-import SignatureTestPlayground from './components/wallet/SignatureTestPlayground';
 import { DotBot, ExecutionArrayState, ConversationMessage } from './lib';
 import { useWalletStore } from './stores/walletStore';
 import { ASIOneService } from './lib/services/asiOneService';
@@ -36,7 +35,6 @@ interface Message {
 }
 
 const App: React.FC = () => {
-  const [showPlayground, setShowPlayground] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
@@ -242,68 +240,10 @@ const App: React.FC = () => {
   const handleSearchChat = () => console.log('Search Chat clicked');
   const handleTransactions = () => console.log('Transactions clicked');
 
-  // Render playground if enabled
-  if (showPlayground) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => setShowPlayground(false)}
-              style={{
-                position: 'fixed',
-                top: '20px',
-                right: '20px',
-                padding: '10px 20px',
-                backgroundColor: '#f44336',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                zIndex: 9999,
-                fontSize: '14px',
-                fontWeight: 'bold'
-              }}
-            >
-              ← Back to DotBot
-            </button>
-            <SignatureTestPlayground />
-          </div>
-        </ThemeProvider>
-      </QueryClientProvider>
-    );
-  }
-
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <div className={`app-container ${isSidebarExpanded ? '' : 'sidebar-collapsed'}`}>
-          {/* Playground Toggle Button */}
-          <button
-            onClick={() => setShowPlayground(true)}
-            style={{
-              position: 'fixed',
-              bottom: '20px',
-              right: '20px',
-              padding: '12px 24px',
-              backgroundColor: '#9C27B0',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              zIndex: 9999,
-              fontSize: '14px',
-              fontWeight: 'bold',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-            title="Test signature verification"
-          >
-            🧪 Signature Playground
-          </button>
-
           <CollapsibleSidebar
             onNewChat={handleNewChat}
             onSearchChat={handleSearchChat}
@@ -330,9 +270,9 @@ const App: React.FC = () => {
             }
             simulationStatus={simulationStatus}
             executionFlow={
-              /* Execution Flow - Visual representation and approval */
-          <ExecutionFlow
-            state={executionArrayState}
+              /* Execution Flow - Shows immediately with simulation status */
+              <ExecutionFlow
+                state={executionArrayState}
                 onAcceptAndStart={async () => {
                   console.log('✅ Accepting and starting execution flow');
                   

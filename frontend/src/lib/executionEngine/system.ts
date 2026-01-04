@@ -73,7 +73,7 @@ export class ExecutionSystem {
     onSimulationStatus?: SimulationStatusCallback | null
   ): void {
     this.orchestrator.initialize(api, assetHubApi, onSimulationStatus, relayChainManager, assetHubManager);
-    this.executioner.initialize(api, account, signer, assetHubApi, relayChainManager, assetHubManager);
+    this.executioner.initialize(api, account, signer, assetHubApi, relayChainManager, assetHubManager, onSimulationStatus || undefined);
   }
   
   /**

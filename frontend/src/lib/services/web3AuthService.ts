@@ -174,47 +174,6 @@ class Web3AuthService {
     }
   }
 
-  /**
-   * TEST: Exact playground code - call web3Enable FRESH
-   */
-  async testPlaygroundCode(account: WalletAccount): Promise<void> {
-    // Call web3Enable FRESH just like the working playground!
-    const extensions = await web3Enable('DotBot');
-    console.log('🧪 PLAYGROUND TEST - Fresh extensions:', extensions.map((e: any) => e.name));
-    const extension = extensions.find((e: any) => e.name === account.source);
-    
-    if (!extension || !extension.signer || !extension.signer.signRaw) {
-      throw new Error('No signer available');
-    }
-
-    const timestamp = Date.now();
-    const message = `Test Message\nTimestamp: ${timestamp}\nAddress: ${account.address}`;
-    
-    console.log('🧪 PLAYGROUND TEST - Message:', message);
-
-    const signResult = await extension.signer.signRaw({
-      address: account.address,
-      data: message,
-      type: 'payload'
-    });
-
-    console.log('🧪 PLAYGROUND TEST - Signature:', signResult.signature);
-
-    const verificationResult = signatureVerify(message, signResult.signature, account.address);
-    
-    console.log('🧪 PLAYGROUND TEST - Result:', {
-      isValid: verificationResult.isValid,
-      crypto: verificationResult.crypto
-    });
-    
-    const expectedPublicKey = decodeAddress(account.address);
-    if (verificationResult.publicKey) {
-      const keysMatch = expectedPublicKey.length === verificationResult.publicKey.length &&
-        expectedPublicKey.every((b, i) => b === verificationResult.publicKey![i]);
-      console.log('🧪 PLAYGROUND TEST - Keys match:', keysMatch);
-      console.log('🧪 PLAYGROUND TEST - FINAL:', verificationResult.isValid && keysMatch ? '✅ SUCCESS' : '❌ FAIL');
-    }
-  }
 
   /**
    * Authenticate with a specific account
@@ -226,19 +185,11 @@ class Web3AuthService {
       this.currentAccount = account;
       
       console.log('🚀 Starting authentication process');
-      console.log('📋 Account details:', {
-        address: account.address,
-        name: account.name || 'unnamed',
-        source: account.source,
-        type: account.type || 'not specified',
-        genesisHash: account.genesisHash || 'not specified'
-      });
+      console.log('📋 Account:', account.address);
       
-      // Create message (EXACT playground format for testing)
+      // Create authentication message
       const timestamp = Date.now();
-      const message = `Test Message\nTimestamp: ${timestamp}\nAddress: ${account.address}`;
-      
-      console.log('📝 Message:', message);
+      const message = `Authenticate with DotBot\nTimestamp: ${timestamp}\nAddress: ${account.address}`;
       
       // Decode account address to get the expected public key (for comparison)
       const expectedPublicKey = decodeAddress(account.address);
@@ -251,10 +202,8 @@ class Web3AuthService {
       // Request signature from the wallet
       let signatureData: string;
       try {
-        // Call web3Enable FRESH just like the working playground
+        // Get wallet extension
         const extensions = await web3Enable('DotBot');
-        console.log('🔌 All extensions:', extensions.map((e: any) => ({ name: e.name, version: e.version })));
-        console.log('🔍 Looking for extension with name:', account.source);
         const extension = extensions.find((e: any) => e.name === account.source);
         
         if (!extension) {
@@ -266,31 +215,16 @@ class Web3AuthService {
           throw new Error('No signer available');
         }
 
-        console.log('✅ Signer found:', { name: extension.name, hasSigner: !!extension.signer, hasSignRaw: !!extension.signer?.signRaw });
-        console.log('📝 About to sign:', {
-          address: account.address,
-          messageLength: message.length,
-          message: message,
-          messageBytes: Array.from(new TextEncoder().encode(message)).slice(0, 20),
-          type: 'payload'
-        });
+        console.log('🔐 Requesting signature from wallet...');
 
-        // Sign with type: 'payload' (exactly like playground)
+        // Sign the message
         const signResult = await extension.signer.signRaw({
           address: account.address,
           data: message,
           type: 'payload'
         });
 
-        console.log('📥 Raw signResult:', {
-          type: typeof signResult,
-          keys: Object.keys(signResult),
-          signResult: signResult
-        });
-
-        // Extract signature EXACTLY like playground
         signatureData = signResult.signature;
-        console.log('✅ Extracted signature:', signatureData);
         
       } catch (signError) {
         console.error('Signing error:', signError);
@@ -312,44 +246,24 @@ class Web3AuthService {
         }
       }
 
-      // Signature already extracted above
-      console.log('🔐 Final signature to verify:', signatureData);
-
       // Verify signature - REQUIRED for security
-      // CRITICAL: Verify the EXACT SAME BYTES that were signed (raw Uint8Array)
-      // CRITICAL: Compare PUBLIC KEYS, not SS58 addresses!
       let isValid = false;
       let verificationError: Error | null = null;
       
       try {
-        // Verify signature (EXACT playground call)
-        console.log('🔍 About to verify with:', {
-          message: message,
-          messageLength: message.length,
-          signature: signatureData,
-          signatureLength: signatureData.length,
-          address: account.address
-        });
+        console.log('🔍 Verifying signature...');
         
-        // Ensure crypto library is fully initialized
+        // Ensure crypto library is fully initialized (CRITICAL!)
         await cryptoWaitReady();
-        console.log('✅ Crypto library ready');
         
+        // Verify the signature
         const verificationResult = signatureVerify(message, signatureData, account.address);
         
-        console.log('🔍 Verification result:', {
-          isValid: verificationResult.isValid,
-          crypto: verificationResult.crypto,
-          publicKeyLength: verificationResult.publicKey?.length
-        });
-        
-        // Compare public keys (not SS58 addresses)
+        // Compare public keys (not SS58 addresses - critical for multi-chain support)
         if (verificationResult.publicKey) {
           const verifiedPublicKey = verificationResult.publicKey;
           const keysMatch = expectedPublicKey.length === verifiedPublicKey.length &&
             expectedPublicKey.every((b, i) => b === verifiedPublicKey[i]);
-          
-          console.log('🔑 Keys match:', keysMatch);
           
           // Success ONLY if both signature valid AND public keys match
           isValid = verificationResult.isValid && keysMatch;
@@ -381,17 +295,10 @@ class Web3AuthService {
         throw new Error(`Authentication failed: ${errorMessage}`);
       }
       
-      console.log('✅ Signature verified successfully!', {
-        address: account.address,
-        publicKeyMatch: true,
-        signatureValid: true
-      });
+      console.log('✅ Signature verified successfully!');
 
-      // In a real implementation, you would send the signature to your backend for authentication
-      // For now, we'll create a local session token
+      // Create session token (in production, send signature to backend for verification)
       const sessionToken = `session_${account.address}_${Date.now()}`;
-      
-      console.log('✅ Authentication successful! Session created.');
 
       // Store authentication state
       this.authToken = sessionToken;
@@ -403,16 +310,8 @@ class Web3AuthService {
       };
       this.currentAccount = account;
       
-      // Store in localStorage
       localStorage.setItem('authToken', this.authToken);
       localStorage.setItem('user', JSON.stringify(this.user));
-      
-      console.log('Service: Authentication state updated:', {
-        authToken: this.authToken,
-        user: this.user,
-        currentAccount: this.currentAccount,
-        isAuthenticated: this.isAuthenticated()
-      });
       
       return {
         success: true,

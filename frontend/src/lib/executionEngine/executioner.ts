@@ -36,6 +36,7 @@ export class Executioner {
   private signer: Signer | null = null;
   private relayChainManager: RpcManager | null = null;
   private assetHubManager: RpcManager | null = null;
+  private onStatusUpdate?: (status: any) => void;
   
   // Backwards compatibility: old browser-specific handlers
   private signingRequestHandler?: (request: SigningRequest) => void;
@@ -51,6 +52,7 @@ export class Executioner {
    * @param assetHubApi Optional: Asset Hub API instance (for DOT transfers)
    * @param relayChainManager Optional: RPC manager for Relay Chain (for execution sessions)
    * @param assetHubManager Optional: RPC manager for Asset Hub (for execution sessions)
+   * @param onStatusUpdate Optional: Callback for simulation status updates
    */
   initialize(
     api: ApiPromise, 
@@ -58,7 +60,8 @@ export class Executioner {
     signer?: Signer, 
     assetHubApi?: ApiPromise | null,
     relayChainManager?: RpcManager | null,
-    assetHubManager?: RpcManager | null
+    assetHubManager?: RpcManager | null,
+    onStatusUpdate?: (status: any) => void
   ): void {
     this.api = api;
     this.assetHubApi = assetHubApi || null;
@@ -66,6 +69,7 @@ export class Executioner {
     this.signer = signer || null;
     this.relayChainManager = relayChainManager || null;
     this.assetHubManager = assetHubManager || null;
+    this.onStatusUpdate = onStatusUpdate;
     
     // If signer is BrowserWalletSigner, set up handlers
     if (signer && signer instanceof BrowserWalletSigner) {
@@ -492,7 +496,7 @@ export class Executioner {
       let isChopsticksAvailable: any;
       
       try {
-        const simulationModule = await import('../../lib/services/simulation');
+        const simulationModule = await import('../services/simulation');
         simulateTransaction = simulationModule.simulateTransaction;
         isChopsticksAvailable = simulationModule.isChopsticksAvailable;
         console.log('[Executioner] ✓ Simulation module loaded successfully');
@@ -538,7 +542,8 @@ export class Executioner {
           apiForExtrinsic,
           rpcEndpoints,
           extrinsic,
-          this.account.address
+          this.account.address,
+          this.onStatusUpdate // Pass the callback so UI shows simulation progress!
         );
         
         if (!simulationResult.success) {
@@ -843,7 +848,7 @@ export class Executioner {
       let isChopsticksAvailable: any;
       
       try {
-        const simulationModule = await import('../../lib/services/simulation');
+        const simulationModule = await import('../services/simulation');
         simulateTransaction = simulationModule.simulateTransaction;
         isChopsticksAvailable = simulationModule.isChopsticksAvailable;
         console.log('[Executioner] ✓ Simulation module loaded successfully for batch');

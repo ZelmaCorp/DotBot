@@ -75,6 +75,33 @@
   color: #ef4444;
 }
 
+/* Simulation Banner */
+.simulation-banner {
+  padding: 12px 24px;
+  background: rgba(251, 191, 36, 0.1);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #f59e0b;
+  font-size: 14px;
+  font-weight: 500;
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+.simulation-banner svg {
+  flex-shrink: 0;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    border-bottom-color: rgba(251, 191, 36, 0.3);
+  }
+  50% {
+    border-bottom-color: rgba(251, 191, 36, 0.6);
+  }
+}
+
 /* Intro Message */
 .execution-flow-intro {
   padding: 16px 24px;
@@ -437,9 +464,16 @@
   box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
 }
 
-.execution-accept-btn:hover {
+.execution-accept-btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+}
+
+.execution-accept-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.5) 0%, rgba(139, 92, 246, 0.5) 100%);
+  box-shadow: none;
 }
 
 .execution-flow-approval-actions .execution-cancel-btn {

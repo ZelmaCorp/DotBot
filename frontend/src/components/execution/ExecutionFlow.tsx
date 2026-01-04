@@ -29,6 +29,10 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
     return null;
   }
 
+  // Check if any items are being simulated (pending status)
+  const isSimulating = state.items.some(item => item.status === 'pending');
+  const simulatingCount = state.items.filter(item => item.status === 'pending').length;
+  
   // Check if flow is waiting for user approval (all items are pending/ready)
   const isWaitingForApproval = state.items.every(item => 
     item.status === 'pending' || item.status === 'ready'
@@ -70,6 +74,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
       case 'ready':
         return <Clock className="status-icon status-ready" />;
       case 'pending':
+        return <Loader2 className="status-icon status-pending animate-spin" />;
       default:
         return <Clock className="status-icon status-pending" />;
     }
@@ -77,7 +82,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
 
   const getStatusLabel = (status: ExecutionItem['status']) => {
     switch (status) {
-      case 'pending': return 'Pending';
+      case 'pending': return 'Simulating...';
       case 'ready': return 'Ready';
       case 'executing': return 'Executing';
       case 'signing': return 'Signing...';
@@ -144,8 +149,18 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
         )}
       </div>
 
+      {/* Simulation in Progress Banner */}
+      {isSimulating && (
+        <div className="simulation-banner">
+          <Loader2 className="animate-spin" size={16} />
+          <span>
+            Simulating {simulatingCount} transaction{simulatingCount !== 1 ? 's' : ''} to verify {simulatingCount !== 1 ? 'they' : 'it'} will succeed...
+          </span>
+        </div>
+      )}
+
       {/* Approval message */}
-      {isWaitingForApproval && (
+      {isWaitingForApproval && !isSimulating && (
         <div className="execution-flow-intro">
           <p>Review the steps below. Once you accept, your wallet will ask you to sign each transaction.</p>
         </div>
@@ -305,9 +320,11 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
               <button
                 onClick={onAcceptAndStart}
                 className="execution-accept-btn"
+                disabled={isSimulating}
+                title={isSimulating ? 'Waiting for simulation to complete...' : 'Accept and start execution'}
               >
                 <Play size={16} />
-                Accept and Start
+                {isSimulating ? 'Simulating...' : 'Accept and Start'}
               </button>
             )}
           </div>
