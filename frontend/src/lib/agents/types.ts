@@ -3,6 +3,7 @@
  */
 
 import { SubmittableExtrinsic } from '@polkadot/api/types';
+import type { Network } from '../prompts/system/knowledge/types';
 
 /**
  * Result from an agent function call
@@ -59,8 +60,6 @@ export type SimulationStatusCallback = (status: {
     wouldSucceed?: boolean;
   };
 }) => void;
-
-import type { Network } from '../prompts/system/knowledge/types';
 
 /**
  * Base parameters that all agent functions might need
