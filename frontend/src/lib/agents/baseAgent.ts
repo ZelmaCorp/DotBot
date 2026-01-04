@@ -138,8 +138,7 @@ export abstract class BaseAgent {
       if (this.assetHubManager) {
         try {
           this.assetHubApi = await this.assetHubManager.getReadApi();
-        } catch (error) {
-          console.error('Failed to reconnect to Asset Hub for balance check:', error);
+        } catch {
           return null;
         }
       } else {
@@ -241,17 +240,8 @@ export abstract class BaseAgent {
   }
 
   /**
-   * Dry-run an extrinsic to validate it before returning to user
-   * This catches runtime errors BEFORE the user sees the transaction
-   * 
-   * Uses Chopsticks for real runtime simulation (fork-based execution)
-   * Falls back to paymentInfo if Chopsticks is unavailable (with warning)
-   * 
-   * @param api The API instance that created the extrinsic (MUST match!)
-   * @param extrinsic The extrinsic to validate
-   * @param address The sender address
-   * @param rpcEndpoint Optional RPC endpoint for Chopsticks (defaults to api endpoint)
-   * @returns DryRunResult with success status and fee estimation
+   * Dry-run an extrinsic to validate it before returning to user.
+   * Uses Chopsticks for runtime simulation, falls back to paymentInfo.
    */
   protected async dryRunExtrinsic(
     api: ApiPromise,
@@ -259,12 +249,10 @@ export abstract class BaseAgent {
     address: string,
     rpcEndpoint?: string | string[]
   ): Promise<DryRunResult> {
-    // CRITICAL: Ensure API is ready before any operations
     if (!api.isReady) {
       await api.isReady;
     }
-    
-    // Validate extrinsic is properly formed
+
     if (!extrinsic || !extrinsic.method || !extrinsic.method.section || !extrinsic.method.method) {
       throw new Error('Invalid extrinsic: missing method information');
     }
@@ -283,8 +271,7 @@ export abstract class BaseAgent {
         const endpoints = rpcEndpoint 
           ? (Array.isArray(rpcEndpoint) ? rpcEndpoint : [rpcEndpoint])
           : this.getRpcEndpointsForChain(chain);
-        console.log('[Simulation] Using Chopsticks for runtime validation with endpoints:', endpoints);
-        
+
         // Pass status callback to simulation for user feedback
         const result = await simulateTransaction(api, endpoints, extrinsic, address, this.onStatusUpdate || undefined);
         
@@ -329,48 +316,28 @@ export abstract class BaseAgent {
           });
         }
 
-        if (result.success) {
-          console.log('[Simulation] ✓ Chopsticks validation passed');
-          return dryRunResult;
-        } else {
-          console.log('[Simulation] ✗ Chopsticks validation failed:', result.error);
-          return dryRunResult;
-        }
-      } else {
-        console.log('[Simulation] Chopsticks not available, falling back to paymentInfo');
+        return dryRunResult;
       }
     } catch (error) {
       chopsticksError = error;
-      console.warn('[Simulation] Chopsticks error (falling back to paymentInfo):', 
-        error instanceof Error ? error.message : String(error));
     }
     
-    // Fallback: Use paymentInfo (structure validation only)
-    // WARNING: This does NOT validate runtime execution!
-    // CRITICAL: Ensure API is ready and extrinsic is valid before calling paymentInfo
     try {
-      // Ensure API is ready
       if (!api.isReady) {
         await api.isReady;
       }
-      
-      // Validate extrinsic before calling paymentInfo
-      // This helps catch invalid extrinsic shapes before they cause runtime panics
+
       if (!extrinsic.method || !extrinsic.method.section || !extrinsic.method.method) {
         throw new Error('Invalid extrinsic structure: missing method information');
       }
-      
-      // Ensure address is valid SS58 format
+
       if (!address || address.trim().length === 0) {
         throw new Error('Invalid address for paymentInfo');
       }
-      
-      // Call paymentInfo with error handling for runtime panics
+
       const paymentInfo = await extrinsic.paymentInfo(address);
       const estimatedFee = paymentInfo.partialFee.toString();
-      
-      console.warn('[Simulation] ⚠ Using paymentInfo only - runtime execution NOT validated!');
-      
+
       const paymentInfoResult: DryRunResult = {
         success: true,
         estimatedFee,
@@ -404,8 +371,6 @@ export abstract class BaseAgent {
 
       return paymentInfoResult;
     } catch (error) {
-      console.error('[Simulation] ✗ paymentInfo also failed:', error);
-      
       const errorMessage = error instanceof Error ? error.message : String(error);
       
       return {
@@ -519,16 +484,8 @@ export abstract class BaseAgent {
   }
 
   /**
-   * Get API instance for a specific chain
-   * 
-   * CRITICAL: This method MUST validate the returned API is actually connected
-   * to the expected chain type. Never trust the API without verification!
-   * 
-   * According to GLOBAL RULE #1: CHAIN TRUTH IS DYNAMIC — NEVER TRUST INITIAL API
-   * 
-   * @param chain The target chain ('assetHub' or 'relay')
-   * @returns The corresponding API instance
-   * @throws AgentError if the requested API is not available or wrong chain
+   * Get API instance for a specific chain.
+   * Validates the API is connected to the expected chain type.
    */
   protected async getApiForChain(chain: 'assetHub' | 'relay'): Promise<ApiPromise> {
     let api: ApiPromise;
@@ -537,12 +494,9 @@ export abstract class BaseAgent {
       if (!this.assetHubApi) {
         // Try to reconnect if we have the manager
         if (this.assetHubManager) {
-          console.log('🔄 Asset Hub API not available, attempting to reconnect...');
           try {
             this.assetHubApi = await this.assetHubManager.getReadApi();
-            console.log(`✅ Asset Hub reconnected via: ${this.assetHubManager.getCurrentEndpoint()}`);
           } catch (error) {
-            console.error('❌ Asset Hub reconnection failed:', error);
             throw new AgentError(
               `Asset Hub API not available. Failed to connect to any Asset Hub endpoint: ${error instanceof Error ? error.message : 'Unknown error'}`,
               'ASSET_HUB_NOT_AVAILABLE'
@@ -560,30 +514,25 @@ export abstract class BaseAgent {
       // Relay chain
       api = this.getApi();
     }
-    
-    // CRITICAL: Validate API is ready
+
     if (!api || !api.isReady) {
       await api.isReady;
     }
-    
-    // CRITICAL: Validate API is actually connected to the expected chain type
-    // This prevents using wrong API for extrinsic construction (causes wasm unreachable)
+
     const runtimeChain = api.runtimeChain?.toString() || 'Unknown';
     const specName = api.runtimeVersion?.specName?.toString() || 'unknown';
-    
-    // Detect actual chain type
-    const isAssetHub = 
+
+    const isAssetHub =
       runtimeChain.toLowerCase().includes('asset') ||
       runtimeChain.toLowerCase().includes('statemint') ||
       specName.toLowerCase().includes('asset') ||
       specName.toLowerCase().includes('statemint');
-    
-    const isRelayChain = 
-      runtimeChain.toLowerCase().includes('polkadot') && 
+
+    const isRelayChain =
+      runtimeChain.toLowerCase().includes('polkadot') &&
       !isAssetHub &&
       specName.toLowerCase().includes('polkadot');
-    
-    // Validate chain type matches expectation
+
     if (chain === 'assetHub' && !isAssetHub) {
       throw new AgentError(
         `API chain mismatch: Requested Asset Hub but API is connected to "${runtimeChain}" (${specName}). ` +
@@ -599,22 +548,6 @@ export abstract class BaseAgent {
         }
       );
     }
-    
-    if (chain === 'relay' && !isRelayChain && !isAssetHub) {
-      // Warn but don't fail for relay chain - might be test network
-      console.warn(
-        `[BaseAgent] WARNING: Requested Relay Chain but API is connected to "${runtimeChain}" (${specName}). ` +
-        `This may not be a Polkadot Relay Chain.`
-      );
-    }
-    
-    console.log(`[BaseAgent] ✓ API validated for ${chain}:`, {
-      runtimeChain,
-      specName,
-      specVersion: api.runtimeVersion?.specVersion?.toNumber() || 0,
-      isAssetHub,
-      isRelayChain,
-    });
     
     return api;
   }
