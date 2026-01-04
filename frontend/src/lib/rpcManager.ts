@@ -46,7 +46,22 @@ export class ExecutionSession {
     this.api = api;
     this.endpoint = endpoint;
     this.registry = api.registry;
-    // Freeze public properties but keep _isActive mutable
+    
+    // Make readonly properties non-writable at runtime
+    Object.defineProperty(this, 'endpoint', {
+      writable: false,
+      configurable: false,
+    });
+    Object.defineProperty(this, 'api', {
+      writable: false,
+      configurable: false,
+    });
+    Object.defineProperty(this, 'registry', {
+      writable: false,
+      configurable: false,
+    });
+    
+    // Freeze nested objects
     Object.freeze(this.api);
     Object.freeze(this.registry);
     // Note: We don't freeze 'this' because _isActive needs to be mutable
