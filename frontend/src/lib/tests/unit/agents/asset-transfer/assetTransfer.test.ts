@@ -254,8 +254,8 @@ describe('AssetTransferAgent', () => {
       });
 
       it('should handle API query errors gracefully', async () => {
-        // Mock API query to throw error
-        const mockAccountQuery = mockApi.query?.system?.account as jest.MockedFunction<any>;
+        // Mock API query to throw error on Asset Hub API (used for transfers)
+        const mockAccountQuery = mockAssetHubApi.query?.system?.account as jest.MockedFunction<any>;
         mockAccountQuery.mockRejectedValue(new Error('RPC connection failed'));
 
         const error = await agent.transfer({
@@ -404,9 +404,9 @@ describe('AssetTransferAgent', () => {
       });
 
       it('should handle batch extrinsic creation failure', async () => {
-        // Mock batch creation to throw error
-        const mockBatch = mockApi.tx?.utility?.batch as jest.MockedFunction<any>;
-        mockBatch.mockImplementation(() => {
+        // Mock batchAll creation to throw error on Asset Hub API (used for transfers)
+        const mockBatchAll = mockAssetHubApi.tx?.utility?.batchAll as jest.MockedFunction<any>;
+        mockBatchAll.mockImplementation(() => {
           throw new Error('Batch creation failed');
         });
 

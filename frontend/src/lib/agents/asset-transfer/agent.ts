@@ -149,6 +149,8 @@ export class AssetTransferAgent extends BaseAgent {
             decimals: context.capabilities.nativeDecimals,
             symbol: context.capabilities.nativeTokenSymbol,
             enableSimulation: true,
+            transfers: validatedTransfers,
+            totalAmount: totalAmount.toString(),
           },
           resultType: 'extrinsic',
           requiresConfirmation: true,
@@ -330,6 +332,7 @@ export class AssetTransferAgent extends BaseAgent {
       senderAddress: string;
       warnings: string[];
       estimatedFeeBN: BN;
+      keepAlive?: boolean;
     }
   ): AgentResult {
     const allWarnings = [...context.warnings, ...extrinsicResult.warnings];
@@ -347,6 +350,11 @@ export class AssetTransferAgent extends BaseAgent {
           decimals: context.capabilities.nativeDecimals,
           symbol: context.capabilities.nativeTokenSymbol,
           enableSimulation: true,
+          amount: extrinsicResult.amountBN.toString(),
+          sender: context.senderAddress,
+          recipient: extrinsicResult.recipientEncoded,
+          keepAlive: context.keepAlive ?? false,
+          formattedAmount: formatAmount(extrinsicResult.amountBN, context.capabilities.nativeDecimals),
         },
         resultType: 'extrinsic',
         requiresConfirmation: true,
