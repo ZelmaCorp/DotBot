@@ -16,7 +16,7 @@ export interface WalletContext {
   }>;
 }
 
-import type { Network } from '../knowledge/types';
+import type { Network, PolkadotKnowledge } from '../knowledge/types';
 
 export interface NetworkContext {
   /** Current network */
@@ -55,5 +55,6 @@ export interface SystemContext {
   network: NetworkContext;
   balance?: BalanceContext;
   metadata?: Record<string, any>;
+  knowledgeBase?: PolkadotKnowledge;
 }
 

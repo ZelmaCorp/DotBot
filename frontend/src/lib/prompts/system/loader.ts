@@ -11,6 +11,7 @@ import { EXECUTION_ARRAY_INSTRUCTIONS } from './execution/instructions';
 import { SystemContext } from './context/types';
 import { createVersionedPrompt } from './version';
 import { formatPolkadotKnowledgeBase } from './knowledge/dotKnowledge';
+import { formatKnowledgeBaseForNetwork } from './knowledge';
 
 /**
  * Format agent definitions for inclusion in system prompt
@@ -291,8 +292,12 @@ Generate ONLY a JSON ExecutionPlan (no surrounding text) when the user gives:
   // Add context information
   prompt += formatContext(context);
   
-  // Add Polkadot Knowledge Base
-  prompt += formatPolkadotKnowledgeBase();
+  // Add Knowledge Base (network-specific)
+  if (context?.network?.network) {
+    prompt += formatKnowledgeBaseForNetwork(context.network.network);
+  } else {
+    prompt += formatPolkadotKnowledgeBase();
+  }
   
   // Add agent definitions
   prompt += formatAgentDefinitions();
