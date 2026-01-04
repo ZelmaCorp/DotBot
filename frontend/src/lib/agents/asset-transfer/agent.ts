@@ -111,7 +111,7 @@ export class AssetTransferAgent extends BaseAgent {
 
       await validateSenderAddressForSigning(params.address);
       const senderAddress = params.address;
-
+      
       const estimatedFeeBN = new BN('500000000');
       const balanceResult = await validateBalance(
         context.targetApi,
@@ -121,12 +121,12 @@ export class AssetTransferAgent extends BaseAgent {
         context.capabilities,
         params.validateBalance !== false
       );
-
+      
       const transfersWithBN = validatedTransfers.map(t => ({
         recipient: t.recipient,
         amount: new BN(t.amount),
       }));
-
+      
       const result = buildSafeBatchExtrinsic(
         context.targetApi,
         transfersWithBN,

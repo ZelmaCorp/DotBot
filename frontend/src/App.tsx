@@ -112,8 +112,6 @@ const App: React.FC = () => {
     try {
       const dotbotInstance = await DotBot.create({
         wallet: selectedAccount!,
-        endpoint: 'wss://rpc.polkadot.io',
-        // Pass pre-initialized managers (already connecting in background!)
         relayChainManager,
         assetHubManager,
         onSigningRequest: (request) => setSigningRequest(request),

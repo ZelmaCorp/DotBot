@@ -80,7 +80,6 @@ class Web3AuthService {
       const accounts = await web3Accounts();
 
       return accounts.map(account => ({
-      return accounts.map(account => ({
         address: account.address,
         name: account.meta?.name || 'Unnamed Account',
         source: account.meta?.source || 'unknown',

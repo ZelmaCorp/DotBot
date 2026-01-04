@@ -33,9 +33,6 @@ export interface DotBotConfig {
   /** Wallet account */
   wallet: WalletAccount;
   
-  /** Polkadot endpoint (default: wss://rpc.polkadot.io) */
-  endpoint?: string;
-  
   /** LLM API endpoint (for custom LLM) */
   llmEndpoint?: string;
   
@@ -557,7 +554,7 @@ export class DotBot {
       const balance = await this.getBalance();
       const chainInfo = await this.getChainInfo();
       
-      return buildSystemPrompt({
+      const systemPrompt = buildSystemPrompt({
         wallet: {
           isConnected: true,
           address: this.wallet.address,
@@ -565,7 +562,7 @@ export class DotBot {
         },
         network: {
           network: chainInfo.chain.toLowerCase().includes('kusama') ? 'kusama' : 'polkadot',
-          rpcEndpoint: this.config.endpoint || 'wss://rpc.polkadot.io'
+          rpcEndpoint: this.relayChainManager.getCurrentEndpoint() || 'wss://rpc.polkadot.io'
         },
         balance: {
           relayChain: {
@@ -582,6 +579,8 @@ export class DotBot {
           symbol: 'DOT'
         }
       });
+      
+      return systemPrompt;
     } catch (error) {
       // Fallback to basic prompt if context fetch fails
       return buildSystemPrompt();
