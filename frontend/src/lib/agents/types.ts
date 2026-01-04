@@ -60,6 +60,8 @@ export type SimulationStatusCallback = (status: {
   };
 }) => void;
 
+import type { Network } from '../prompts/system/knowledge/types';
+
 /**
  * Base parameters that all agent functions might need
  */
@@ -68,7 +70,7 @@ export interface BaseAgentParams {
   address: string;
   
   /** Network/chain identifier */
-  network?: 'polkadot' | 'kusama' | string;
+  network?: Network;
   
   /** Optional callback for simulation status updates */
   onSimulationStatus?: SimulationStatusCallback;

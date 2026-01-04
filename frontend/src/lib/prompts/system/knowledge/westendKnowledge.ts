@@ -106,6 +106,7 @@ import type {
         pairs: ['WND/HDX', 'USDT/HDX', 'WND/USDT'],
         type: 'AMM',
         pools: ['Omnipool'],
+        notes: 'Single-sided liquidity pool model. All swaps route through HDX. Test environment for Omnipool features.',
       },
     ],
   
