@@ -121,7 +121,7 @@ export class DataManager {
     
     // Get any other DotBot-related keys
     const other: Record<string, any> = {};
-    const knownKeys = new Set(Object.values(STORAGE_KEYS));
+    const knownKeys = new Set<string>(Object.values(STORAGE_KEYS));
     
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -342,7 +342,7 @@ export class DataManager {
     }
 
     const otherKeys: string[] = [];
-    const knownKeys = new Set(Object.values(STORAGE_KEYS));
+    const knownKeys = new Set<string>(Object.values(STORAGE_KEYS));
     
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
