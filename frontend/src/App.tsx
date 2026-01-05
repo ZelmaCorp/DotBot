@@ -11,11 +11,10 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import CollapsibleSidebar from './components/layout/CollapsibleSidebar';
 import MainContent from './components/layout/MainContent';
 import ExecutionFlow from './components/execution/ExecutionFlow';
-import { DotBot, ExecutionArrayState, ConversationMessage } from './lib';
+import { DotBot, ExecutionArrayState } from './lib';
 import { useWalletStore } from './stores/walletStore';
 import { ASIOneService } from './lib/services/asiOneService';
 import { SigningRequest, BatchSigningRequest } from './lib';
-import { createRpcManagersForNetwork, RpcManager } from './lib/rpcManager';
 import './styles/globals.css';
 import './styles/execution-flow.css';
 
@@ -36,8 +35,8 @@ interface Message {
 }
 
 const App: React.FC = () => {
+  // UI State
   const [messages, setMessages] = useState<Message[]>([]);
-  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(true);
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
@@ -61,26 +60,12 @@ const App: React.FC = () => {
     };
   } | null>(null);
   
-  // DotBot integration
+  // DotBot integration (SIMPLE!)
   const [dotbot, setDotbot] = useState<DotBot | null>(null);
   const [asiOne] = useState(() => new ASIOneService());
   const [isInitializing, setIsInitializing] = useState(false);
   
-  // Create RPC managers (Polkadot network)
-  const [rpcManagers] = useState<{ relayChainManager: RpcManager; assetHubManager: RpcManager }>(() => 
-    createRpcManagersForNetwork('polkadot')
-  );
-  
   const { isConnected, selectedAccount } = useWalletStore();
-
-  useEffect(() => {
-    Promise.all([
-      rpcManagers.relayChainManager.getReadApi(),
-      rpcManagers.assetHubManager.getReadApi()
-    ]).catch(() => {
-      // Ignore pre-connection errors - will retry when needed
-    });
-  }, [rpcManagers]);
 
   // Initialize DotBot when wallet connects
   useEffect(() => {
@@ -89,6 +74,16 @@ const App: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, selectedAccount]);
+
+  // Sync UI messages from DotBot's chat history
+  useEffect(() => {
+    if (dotbot?.currentChat) {
+      // Use ChatInstance's built-in method to get display-friendly messages
+      const uiMessages = dotbot.currentChat.getDisplayMessages();
+      setMessages(uiMessages);
+      setShowWelcomeScreen(dotbot.currentChat.isEmpty);
+    }
+  }, [dotbot, dotbot?.currentChat]);
 
   useEffect(() => {
     if (!dotbot) return;
@@ -115,9 +110,7 @@ const App: React.FC = () => {
     try {
       const dotbotInstance = await DotBot.create({
         wallet: selectedAccount!,
-        network: 'polkadot',
-        relayChainManager: rpcManagers.relayChainManager,
-        assetHubManager: rpcManagers.assetHubManager,
+        // Uses 'mainnet' by default
         onSigningRequest: (request) => setSigningRequest(request),
         onBatchSigningRequest: (request) => setSigningRequest(request),
         onSimulationStatus: (status) => {
@@ -130,21 +123,13 @@ const App: React.FC = () => {
       });
       
       setDotbot(dotbotInstance);
-      
-      const botMessage: Message = {
-        id: Date.now().toString(),
-        type: 'bot',
-        content: `Hello! I'm DotBot. Your wallet is connected (${selectedAccount!.address.slice(0, 8)}...). I can help you with Polkadot operations!`,
-        timestamp: Date.now()
-      };
-      setMessages(prev => [...prev, botMessage]);
     } catch (error) {
       console.error('Failed to initialize DotBot:', error);
       
       const errorMessage: Message = {
         id: Date.now().toString(),
         type: 'bot',
-        content: 'Failed to connect to Polkadot network. Please check your connection and try again.',
+        content: 'Failed to connect to the network. Please check your connection and try again.',
         timestamp: Date.now()
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -154,7 +139,7 @@ const App: React.FC = () => {
   };
 
   /**
-   * Send message - Simple!
+   * Send message - SIMPLE!
    */
   const handleSendMessage = async (message: string) => {
     if (showWelcomeScreen) {
@@ -176,23 +161,16 @@ const App: React.FC = () => {
       }
 
       const result = await dotbot.chat(message, {
-        conversationHistory,
         llm: async (msg, systemPrompt, llmContext) => {
           const response = await asiOne.sendMessage(msg, {
             systemPrompt,
             ...llmContext,
             walletAddress: selectedAccount?.address,
-            network: 'Polkadot'
+            network: dotbot.getNetwork().charAt(0).toUpperCase() + dotbot.getNetwork().slice(1)
           });
           return response;
         }
       });
-
-      setConversationHistory(prev => [
-        ...prev,
-        { role: 'user', content: message, timestamp: Date.now() },
-        { role: 'assistant', content: result.response, timestamp: Date.now() }
-      ]);
 
       const botMessage: Message = {
         id: Date.now().toString(),
@@ -228,10 +206,17 @@ const App: React.FC = () => {
     }
   };
 
-  const handleNewChat = () => {
-    setMessages([]);
-    setConversationHistory([]); // Clear conversation history
-    setShowWelcomeScreen(true);
+  const handleNewChat = async () => {
+    if (!dotbot) return;
+
+    try {
+      await dotbot.clearHistory();
+      setMessages([]);
+      setShowWelcomeScreen(true);
+      setExecutionArrayState(null);
+    } catch (error) {
+      console.error('Failed to create new chat:', error);
+    }
   };
 
   const handleCheckBalance = () => handleSendMessage("Please check my DOT balance");
@@ -282,21 +267,21 @@ const App: React.FC = () => {
                     setAutoApprovePending(true);
                   }
 
-                  if (dotbot && executionArrayState) {
-                    const executionArray = (dotbot as any).currentExecutionArray;
-                    if (executionArray && !executionArrayState.isExecuting) {
+                  if (dotbot?.currentChat) {
+                    // Access execution through chat instance (clean API!)
+                    if (dotbot.currentChat.currentExecution && !dotbot.currentChat.isPlanExecuting) {
                       try {
                         const executionSystem = (dotbot as any).executionSystem;
                         const executioner = (executionSystem as any).executioner;
                         if (executioner) {
-                          executioner.execute(executionArray, { autoApprove: false }).catch(() => {
+                          executioner.execute(dotbot.currentChat.currentExecution, { autoApprove: false }).catch(() => {
                             setAutoApprovePending(false);
                           });
                         }
                       } catch {
                         setAutoApprovePending(false);
                       }
-                    } else if (!executionArrayState.isExecuting) {
+                    } else if (!dotbot.currentChat.isPlanExecuting) {
                       setAutoApprovePending(false);
                     }
                   }

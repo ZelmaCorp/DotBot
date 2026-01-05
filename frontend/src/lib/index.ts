@@ -156,11 +156,11 @@ export type {
 // ============================================================================
 // Chat Instance System (Environment-bound conversations)
 // ============================================================================
+export { ChatInstance } from './chatInstance';
 export { ChatInstanceManager } from './chatInstanceManager';
 export type { ChatInstanceManagerConfig } from './chatInstanceManager';
 export type {
   Environment,
-  ChatInstance,
   ChatMessage,
   ChatMessageType,
   TextMessage,

@@ -29,6 +29,9 @@ import { processSystemQueries, areSystemQueriesEnabled } from './prompts/system/
 import { createRelayChainManager, createAssetHubManager, RpcManager, createRpcManagersForNetwork, Network } from './rpcManager';
 import { SimulationStatusCallback } from './agents/types';
 import { detectNetworkFromChainName } from './prompts/system/knowledge';
+import { ChatInstanceManager } from './chatInstanceManager';
+import { ChatInstance } from './chatInstance';
+import type { Environment, ChatMessage } from './types/chatInstance';
 
 export interface DotBotConfig {
   /** Wallet account */
@@ -36,6 +39,9 @@ export interface DotBotConfig {
   
   /** Network to connect to (defaults to 'polkadot') */
   network?: Network;
+  
+  /** Environment (defaults to 'mainnet') */
+  environment?: Environment;
   
   /** LLM API endpoint (for custom LLM) */
   llmEndpoint?: string;
@@ -58,6 +64,12 @@ export interface DotBotConfig {
   /** Pre-initialized RPC managers (optional - for faster connection) */
   relayChainManager?: RpcManager;
   assetHubManager?: RpcManager;
+  
+  /** Custom chat instance manager (optional - for advanced usage) */
+  chatManager?: ChatInstanceManager;
+  
+  /** Disable automatic chat persistence (defaults to false) */
+  disableChatPersistence?: boolean;
 }
 
 export interface ChatResult {
@@ -133,60 +145,57 @@ export class DotBot {
   private wallet: WalletAccount;
   private config: DotBotConfig;
   private network: Network;
-  private currentExecutionArray: ExecutionArray | null = null;
-  private executionArrayCallbacks: Set<(state: ExecutionArrayState) => void> = new Set();
+  private environment: Environment;
+  
   private relayChainManager: RpcManager;
   private assetHubManager: RpcManager;
+  
+  // Chat instance management (built-in) - execution lives here!
+  private chatManager: ChatInstanceManager;
+  public currentChat: ChatInstance | null = null;
+  private chatPersistenceEnabled: boolean;
   
   private constructor(
     api: ApiPromise, 
     executionSystem: ExecutionSystem, 
     config: DotBotConfig,
     network: Network,
+    environment: Environment,
     relayChainManager: RpcManager,
-    assetHubManager: RpcManager
+    assetHubManager: RpcManager,
+    chatManager: ChatInstanceManager
   ) {
     this.api = api;
     this.executionSystem = executionSystem;
     this.wallet = config.wallet;
     this.config = config;
     this.network = network;
+    this.environment = environment;
     this.relayChainManager = relayChainManager;
     this.assetHubManager = assetHubManager;
+    this.chatManager = chatManager;
+    this.chatPersistenceEnabled = !config.disableChatPersistence;
   }
   
   /**
    * Subscribe to execution array state changes
+   * 
+   * Delegates to currentChat for actual management
    */
   onExecutionArrayUpdate(callback: (state: ExecutionArrayState) => void): () => void {
-    this.executionArrayCallbacks.add(callback);
-    
-    // If there's a current execution array, subscribe to it
-    if (this.currentExecutionArray) {
-      const unsubscribe = this.currentExecutionArray.onStatusUpdate(() => {
-        const state = this.currentExecutionArray!.getState();
-        this.executionArrayCallbacks.forEach(cb => cb(state));
-      });
-      
-      // Also call immediately with current state
-      callback(this.currentExecutionArray.getState());
-      
-      return () => {
-        this.executionArrayCallbacks.delete(callback);
-        unsubscribe();
-      };
+    if (this.currentChat) {
+      return this.currentChat.onExecutionUpdate(callback);
     }
     
-    return () => {
-      this.executionArrayCallbacks.delete(callback);
-    };
+    // No chat - return no-op unsubscribe
+    return () => {};
   }
   
   /**
    * Get current execution array state
    */
   getExecutionArrayState(): ExecutionArrayState | null {
-    return this.currentExecutionArray ? this.currentExecutionArray.getState() : null;
+    return this.currentChat?.executionState || null;
   }
   
   /**
@@ -229,6 +238,9 @@ export class DotBot {
     // Determine network - use config.network or default to 'polkadot'
     const configuredNetwork = config.network || 'polkadot';
     
+    // Determine environment - use config.environment or default to 'mainnet'
+    const environment = config.environment || 'mainnet';
+    
     // Use pre-initialized RPC managers if provided, otherwise create new ones for the specified network
     let relayChainManager: RpcManager;
     let assetHubManager: RpcManager;
@@ -252,7 +264,7 @@ export class DotBot {
     const detectedNetwork = detectNetworkFromChainName(chainInfo.toString());
     const actualNetwork = detectedNetwork;
     
-    console.info(`Network: ${actualNetwork} (configured: ${configuredNetwork})`);
+    console.info(`Network: ${actualNetwork} (configured: ${configuredNetwork}), Environment: ${environment}`);
     
     // Create signer
     const signer = new BrowserWalletSigner({ 
@@ -270,7 +282,24 @@ export class DotBot {
     // Create execution system
     const executionSystem = new ExecutionSystem();
     
-    const dotbot = new DotBot(api, executionSystem, config, actualNetwork, relayChainManager, assetHubManager);
+    // Create or use chat manager
+    const chatManager = config.chatManager || new ChatInstanceManager();
+    
+    const dotbot = new DotBot(
+      api, 
+      executionSystem, 
+      config, 
+      actualNetwork, 
+      environment,
+      relayChainManager, 
+      assetHubManager,
+      chatManager
+    );
+    
+    // Initialize chat instance (load or create)
+    if (!config.disableChatPersistence) {
+      await dotbot.initializeChatInstance();
+    }
     
     try {
       await dotbot.initializeAssetHub();
@@ -296,6 +325,140 @@ export class DotBot {
   }
   
   /**
+   * Initialize or load chat instance
+   */
+  private async initializeChatInstance(): Promise<void> {
+    try {
+      // Try to load existing instances for this environment and wallet
+      const instances = await this.chatManager.queryInstances({
+        environment: this.environment,
+        walletAddress: this.wallet.address,
+        archived: false,
+      });
+
+      if (instances.length > 0) {
+        // Load the most recent instance as ChatInstance class
+        this.currentChat = new ChatInstance(
+          instances[0],
+          this.chatManager,
+          this.chatPersistenceEnabled
+        );
+        console.info(`Loaded chat: ${this.currentChat.id}`);
+      } else {
+        // Create a new ChatInstance
+        this.currentChat = await ChatInstance.create(
+          {
+            environment: this.environment,
+            network: this.network,
+            walletAddress: this.wallet.address,
+            title: `Chat - ${this.network}`,
+          },
+          this.chatManager,
+          this.chatPersistenceEnabled
+        );
+        console.info(`Created new chat: ${this.currentChat.id}`);
+      }
+    } catch (error) {
+      console.error('Failed to initialize chat instance:', error);
+      this.currentChat = null;
+    }
+  }
+  
+  /**
+   * Get conversation history (for LLM context)
+   */
+  getHistory(): ConversationMessage[] {
+    return this.currentChat?.getHistory() || [];
+  }
+  
+  /**
+   * Get all messages (full chat history)
+   */
+  getAllMessages(): ChatMessage[] {
+    return this.currentChat?.messages || [];
+  }
+  
+  /**
+   * Clear conversation history (starts new chat)
+   */
+  async clearHistory(): Promise<void> {
+    if (!this.chatPersistenceEnabled) {
+      return;
+    }
+    
+    // Create a new ChatInstance
+    this.currentChat = await ChatInstance.create(
+      {
+        environment: this.environment,
+        network: this.network,
+        walletAddress: this.wallet.address,
+        title: `Chat - ${this.network}`,
+      },
+      this.chatManager,
+      this.chatPersistenceEnabled
+    );
+    
+    console.info(`Started new chat: ${this.currentChat.id}`);
+  }
+  
+  /**
+   * Switch environment (creates new chat instance)
+   */
+  async switchEnvironment(environment: Environment, network?: Network): Promise<void> {
+    const targetNetwork = network || (environment === 'mainnet' ? 'polkadot' : 'westend');
+    
+    // Validate network for environment
+    const validation = this.chatManager.validateNetworkForEnvironment(targetNetwork, environment);
+    if (!validation.valid) {
+      throw new Error(validation.error || 'Invalid network for environment');
+    }
+    
+    // Update internal state
+    this.environment = environment;
+    this.network = targetNetwork;
+    
+    // Create RPC managers for new network
+    const managers = createRpcManagersForNetwork(targetNetwork);
+    this.relayChainManager = managers.relayChainManager;
+    this.assetHubManager = managers.assetHubManager;
+    
+    // Reconnect APIs
+    this.api = await this.relayChainManager.getReadApi();
+    await this.initializeAssetHub().catch(() => {
+      console.warn('Asset Hub connection failed after environment switch');
+    });
+    
+    // Create new chat instance
+    if (this.chatPersistenceEnabled) {
+      this.currentChat = await ChatInstance.create(
+        {
+          environment: this.environment,
+          network: this.network,
+          walletAddress: this.wallet.address,
+          title: `Chat - ${this.network}`,
+        },
+        this.chatManager,
+        this.chatPersistenceEnabled
+      );
+      console.info(`Switched to ${environment} (${targetNetwork}), new chat: ${this.currentChat.id}`);
+    }
+  }
+  
+  /**
+   * Get current environment
+   */
+  getEnvironment(): Environment {
+    return this.environment;
+  }
+  
+  /**
+   * Access chat manager directly (advanced usage)
+   */
+  getChatManager(): ChatInstanceManager {
+    return this.chatManager;
+  }
+  
+  /**
    * Chat with DotBot - Natural language to blockchain operations
    * 
    * This is the main method. Pass a message, get results.
@@ -314,11 +477,34 @@ export class DotBot {
    * ```
    */
   async chat(message: string, options?: ChatOptions): Promise<ChatResult> {
-    // Build system prompt with current context
-    const systemPrompt = options?.systemPrompt || await this.buildContextualSystemPrompt();
+    // Save user message
+    if (this.currentChat) {
+      await this.currentChat.addUserMessage(message);
+    }
     
-    // Send to LLM (with conversation history if provided)
-    let llmResponse = await this.callLLM(message, systemPrompt, options?.llm, options?.conversationHistory);
+    // Get LLM response
+    const llmResponse = await this.getLLMResponse(message, options);
+    
+    // Extract execution plan
+    const plan = this.extractExecutionPlan(llmResponse);
+    
+    // No execution needed - just a conversation
+    if (!plan || plan.steps.length === 0) {
+      return await this.handleConversationResponse(llmResponse);
+    }
+    
+    // Execute blockchain operations
+    return await this.handleExecutionResponse(llmResponse, plan, options);
+  }
+  
+  /**
+   * Get LLM response (extracted method)
+   */
+  private async getLLMResponse(message: string, options?: ChatOptions): Promise<string> {
+    const systemPrompt = options?.systemPrompt || await this.buildContextualSystemPrompt();
+    const conversationHistory = options?.conversationHistory || this.getHistory();
+    
+    let llmResponse = await this.callLLM(message, systemPrompt, options?.llm, conversationHistory);
     
     // Process system queries if enabled (future feature)
     if (areSystemQueriesEnabled() && options?.llm) {
@@ -326,35 +512,59 @@ export class DotBot {
         llmResponse,
         systemPrompt,
         message,
-        async (msg, prompt) => this.callLLM(msg, prompt, options.llm, options.conversationHistory)
+        async (msg, prompt) => this.callLLM(msg, prompt, options.llm, conversationHistory)
       );
     }
     
-    // Try to extract execution plan
-    const plan = this.extractExecutionPlan(llmResponse);
-    
-    if (!plan || plan.steps.length === 0) {
-      this.currentExecutionArray = null;
-      
-      const cleanedResponse = llmResponse
-        .replace(/```json\s*/g, '')
-        .replace(/```\s*/g, '')
-        .trim();
-      
-      return {
-        response: cleanedResponse,
-        executed: false,
-        success: true,
-        completed: 0,
-        failed: 0
-      };
+    return llmResponse;
+  }
+  
+  /**
+   * Handle conversation response (no execution)
+   */
+  private async handleConversationResponse(llmResponse: string): Promise<ChatResult> {
+    // Clear any previous execution
+    if (this.currentChat) {
+      this.currentChat.setExecution(null);
     }
     
-    // Prepare the plan for execution with array tracking
+    const cleanedResponse = llmResponse
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .trim();
+    
+    // Save bot response
+    if (this.currentChat) {
+      await this.currentChat.addBotMessage(cleanedResponse);
+      
+      // Auto-generate title if needed
+      if (!this.currentChat.title || this.currentChat.title.startsWith('Chat -')) {
+        await this.currentChat.autoGenerateTitle();
+      }
+    }
+    
+    return {
+      response: cleanedResponse,
+      executed: false,
+      success: true,
+      completed: 0,
+      failed: 0
+    };
+  }
+  
+  /**
+   * Handle execution response (blockchain operations)
+   */
+  private async handleExecutionResponse(
+    llmResponse: string,
+    plan: ExecutionPlan,
+    options?: ChatOptions
+  ): Promise<ChatResult> {
     let completed = 0;
     let failed = 0;
     let success = true;
     
+    // Execute the plan
     try {
       await this.executeWithArrayTracking(
         plan,
@@ -368,10 +578,9 @@ export class DotBot {
         }
       );
     } catch (error) {
-      success = false;
       console.error('Execution preparation failed:', error);
-      
       const errorMsg = error instanceof Error ? error.message : String(error);
+      
       return {
         response: `Unable to prepare your transaction:\n\n${errorMsg}\n\nPlease check the parameters and try again.`,
         plan,
@@ -382,7 +591,25 @@ export class DotBot {
       };
     }
     
+    // Generate friendly message
     const friendlyMessage = this.generateFriendlyMessage(plan, completed, failed);
+    
+    // Save messages
+    if (this.currentChat) {
+      await this.currentChat.addBotMessage(friendlyMessage);
+      
+      const statusVariant = success ? 'success' : 'warning';
+      const statusContent = success 
+        ? `✅ Successfully executed ${completed} operation(s).`
+        : `⚠️ Completed ${completed}, failed ${failed} operation(s).`;
+      
+      await this.currentChat.addSystemMessage(statusContent, statusVariant);
+      
+      // Auto-generate title if needed
+      if (!this.currentChat.title || this.currentChat.title.startsWith('Chat -')) {
+        await this.currentChat.autoGenerateTitle();
+      }
+    }
     
     return {
       response: friendlyMessage,
@@ -418,11 +645,16 @@ export class DotBot {
       throw new Error(`Failed to prepare transaction:\n\n${errorMessages}`);
     }
     
-    this.currentExecutionArray = executionArray;
+    // Set execution on current chat (execution belongs to conversation!)
+    if (this.currentChat) {
+      this.currentChat.setExecution(executionArray);
+    }
     
-    const unsubscribe = executionArray.onStatusUpdate((item: ExecutionItem) => {
-      const state = executionArray.getState();
-      this.executionArrayCallbacks.forEach(cb => cb(state));
+    const unsubscribe = executionArray.onStatusUpdate(() => {
+      // Chat instance handles callbacks now
+      if (this.currentChat) {
+        this.currentChat.setExecution(executionArray);
+      }
     });
     
     try {

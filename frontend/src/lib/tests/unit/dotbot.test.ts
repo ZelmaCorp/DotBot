@@ -488,7 +488,12 @@ describe('DotBot', () => {
         'What is staking?',
         'Mock system prompt',
         expect.objectContaining({
-          conversationHistory: [],
+          conversationHistory: expect.arrayContaining([
+            expect.objectContaining({
+              role: 'user',
+              content: 'What is staking?',
+            }),
+          ]),
         })
       );
     });
@@ -1044,7 +1049,10 @@ describe('DotBot', () => {
         getState: jest.fn().mockReturnValue(mockState),
       };
 
-      (dotbot as any).currentExecutionArray = mockExecutionArray;
+      // Set execution on current chat instance
+      if (dotbot.currentChat) {
+        dotbot.currentChat.currentExecution = mockExecutionArray as any;
+      }
 
       const callback = jest.fn();
       dotbot.onExecutionArrayUpdate(callback);
@@ -1069,7 +1077,10 @@ describe('DotBot', () => {
         getState: jest.fn().mockReturnValue(mockState),
       };
 
-      (dotbot as any).currentExecutionArray = mockExecutionArray;
+      // Set execution on current chat instance
+      if (dotbot.currentChat) {
+        dotbot.currentChat.currentExecution = mockExecutionArray as any;
+      }
 
       const callback = jest.fn();
       const unsubscribe = dotbot.onExecutionArrayUpdate(callback);
@@ -1094,7 +1105,10 @@ describe('DotBot', () => {
         getState: jest.fn().mockReturnValue(mockState),
       };
 
-      (dotbot as any).currentExecutionArray = mockExecutionArray;
+      // Set execution on current chat instance
+      if (dotbot.currentChat) {
+        dotbot.currentChat.currentExecution = mockExecutionArray as any;
+      }
 
       const callback1 = jest.fn();
       const callback2 = jest.fn();
@@ -1132,7 +1146,10 @@ describe('DotBot', () => {
         getState: jest.fn().mockReturnValue(mockState),
       };
 
-      (dotbot as any).currentExecutionArray = mockExecutionArray;
+      // Set execution on current chat instance
+      if (dotbot.currentChat) {
+        dotbot.currentChat.currentExecution = mockExecutionArray as any;
+      }
 
       const callback = jest.fn();
       const unsubscribe = dotbot.onExecutionArrayUpdate(callback);
@@ -1728,7 +1745,7 @@ describe('DotBot', () => {
       expect(mockOrchestrator.orchestrate).toHaveBeenCalledWith(executionPlan);
       expect(mockExecutioner.execute).toHaveBeenCalledWith(mockExecutionArray, undefined);
       expect(onComplete).toHaveBeenCalledWith(true, 1, 0);
-      expect((dotbot as any).currentExecutionArray).toBe(mockExecutionArray);
+      expect(dotbot.currentChat?.currentExecution).toBe(mockExecutionArray);
     });
 
     it('should throw error if orchestration fails', async () => {
