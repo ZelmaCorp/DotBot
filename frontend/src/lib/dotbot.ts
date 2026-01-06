@@ -503,10 +503,6 @@ export class DotBot {
       this.chatPersistenceEnabled
     );
     
-    // Rebuild ExecutionArrays to restore working extrinsics
-    const orchestrator = this.executionSystem.getOrchestrator();
-    await this.currentChat.rebuildExecutionArrays(orchestrator);
-    
     console.info(`Loaded chat instance: ${this.currentChat.id}`);
   }
   

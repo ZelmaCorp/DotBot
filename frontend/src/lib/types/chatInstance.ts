@@ -91,7 +91,7 @@ export interface ExecutionMessage extends BaseChatMessage {
   executionArray: ExecutionArrayState;
   
   /** Original execution plan (for rebuilding ExecutionArray with working extrinsics) */
-  executionPlan?: import('./execution/types').ExecutionPlan;
+  executionPlan?: ExecutionPlan;
   
   /** High-level status */
   status: 'pending' | 'executing' | 'completed' | 'failed' | 'cancelled';

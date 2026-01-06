@@ -118,6 +118,9 @@ export class ExecutionArray {
   /**
    * Restore ExecutionArray from saved state
    * Used when loading a chat instance that has execution messages
+   * 
+   * Note: This creates a basic ExecutionArray from state, but extrinsics will be broken.
+   * Use rebuildExecutionArrays() to fully restore with working extrinsics.
    */
   static fromState(state: ExecutionArrayState): ExecutionArray {
     const executionArray = new ExecutionArray(state.id);
