@@ -6,6 +6,11 @@ This document provides comprehensive API documentation for integrating DotBot in
 
 - [Getting Started](#getting-started)
 - [Core Concepts](#core-concepts)
+- [Multi-Network Configuration](#multi-network-configuration)
+- [DotBot Core Multi-Network Support](#dotbot-core-multi-network-support)
+- [ChatInstance API](#chatinstance-api) ← NEW in v0.2.0
+- [Storage API](#storage-api) ← NEW in v0.2.0
+- [DataManager API](#datamanager-api) ← NEW in v0.2.0
 - [Agents API](#agents-api)
 - [Execution Engine API](#execution-engine-api)
 - [Utilities API](#utilities-api)
@@ -464,17 +469,18 @@ function formatKnowledgeBaseForNetwork(network: Network): string
 
 #### `DotBot.create()`
 
-**UPDATED** in v0.2.0 to support network parameter:
+**UPDATED** in v0.2.0 to support network parameter and chat management:
 
 ```typescript
 interface DotBotConfig {
   wallet: InjectedAccountWithMeta;
   network?: Network;  // ← NEW in v0.2.0
-  relayChainManager: RpcManager;
-  assetHubManager: RpcManager;
+  relayChainManager?: RpcManager;  // Optional if using network param
+  assetHubManager?: RpcManager;    // Optional if using network param
   onSigningRequest?: (request: SigningRequest) => void;
   onBatchSigningRequest?: (request: BatchSigningRequest) => void;
   onSimulationStatus?: (status: SimulationStatus) => void;
+  disableChatPersistence?: boolean;  // ← NEW in v0.2.0
 }
 
 static async create(config: DotBotConfig): Promise<DotBot>
@@ -482,12 +488,18 @@ static async create(config: DotBotConfig): Promise<DotBot>
 
 **Parameters:**
 - `network` (Network, optional): Network identifier. Default: `'polkadot'`. *Added in v0.2.0*
+- `relayChainManager` (RpcManager, optional): Now optional - auto-created if `network` provided. *Updated in v0.2.0*
+- `assetHubManager` (RpcManager, optional): Now optional - auto-created if `network` provided. *Updated in v0.2.0*
+- `disableChatPersistence` (boolean, optional): Disable chat history persistence. Default: `false`. *Added in v0.2.0*
 
 **Behavior Changes in v0.2.0:**
 - System prompt includes network-specific knowledge
 - Balance displays use correct token symbol (DOT/KSM/WND)
 - Testnet flag set automatically for Westend
 - Network can be detected from connected chain if not specified
+- **Automatically creates and manages ChatInstances** (no manual ChatInstanceManager needed)
+- **Chat history persisted to localStorage by default** (disable with `disableChatPersistence: true`)
+- **Execution requires user approval** (two-step: prepare → user clicks "Accept & Start" → execute)
 
 **Example (v0.2.0+):**
 ```typescript
@@ -547,6 +559,712 @@ if (dotbot.getNetwork() === 'westend') {
 ```
 
 **Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.chat()`
+
+Main conversational interface. Handles LLM interaction and execution planning.
+
+```typescript
+async chat(message: string, options?: ChatOptions): Promise<ChatResult>
+
+interface ChatOptions {
+  llm?: LLMFunction;
+  systemPrompt?: string;
+  conversationHistory?: ConversationMessage[];
+}
+
+interface ChatResult {
+  response: string;
+  plan?: ExecutionPlan;
+  executed: boolean;
+  success: boolean;
+  completed: number;
+  failed: number;
+}
+```
+
+**Parameters:**
+- `message` (string): User's natural language message
+- `options.llm` (LLMFunction, optional): Custom LLM function. If not provided, uses configured LLM
+- `options.systemPrompt` (string, optional): Override system prompt
+- `options.conversationHistory` (ConversationMessage[], optional): Custom history (for testing)
+
+**Returns:**
+- `response` (string): Bot's response or execution result
+- `plan` (ExecutionPlan, optional): Extracted execution plan if found
+- `executed` (boolean): Whether execution occurred (v0.2.0: always false until user approves)
+- `success` (boolean): Whether operation succeeded
+- `completed` (number): Number of completed operations
+- `failed` (number): Number of failed operations
+
+**Behavior (v0.2.0):**
+1. Saves user message to chat history
+2. Gets LLM response with network-specific context
+3. Extracts ExecutionPlan if present
+4. If plan found: **Prepares** execution (orchestrates, adds to chat) - **does NOT auto-execute**
+5. Returns result with `executed: false` (user must approve via UI)
+6. User clicks "Accept & Start" → UI calls `dotbot.startExecution(executionId)`
+
+**Example:**
+```typescript
+const result = await dotbot.chat("Send 2 DOT to Alice", {
+  llm: async (message, systemPrompt) => {
+    return await openai.chat(message, systemPrompt);
+  }
+});
+
+console.log(result.response);  
+// "I've prepared a transaction flow with 1 step. Review the details below..."
+
+// ExecutionFlow shown in UI for user approval
+// User clicks "Accept & Start" → startExecution() called
+```
+
+**Breaking Changes:**
+- ⚠️ v0.2.0: No longer auto-executes. Returns `executed: false`. User must approve.
+
+**Version History:**
+- v0.2.0 (January 2026): Changed to two-step execution (prepare, then user approves)
+- v0.1.0: Initial implementation (auto-executed immediately)
+
+---
+
+#### `DotBot.startExecution()`
+
+**NEW** in v0.2.0: Execute a prepared execution plan after user approval.
+
+```typescript
+async startExecution(
+  executionId: string, 
+  options?: ExecutionOptions
+): Promise<void>
+```
+
+**Parameters:**
+- `executionId` (string): Unique ID from `ExecutionMessage.executionId`
+- `options` (ExecutionOptions, optional): Execution options (e.g., `autoApprove`)
+
+**Usage:**
+```typescript
+// After chat() prepares execution
+const messages = dotbot.currentChat.getDisplayMessages();
+const executionMessage = messages.find(m => m.type === 'execution');
+
+// User clicks "Accept & Start" in UI
+await dotbot.startExecution(executionMessage.executionId);
+```
+
+**Throws:**
+- Error if no active chat
+- Error if executionId not found
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.switchEnvironment()`
+
+**NEW** in v0.2.0: Switch between mainnet and testnet environments.
+
+```typescript
+async switchEnvironment(
+  environment: Environment, 
+  network?: Network
+): Promise<void>
+
+type Environment = 'mainnet' | 'testnet';
+```
+
+**Parameters:**
+- `environment` ('mainnet' | 'testnet'): Target environment
+- `network` (Network, optional): Specific network. Auto-selected if not provided:
+  - `mainnet` → `'polkadot'`
+  - `testnet` → `'westend'`
+
+**Behavior:**
+- Validates network/environment compatibility
+- Creates new RPC managers for target network
+- Reconnects APIs
+- **Creates new ChatInstance** (previous chat remains in history)
+
+**Example:**
+```typescript
+// Switch to testnet
+await dotbot.switchEnvironment('testnet');  // Uses Westend
+
+// Or specify network explicitly
+await dotbot.switchEnvironment('mainnet', 'kusama');
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.clearHistory()`
+
+**NEW** in v0.2.0: Start a new chat in the current environment.
+
+```typescript
+async clearHistory(): Promise<void>
+```
+
+**Behavior:**
+- Creates new ChatInstance in current environment
+- Previous chat remains in storage (accessible via ChatInstanceManager)
+
+**Example:**
+```typescript
+await dotbot.clearHistory();
+console.log('Started fresh chat:', dotbot.currentChat.id);
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getEnvironment()`
+
+**NEW** in v0.2.0: Get current environment.
+
+```typescript
+getEnvironment(): Environment
+```
+
+**Returns:** Current environment (`'mainnet'` or `'testnet'`)
+
+**Example:**
+```typescript
+if (dotbot.getEnvironment() === 'testnet') {
+  console.log('⚠️ Using testnet - safe to experiment!');
+}
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getChatManager()`
+
+**NEW** in v0.2.0: Access ChatInstanceManager for advanced usage.
+
+```typescript
+getChatManager(): ChatInstanceManager
+```
+
+**Returns:** Internal ChatInstanceManager instance
+
+**Usage (advanced):**
+```typescript
+const manager = dotbot.getChatManager();
+
+// Query all chats
+const allChats = await manager.loadInstances();
+
+// Query by environment
+const testnetChats = manager.getInstancesByEnvironment('testnet');
+
+// Delete specific chat
+await manager.deleteInstance('chat-id-123');
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.currentChat`
+
+**NEW** in v0.2.0: Access current chat instance.
+
+```typescript
+public currentChat: ChatInstance | null
+```
+
+**Usage:**
+```typescript
+// Get conversation items (messages + execution flows)
+const items = dotbot.currentChat?.getDisplayMessages() || [];
+
+// Subscribe to execution updates
+dotbot.currentChat?.onExecutionUpdate(executionId, (state) => {
+  console.log('Execution progress:', state);
+});
+
+// Get execution arrays
+const execution = dotbot.currentChat?.getExecutionArray(executionId);
+```
+
+**See:** ChatInstance API for full details
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+## ChatInstance API
+
+**NEW** in v0.2.0: Class for managing individual chat conversations.
+
+### Overview
+
+`ChatInstance` encapsulates a single conversation with its execution state. Each instance is bound to an environment (`'mainnet'` | `'testnet'`) and contains a temporal sequence of conversation items (messages and execution flows).
+
+```typescript
+class ChatInstance {
+  readonly id: string;
+  readonly environment: Environment;
+  readonly network: Network;
+  readonly walletAddress: string;
+  title?: string;
+  createdAt: number;
+  updatedAt: number;
+  
+  // Core methods
+  async addUserMessage(content: string): Promise<TextMessage>;
+  async addBotMessage(content: string): Promise<TextMessage>;
+  async addExecutionMessage(state: ExecutionArrayState): Promise<ExecutionMessage>;
+  async updateExecutionMessage(id: string, updates: Partial<ExecutionMessage>): Promise<void>;
+  
+  getDisplayMessages(): ConversationItem[];
+  
+  setExecutionArray(executionId: string, executionArray: ExecutionArray): void;
+  getExecutionArray(executionId: string): ExecutionArray | undefined;
+  getAllExecutionArrays(): Map<string, ExecutionArray>;
+  
+  onExecutionUpdate(executionId: string, callback: (state: ExecutionArrayState) => void): () => void;
+  
+  get executionState(): ExecutionArrayState | null;
+  get isPlanExecuting(): boolean;
+  get executionProgress(): { current: number; total: number };
+  // ... other convenience getters
+}
+```
+
+### `ChatInstance.create()`
+
+Create a new chat instance.
+
+```typescript
+static async create(
+  params: CreateChatInstanceParams,
+  manager: ChatInstanceManager,
+  persist: boolean = true
+): Promise<ChatInstance>
+
+interface CreateChatInstanceParams {
+  environment: Environment;
+  network: Network;
+  walletAddress: string;
+  title?: string;
+}
+```
+
+**Parameters:**
+- `environment` ('mainnet' | 'testnet'): Environment for this chat
+- `network` (Network): Network ('polkadot', 'kusama', 'westend')
+- `walletAddress` (string): User's wallet address
+- `title` (string, optional): Chat title (auto-generated if not provided)
+
+**Example:**
+```typescript
+const chat = await ChatInstance.create(
+  {
+    environment: 'testnet',
+    network: 'westend',
+    walletAddress: account.address,
+    title: 'Testing transfers'
+  },
+  chatManager
+);
+```
+
+---
+
+### `ChatInstance.addUserMessage()`
+
+Add user message to conversation.
+
+```typescript
+async addUserMessage(content: string): Promise<TextMessage>
+```
+
+---
+
+### `ChatInstance.addExecutionMessage()`
+
+Add execution flow to conversation.
+
+```typescript
+async addExecutionMessage(state: ExecutionArrayState): Promise<ExecutionMessage>
+```
+
+**Parameters:**
+- `state` (ExecutionArrayState): Execution array state with unique `id`
+
+**Returns:** Created ExecutionMessage with `executionId` matching `state.id`
+
+---
+
+### `ChatInstance.getDisplayMessages()`
+
+Get all conversation items in temporal order.
+
+```typescript
+getDisplayMessages(): ConversationItem[]
+
+type ConversationItem = 
+  | TextMessage 
+  | ExecutionMessage 
+  | SystemMessage 
+  | KnowledgeRequestMessage
+  | KnowledgeResponseMessage
+  | SearchRequestMessage
+  | SearchResponseMessage;
+```
+
+**Returns:** Array of all conversation items (text messages, execution flows, etc.) in chronological order
+
+**Usage:**
+```typescript
+const items = chat.getDisplayMessages();
+
+items.forEach(item => {
+  switch (item.type) {
+    case 'user':
+    case 'bot':
+      console.log(`${item.type}: ${item.content}`);
+      break;
+    case 'execution':
+      console.log(`Execution flow: ${item.executionId}`);
+      break;
+  }
+});
+```
+
+---
+
+### `ChatInstance.setExecutionArray()`
+
+Add or update an execution array.
+
+```typescript
+setExecutionArray(executionId: string, executionArray: ExecutionArray): void
+```
+
+**Usage:**
+```typescript
+const executionArray = new ExecutionArray();
+chat.setExecutionArray(executionArray.getId(), executionArray);
+```
+
+---
+
+### `ChatInstance.onExecutionUpdate()`
+
+Subscribe to execution state changes for a specific execution.
+
+```typescript
+onExecutionUpdate(
+  executionId: string, 
+  callback: (state: ExecutionArrayState) => void
+): () => void
+```
+
+**Parameters:**
+- `executionId` (string): Unique execution ID
+- `callback` (function): Called when execution state changes
+
+**Returns:** Unsubscribe function
+
+**Example:**
+```typescript
+const unsubscribe = chat.onExecutionUpdate(executionId, (state) => {
+  console.log(`Progress: ${state.completedItems}/${state.totalItems}`);
+});
+
+// Later: unsubscribe
+unsubscribe();
+```
+
+---
+
+### Convenience Properties
+
+```typescript
+// Current execution state (most recent)
+readonly executionState: ExecutionArrayState | null;
+
+// Is any execution currently running
+readonly isPlanExecuting: boolean;
+
+// Execution progress
+readonly executionProgress: { current: number; total: number };
+
+// Execution statistics
+readonly planLength: number;
+readonly completedItems: number;
+readonly failedItems: number;
+readonly cancelledItems: number;
+```
+
+---
+
+## Storage API
+
+**NEW** in v0.2.0: Storage abstraction for chat persistence.
+
+### IChatStorage Interface
+
+```typescript
+interface IChatStorage {
+  loadAll(): Promise<ChatInstanceData[]>;
+  load(id: string): Promise<ChatInstanceData | null>;
+  save(instance: ChatInstanceData): Promise<void>;
+  delete(id: string): Promise<void>;
+  clear(): Promise<void>;
+  isAvailable(): Promise<boolean>;
+  getType(): string;
+}
+```
+
+### Implementations
+
+#### LocalStorageChatStorage
+
+Default implementation using browser localStorage.
+
+```typescript
+const storage = new LocalStorageChatStorage();
+const chats = await storage.loadAll();
+```
+
+#### ApiChatStorage
+
+External database storage (ready for future implementation).
+
+```typescript
+const storage = new ApiChatStorage({
+  apiUrl: 'https://api.example.com',
+  apiKey: 'your-key'
+});
+```
+
+#### HybridChatStorage
+
+Offline-first with API sync.
+
+```typescript
+const storage = new HybridChatStorage({
+  local: new LocalStorageChatStorage(),
+  api: new ApiChatStorage({ /* ... */ })
+});
+```
+
+### Factory Function
+
+```typescript
+function createChatStorage(config: ChatStorageConfig): IChatStorage
+
+interface ChatStorageConfig {
+  type: 'local' | 'api' | 'hybrid';
+  apiUrl?: string;
+  apiKey?: string;
+  syncInterval?: number;
+}
+```
+
+**Example:**
+```typescript
+const storage = createChatStorage({ 
+  type: 'local'  // Simple localStorage
+});
+
+const storage = createChatStorage({
+  type: 'api',
+  apiUrl: 'https://api.dotbot.app',
+  apiKey: process.env.API_KEY
+});
+```
+
+---
+
+## DataManager API
+
+**NEW** in v0.2.0: GDPR-compliant data management.
+
+### Overview
+
+`DataManager` provides centralized operations for user data management, including export, deletion, and verification.
+
+```typescript
+class DataManager {
+  async exportAllData(): Promise<DataExport>;
+  async importData(data: DataExport): Promise<void>;
+  async deleteAllData(): Promise<DeletionReport>;
+  
+  // Granular deletion
+  async deleteChatData(): Promise<number>;
+  async deleteRpcHealthData(): Promise<number>;
+  async deletePreferences(): Promise<boolean>;
+  async deleteWalletCache(): Promise<boolean>;
+  
+  async verifyDataCleared(): Promise<boolean>;
+  async getStorageInfo(): Promise<StorageInfo>;
+}
+```
+
+### Global Functions
+
+Convenience functions for common operations:
+
+```typescript
+// Export all data
+const data = await exportAllData();
+
+// Export and download as file
+await exportAndDownload('my-dotbot-data.json');
+
+// Delete all data (GDPR right to erasure)
+const report = await nukeAllData();
+console.log(`Deleted ${report.totalDeleted} items`);
+
+// Verify deletion
+const isClean = await verifyDataCleared();
+
+// Get storage info
+const info = await getStorageInfo();
+console.log(`Total storage: ${info.totalSize} bytes`);
+```
+
+### `exportAllData()`
+
+Export all user data (GDPR right to data portability).
+
+```typescript
+async exportAllData(): Promise<DataExport>
+
+interface DataExport {
+  chatInstances: ChatInstanceData[];
+  rpcHealth: Array<{ key: string; value: any }>;
+  userPreferences: Record<string, any>;
+  walletCache: Record<string, any>;
+  metadata: {
+    exportedAt: number;
+    version: string;
+  };
+}
+```
+
+**Example:**
+```typescript
+const data = await exportAllData();
+console.log(`Exported ${data.chatInstances.length} chats`);
+console.log(JSON.stringify(data, null, 2));
+```
+
+---
+
+### `exportAndDownload()`
+
+Export data and trigger browser download.
+
+```typescript
+async exportAndDownload(filename: string = 'dotbot-data.json'): Promise<void>
+```
+
+**Example:**
+```typescript
+await exportAndDownload('my-data-backup.json');
+// Browser downloads file automatically
+```
+
+---
+
+### `nukeAllData()`
+
+Delete all DotBot data (GDPR right to erasure).
+
+```typescript
+async nukeAllData(): Promise<DeletionReport>
+
+interface DeletionReport {
+  chatInstances: number;
+  rpcHealth: number;
+  userPreferences: boolean;
+  walletCache: boolean;
+  unknownKeys: number;
+  totalDeleted: number;
+}
+```
+
+**Example:**
+```typescript
+const report = await nukeAllData();
+console.log('Deletion report:', report);
+
+// Verify complete deletion
+const isClean = await verifyDataCleared();
+console.log('All data deleted:', isClean);
+```
+
+---
+
+### `verifyDataCleared()`
+
+Verify that no DotBot data remains in storage.
+
+```typescript
+async verifyDataCleared(): Promise<boolean>
+```
+
+**Returns:** `true` if no DotBot data found, `false` otherwise
+
+---
+
+### `getStorageInfo()`
+
+Get detailed storage information.
+
+```typescript
+async getStorageInfo(): Promise<StorageInfo>
+
+interface StorageInfo {
+  chatInstances: { count: number; size: number };
+  rpcHealth: { count: number; size: number };
+  preferences: { exists: boolean; size: number };
+  walletCache: { exists: boolean; size: number };
+  totalSize: number;
+  totalKeys: number;
+}
+```
+
+**Example:**
+```typescript
+const info = await getStorageInfo();
+console.log(`${info.chatInstances.count} chats using ${info.chatInstances.size} bytes`);
+console.log(`Total: ${info.totalSize} bytes across ${info.totalKeys} keys`);
+```
+
+---
+
+### Storage Keys
+
+All storage keys are centralized in the `STORAGE_KEYS` enum:
+
+```typescript
+export const STORAGE_KEYS = {
+  CHAT_INSTANCES: 'dotbot_chat_instances',
+  RPC_HEALTH_POLKADOT_RELAY: 'rpc_health_polkadot_relay',
+  RPC_HEALTH_POLKADOT_ASSETHUB: 'rpc_health_polkadot_assethub',
+  RPC_HEALTH_WESTEND_RELAY: 'rpc_health_westend_relay',
+  RPC_HEALTH_WESTEND_ASSETHUB: 'rpc_health_westend_assethub',
+  RPC_HEALTH_KUSAMA_RELAY: 'rpc_health_kusama_relay',
+  RPC_HEALTH_KUSAMA_ASSETHUB: 'rpc_health_kusama_assethub',
+  USER_PREFERENCES: 'dotbot_user_preferences',
+  WALLET_CACHE: 'dotbot_wallet_cache',
+  ANALYTICS_CONSENT: 'dotbot_analytics_consent',
+} as const;
+```
 
 ---
 
