@@ -227,7 +227,15 @@ const App: React.FC = () => {
             {/* Main Body */}
             <div className="main-body">
               {showChatHistory ? (
-                <div className="chat-container">
+                <div className="chat-history-container">
+                  <div className="chat-history-header-bar">
+                    <button
+                      onClick={() => setShowChatHistory(false)}
+                      className="chat-history-back-button"
+                    >
+                      ← Back
+                    </button>
+                  </div>
                   {dotbot && (
                     <ChatHistory
                       dotbot={dotbot}

@@ -6,7 +6,7 @@
 
 .chat-history-card {
   padding: 1rem;
-  background: var(--bg-primary) !important;
+  background: var(--bg-primary);
   border: 1px solid var(--border-secondary);
   border-radius: 8px;
   cursor: pointer;
@@ -18,14 +18,14 @@
 }
 
 .chat-history-card:hover {
-  background: var(--comp-light) !important;
+  background: var(--comp-light);
   border-color: var(--border-primary);
   transform: translateY(-1px);
   box-shadow: var(--shadow);
 }
 
 .chat-history-card.selected {
-  background: var(--bg-message-user) !important;
+  background: var(--bg-message-user);
   border-color: var(--brand-pink);
   box-shadow: 0 0 0 2px var(--brand-pink);
   position: relative;
@@ -119,17 +119,17 @@
 
 /* Dark theme adjustments */
 [data-theme="dark"] .chat-history-card {
-  background: var(--bg-primary) !important;
+  background: var(--bg-primary);
   border-color: var(--border-primary);
 }
 
 [data-theme="dark"] .chat-history-card:hover {
-  background: var(--transparent-dark-pink-light-overlay) !important;
+  background: var(--transparent-dark-pink-light-overlay);
   border-color: var(--text-dark-semi-muted);
 }
 
 [data-theme="dark"] .chat-history-card.selected {
-  background: var(--transparent-dark-pink-light-overlay) !important;
+  background: var(--transparent-dark-pink-light-overlay);
   border-color: var(--brand-pink);
   box-shadow: 0 0 0 1px var(--brand-pink);
 }
