@@ -19,7 +19,8 @@ import type { ConversationMessage } from './dotbot';
 import { ChatInstanceManager } from './chatInstanceManager';
 import { ExecutionArray } from './executionEngine/executionArray';
 import type { ExecutionArrayState } from './executionEngine/types';
-import type { ExecutionPlan } from './prompts/system/execution/types';
+import type { ExecutionOrchestrator } from './executionEngine/orchestrator';
+import type { ExecutionPlan, ExecutionStep } from './prompts/system/execution/types';
 
 /**
  * ChatInstance - A conversation with built-in methods and execution state
