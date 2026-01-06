@@ -232,6 +232,104 @@ prompts/system/knowledge/
 
 ---
 
+### Chat System (`frontend/src/lib/`)
+
+**Purpose**: Manage conversation instances with execution flow tracking and environment isolation.
+
+**Structure:**
+```
+lib/
+├── chatInstance.ts              # ChatInstance class (conversation + execution state)
+├── chatInstanceManager.ts       # Chat lifecycle management
+├── types/chatInstance.ts        # Chat-related types
+└── storage/chatStorage.ts       # Storage abstraction layer
+```
+
+**Key Concepts:**
+
+1. **ChatInstance (Class)**
+   - Encapsulates a single conversation
+   - Bound to an environment (`'mainnet'` | `'testnet'`)
+   - Contains temporal message history (`ConversationItem[]`)
+   - Manages multiple ExecutionArrays (Map<id, ExecutionArray>)
+   - Handles persistence and lifecycle
+
+2. **ConversationItem** (formerly ChatMessage)
+   - Union type for all conversation elements:
+     - `TextMessage` - User/bot text messages
+     - `ExecutionMessage` - Blockchain operations (embeds ExecutionArrayState)
+     - `SystemMessage` - System notifications
+     - `KnowledgeRequestMessage` / `KnowledgeResponseMessage`
+     - `SearchRequestMessage` / `SearchResponseMessage`
+   - Enables temporal ordering of text and execution flows
+
+3. **Environment Isolation**
+   - `mainnet`: Production environment (Polkadot, Kusama)
+   - `testnet`: Testing environment (Westend)
+   - Chat instances cannot mix environments
+   - Switching environment creates new chat instance
+
+4. **Multiple Execution Flows**
+   - Each conversation can have multiple independent ExecutionArrays
+   - Each ExecutionArray has unique ID
+   - Execution flows appear inline in conversation timeline
+   - Can be interacted with independently
+
+**Responsibilities:**
+- Maintain conversation history with execution state
+- Persist chat instances to storage
+- Generate chat titles automatically
+- Subscribe to execution updates
+- Validate environment/network compatibility
+
+**Design Principle**: Conversations are first-class entities that own their execution state, not just message logs.
+
+---
+
+### Data Management (`frontend/src/lib/`)
+
+**Purpose**: GDPR-compliant data management and storage abstraction.
+
+**Structure:**
+```
+lib/
+├── dataManager.ts              # GDPR operations (export, delete, verify)
+└── storage/chatStorage.ts      # Storage abstraction
+```
+
+**Key Components:**
+
+1. **DataManager**
+   - `exportAllData()` - Complete data export (JSON)
+   - `exportAndDownload()` - Export with browser download
+   - `nukeAllData()` - Complete data deletion (GDPR compliance)
+   - `verifyDataCleared()` - Confirm deletion
+   - Granular deletion: chat instances, RPC health, preferences, wallet cache
+
+2. **Storage Abstraction (`IChatStorage`)**
+   - Interface for chat persistence
+   - Implementations:
+     - `LocalStorageChatStorage` - Browser localStorage (current default)
+     - `ApiChatStorage` - External database (ready for future)
+     - `HybridChatStorage` - Offline-first with API sync
+   - All operations async (ready for network requests)
+
+3. **STORAGE_KEYS**
+   - Centralized storage key enum
+   - Keys scoped by data type (chats, RPC, preferences, etc.)
+   - Enables complete data discovery and deletion
+
+**Responsibilities:**
+- GDPR right to erasure (complete data deletion)
+- GDPR right to data portability (export)
+- Storage backend abstraction
+- Data integrity verification
+- Privacy compliance
+
+**Design Principle**: Data management is centralized, auditable, and privacy-first.
+
+---
+
 ## Design Decisions
 
 ### Decision 1: Explicit Chain Selection for DOT Transfers
@@ -688,6 +786,281 @@ This architecture enables:
 - Complete API reference in `docs/API.md`
 - Network utilities documented with examples
 - Migration guide for existing integrations
+
+(Added: January 2026)
+
+---
+
+### Decision 7: Chat Instance Architecture
+
+**Context:**
+- Initial implementation had execution state (ExecutionArray) as a global singleton in DotBot
+- No concept of conversation history or persistence
+- Execution flows needed to be part of conversation timeline, not separate
+- Testing/production isolation required (mainnet vs testnet)
+
+**Decision:**
+Refactor ChatInstance from interface to full class that:
+1. Encapsulates conversation history + execution state
+2. Is bound to an environment (`'mainnet'` | `'testnet'`)
+3. Supports multiple independent ExecutionArrays per conversation
+4. Owns its persistence and lifecycle
+5. DotBot internalizes ChatInstanceManager (better DX)
+
+**Rationale:**
+
+1. **State Ownership**: Execution state belongs to conversation, not DotBot
+2. **Environment Isolation**: Prevents mixing testnet/mainnet operations
+3. **Multiple Flows**: Users can have multiple transactions in-progress in one chat
+4. **Temporal Ordering**: Execution flows appear inline with messages (user message → plan → ExecutionFlow → result)
+5. **Developer Experience**: DotBot users don't need to manage ChatInstanceManager manually
+
+**Key Changes:**
+
+**Before (v0.1.0):**
+```typescript
+// DotBot owned execution state
+class DotBot {
+  private currentExecutionArray: ExecutionArray | null;
+  
+  async chat(message) {
+    // ... LLM response
+    // Auto-executes immediately
+    this.currentExecutionArray = await this.execute(plan);
+  }
+}
+
+// No conversation history
+// No persistence
+// No environment isolation
+```
+
+**After (v0.2.0):**
+```typescript
+// ChatInstance owns execution state
+class ChatInstance {
+  environment: Environment;
+  messages: ConversationItem[];  // Mixed: text + executions
+  private executionArrays: Map<string, ExecutionArray>;
+  
+  addExecutionMessage(state: ExecutionArrayState) { ... }
+  setExecutionArray(id: string, array: ExecutionArray) { ... }
+  onExecutionUpdate(id: string, callback) { ... }
+}
+
+// DotBot delegates to ChatInstance
+class DotBot {
+  private chatManager: ChatInstanceManager;
+  public currentChat: ChatInstance | null;
+  
+  async chat(message) {
+    // ... LLM response
+    await this.prepareExecution(plan);  // Adds to chat, doesn't execute
+    // User clicks "Accept & Start" → startExecution(executionId)
+  }
+  
+  async switchEnvironment(env: Environment) {
+    // Creates new ChatInstance for new environment
+  }
+}
+```
+
+**Two-Step Execution Pattern:**
+```typescript
+// Step 1: Prepare (after LLM response)
+await dotbot.prepareExecution(plan);
+// → Orchestrates, adds ExecutionMessage to chat
+// → UI shows ExecutionFlow for review
+
+// Step 2: Execute (when user approves)
+await dotbot.startExecution(executionMessage.executionId);
+// → Executes specific flow by ID
+```
+
+**Alternatives Considered:**
+
+1. ❌ **Global execution state in DotBot**
+   - Can't support multiple flows
+   - No environment isolation
+   - Doesn't scale to chat history UI
+
+2. ❌ **Separate ExecutionManager**
+   - Splits conversation from execution (artificial separation)
+   - Hard to maintain temporal ordering
+   - Extra complexity for developers
+
+3. ✅ **ChatInstance owns execution**
+   - Natural ownership model
+   - Temporal ordering built-in
+   - Environment isolation automatic
+   - Clean developer API
+
+**Consequences:**
+- **Breaking**: Removed `onExecutionArrayUpdate()` → use `chat.onExecutionUpdate(id, callback)`
+- **Breaking**: Removed `executeWithArrayTracking()` → use `prepareExecution()` + `startExecution(id)`
+- **Breaking**: Renamed `ChatMessage` → `ConversationItem` (better reflects mixed content)
+- **Breaking**: Renamed `ChatInstance` interface → `ChatInstanceData`
+- **Feature**: Multiple execution flows per conversation
+- **Feature**: Environment-bound chat instances
+- **Feature**: User approval before execution (better UX, safer)
+- **DX**: Developers import less, DotBot manages more internally
+
+**Implementation Highlights:**
+
+1. **Unique IDs everywhere:**
+   - `ExecutionArray` generates unique ID
+   - `ExecutionMessage` stores `executionId`
+   - Enables tracking and interaction with specific flows
+
+2. **ConversationItem type:**
+   ```typescript
+   type ConversationItem = 
+     | TextMessage 
+     | ExecutionMessage 
+     | SystemMessage 
+     | KnowledgeRequestMessage 
+     | /* ... */;
+   ```
+   - Union type for all conversation elements
+   - UI maps over `conversationItems` and renders appropriately
+
+3. **Storage abstraction ready:**
+   - `ChatInstanceManager` uses `IChatStorage` interface
+   - Default: `LocalStorageChatStorage`
+   - Ready for: `ApiChatStorage` (external DB)
+
+(Added: January 2026)
+
+---
+
+### Decision 8: Storage Abstraction and GDPR Compliance
+
+**Context:**
+- Chat instances need persistence (localStorage initially)
+- Future requirement: external database for multi-device sync
+- We take privacy, data portability seriously
+- Storage backend might change (localStorage → API → hybrid)
+- Need auditable data management
+
+**Decision:**
+Implement:
+1. Storage abstraction layer (`IChatStorage` interface)
+2. GDPR-compliant `DataManager` class
+3. Centralized storage key management (`STORAGE_KEYS` enum)
+4. Async-first API (ready for network requests)
+
+**Rationale:**
+
+1. **Future-Proof**: Easy to switch from localStorage to external DB
+3. **Testability**: Can mock storage in tests
+4. **Auditability**: Centralized data operations
+5. **Privacy-First**: Users control their data
+
+**Architecture:**
+
+**Storage Abstraction:**
+```typescript
+interface IChatStorage {
+  loadAll(): Promise<ChatInstanceData[]>;
+  load(id: string): Promise<ChatInstanceData | null>;
+  save(instance: ChatInstanceData): Promise<void>;
+  delete(id: string): Promise<void>;
+  clear(): Promise<void>;
+  isAvailable(): Promise<boolean>;
+  getType(): string;
+}
+
+// Implementations
+class LocalStorageChatStorage implements IChatStorage { ... }
+class ApiChatStorage implements IChatStorage { ... }
+class HybridChatStorage implements IChatStorage { ... }
+
+// Factory
+const storage = createChatStorage({ 
+  type: 'local',  // or 'api', 'hybrid'
+  apiUrl: 'https://...'
+});
+```
+
+**GDPR Operations:**
+```typescript
+class DataManager {
+  // Export all data (right to data portability)
+  async exportAllData(): Promise<DataExport> {
+    return {
+      chatInstances: [...],
+      rpcHealth: [...],
+      userPreferences: { ... },
+      walletCache: { ... },
+      metadata: { exportedAt, version }
+    };
+  }
+  
+  // Delete all data (right to erasure)
+  async nukeAllData(): Promise<DeletionReport> {
+    // Deletes ALL storage keys
+    // Returns verification report
+  }
+  
+  // Verify complete deletion
+  async verifyDataCleared(): Promise<boolean> {
+    // Confirms no DotBot data remains
+  }
+  
+  // Granular deletion
+  async deleteChatData(): Promise<number>;
+  async deleteRpcHealthData(): Promise<number>;
+  async deletePreferences(): Promise<boolean>;
+  async deleteWalletCache(): Promise<boolean>;
+}
+
+// Global convenience
+await nukeAllData();
+await exportAndDownload('dotbot-data.json');
+```
+
+**Centralized Keys:**
+```typescript
+export const STORAGE_KEYS = {
+  CHAT_INSTANCES: 'dotbot_chat_instances',
+  RPC_HEALTH_POLKADOT_RELAY: 'rpc_health_polkadot_relay',
+  RPC_HEALTH_POLKADOT_ASSETHUB: 'rpc_health_polkadot_assethub',
+  // ... all storage keys enumerated
+} as const;
+```
+
+**Alternatives Considered:**
+
+1. ❌ **Direct localStorage calls throughout codebase**
+   - Hard to switch backends
+   - No GDPR compliance
+   - Can't mock for testing
+
+2. ❌ **Simple wrapper around localStorage**
+   - Not async (can't add API later)
+   - No interface (can't swap implementations)
+
+3. ✅ **Full abstraction + GDPR module**
+   - Future-proof
+   - Compliant
+   - Testable
+   - Professional
+
+**Consequences:**
+- **Feature**: All storage operations async (ready for network)
+- **Feature**: Complete GDPR compliance
+- **Feature**: Easy storage backend switching
+- **Feature**: Granular data deletion
+- **Complexity**: More abstraction layers
+- **Benefit**: Professional-grade data management
+- **Benefit**: Users can export/delete all data easily
+
+**GDPR Requirements Met:**
+- ✅ Right to erasure (`nukeAllData()`)
+- ✅ Right to data portability (`exportAllData()`)
+- ✅ Transparent data collection (enumerated keys)
+- ✅ Complete deletion verification
+- ✅ Granular deletion control
 
 (Added: January 2026)
 
