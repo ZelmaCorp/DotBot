@@ -18,13 +18,15 @@ interface EnvironmentSwitchProps {
   onSwitch: (environment: Environment) => Promise<void> | void;
   variant?: 'modal' | 'compact';
   disabled?: boolean;
+  explanatoryText?: boolean;
 }
 
 const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
   environment,
   onSwitch,
   variant = 'modal',
-  disabled = false
+  disabled = false,
+  explanatoryText = true
 }) => {
   const [isSwitching, setIsSwitching] = useState(false);
   const isMainnet = environment === 'mainnet';
@@ -75,10 +77,12 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
             <span className="environment-switch-title">Try out testnet?</span>
           </div>
           
-          <p className="environment-switch-description">
-            Testnet is perfect for experimenting with DotBot without using real tokens. 
-            It's a safe environment to learn and test blockchain operations.
-          </p>
+          {explanatoryText && (
+            <p className="environment-switch-description">
+              Testnet is perfect for experimenting with DotBot without using real tokens. 
+              It's a safe environment to learn and test blockchain operations.
+            </p>
+          )}
 
           <button
             onClick={handleSwitch}
@@ -103,10 +107,12 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
             <span className="environment-switch-title">Switch back to mainnet?</span>
           </div>
           
-          <p className="environment-switch-description">
-            You're currently on testnet. Switch back to mainnet to use real tokens 
-            and interact with the live Polkadot network.
-          </p>
+          {explanatoryText && (
+            <p className="environment-switch-description">
+              You're currently on testnet. Switch back to mainnet to use real tokens 
+              and interact with the live Polkadot network.
+            </p>
+          )}
           
           <div className="environment-switch-faucet">
             <span className="environment-switch-faucet-label">Need more testnet tokens?</span>

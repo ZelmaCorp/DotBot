@@ -158,7 +158,7 @@ const App: React.FC = () => {
       await dotbot.switchEnvironment(environment);
       setShowWelcomeScreen(true);
       setConversationRefresh(prev => prev + 1);
-      console.log(`Successfully switched to ${environment}`);
+      console.info(`Successfully switched to ${environment}`);
     } catch (error) {
       console.error('Failed to switch environment:', error);
       // You might want to show an error toast/notification here

@@ -7,7 +7,7 @@ import { Environment } from '../../lib/index';
 
 interface WalletButtonProps {
   environment?: Environment;
-  onEnvironmentSwitch?: (environment: Environment) => void;
+  onEnvironmentSwitch: (environment: Environment) => void;
 }
 
 const WalletButton: React.FC<WalletButtonProps> = ({ 
