@@ -19,8 +19,7 @@ import type { ConversationMessage } from './dotbot';
 import { ChatInstanceManager } from './chatInstanceManager';
 import { ExecutionArray } from './executionEngine/executionArray';
 import type { ExecutionArrayState } from './executionEngine/types';
-import type { ExecutionOrchestrator } from './executionEngine/orchestrator';
-import type { ExecutionPlan, ExecutionStep } from './prompts/system/execution/types';
+import type { ExecutionPlan } from './prompts/system/execution/types';
 
 /**
  * ChatInstance - A conversation with built-in methods and execution state
@@ -65,9 +64,6 @@ export class ChatInstance {
   /**
    * Restore ExecutionArray instances from execution messages
    * This is called when loading a chat instance
-   * 
-   * Note: This creates a basic ExecutionArray from state, but extrinsics will be broken.
-   * Use rebuildExecutionArrays() to fully restore with working extrinsics.
    */
   private restoreExecutionArrays(): void {
     const executionMessages = this.data.messages.filter(
