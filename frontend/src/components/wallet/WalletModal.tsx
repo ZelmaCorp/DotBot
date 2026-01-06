@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
-import { X, AlertCircle, RefreshCw, Plus, Info } from 'lucide-react';
+import { X, AlertCircle, RefreshCw, Plus } from 'lucide-react';
 import { Environment } from '../../lib/index';
 import { useWalletStore } from '../../stores/walletStore';
 import { WalletAccount } from '../../types/wallet';
 import { web3AuthService } from '../../lib/services/web3AuthService';
 import EnvironmentBadge from './EnvironmentBadge';
+import EnvironmentSwitch from './EnvironmentSwitch';
 import walletIcon from '../../assets/wallet.svg';
 
 interface WalletModalProps {
@@ -97,13 +98,6 @@ const WalletModal: React.FC<WalletModalProps> = ({
   const handleDisconnect = async () => {
     await disconnect();
     onClose();
-  };
-
-  const handleEnvironmentSwitch = () => {
-    const newEnvironment: Environment = environment === 'mainnet' ? 'testnet' : 'mainnet';
-    if (onEnvironmentSwitch) {
-      onEnvironmentSwitch(newEnvironment);
-    }
   };
 
   return (
@@ -210,35 +204,13 @@ const WalletModal: React.FC<WalletModalProps> = ({
                     <span>Add Account</span>
                   </button>
                   
-                  {/* Testnet Toggle Section */}
-                  {environment === 'mainnet' && onEnvironmentSwitch && (
-                    <div className="wallet-testnet-section">
-                      <div className="wallet-testnet-content">
-                        <Info className="wallet-testnet-icon" size={18} />
-                        <span className="wallet-testnet-text">Try out testnet?</span>
-                      </div>
-                      <button
-                        onClick={handleEnvironmentSwitch}
-                        className="wallet-testnet-btn"
-                      >
-                        Use Testnet
-                      </button>
-                    </div>
-                  )}
-                  
-                  {environment === 'testnet' && onEnvironmentSwitch && (
-                    <div className="wallet-testnet-section">
-                      <div className="wallet-testnet-content">
-                        <Info className="wallet-testnet-icon" size={18} />
-                        <span className="wallet-testnet-text">Switch back to mainnet?</span>
-                      </div>
-                      <button
-                        onClick={handleEnvironmentSwitch}
-                        className="wallet-testnet-btn mainnet"
-                      >
-                        Use Mainnet
-                      </button>
-                    </div>
+                  {/* Environment Switch Section */}
+                  {onEnvironmentSwitch && (
+                    <EnvironmentSwitch
+                      environment={environment}
+                      onSwitch={onEnvironmentSwitch}
+                      variant="modal"
+                    />
                   )}
                 </div>
               ) : (
