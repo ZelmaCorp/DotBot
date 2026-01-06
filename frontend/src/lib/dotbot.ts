@@ -503,6 +503,10 @@ export class DotBot {
       this.chatPersistenceEnabled
     );
     
+    // Rebuild ExecutionArrays to restore working extrinsics
+    const orchestrator = this.executionSystem.getOrchestrator();
+    await this.currentChat.rebuildExecutionArrays(orchestrator);
+    
     console.info(`Loaded chat instance: ${this.currentChat.id}`);
   }
   
@@ -731,11 +735,6 @@ export class DotBot {
       const state = executionArray.getState();
       const execMessage = await this.currentChat.addExecutionMessage(state, plan);
       this.currentChat.setExecutionArray(state.id, executionArray);
-      
-      // Set title to chat instance ID if no title exists
-      if (!this.currentChat.title || this.currentChat.title.startsWith('Chat -')) {
-        await this.currentChat.setTitle(this.currentChat.id);
-      }
       
       // Subscribe to updates to keep ExecutionMessage in sync
       executionArray.onStatusUpdate(() => {
