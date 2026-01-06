@@ -71,10 +71,26 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
     <div className="environment-switch-modal">
       {isMainnet ? (
         // On Mainnet - encourage trying testnet
-        <>
-          <div className="environment-switch-header">
-            <Info className="environment-switch-info-icon" size={18} />
-            <span className="environment-switch-title">Try out testnet?</span>
+        <div className="environment-switch-content">
+          <div className="environment-switch-header-row">
+            <div className="environment-switch-header">
+              <Info className="environment-switch-info-icon" size={18} />
+              <span className="environment-switch-title">Try out testnet?</span>
+            </div>
+            <button
+              onClick={handleSwitch}
+              disabled={isSwitching}
+              className="environment-switch-btn"
+            >
+              {isSwitching ? (
+                <>
+                  <Loader2 className="environment-switch-spinner" size={14} />
+                  <span>Switching...</span>
+                </>
+              ) : (
+                <span>Use Testnet</span>
+              )}
+            </button>
           </div>
           
           {explanatoryText && (
@@ -83,28 +99,29 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
               It's a safe environment to learn and test blockchain operations.
             </p>
           )}
-
-          <button
-            onClick={handleSwitch}
-            disabled={isSwitching}
-            className="environment-switch-btn"
-          >
-            {isSwitching ? (
-              <>
-                <Loader2 className="environment-switch-spinner" size={16} />
-                <span>Switching...</span>
-              </>
-            ) : (
-              <span>Use Testnet</span>
-            )}
-          </button>
-        </>
+        </div>
       ) : (
         // On Testnet - option to switch back
-        <>
-          <div className="environment-switch-header">
-            <Info className="environment-switch-info-icon testnet" size={18} />
-            <span className="environment-switch-title">Switch back to mainnet?</span>
+        <div className="environment-switch-content">
+          <div className="environment-switch-header-row">
+            <div className="environment-switch-header">
+              <Info className="environment-switch-info-icon testnet" size={18} />
+              <span className="environment-switch-title">Switch back to mainnet?</span>
+            </div>
+            <button
+              onClick={handleSwitch}
+              disabled={isSwitching}
+              className="environment-switch-btn mainnet"
+            >
+              {isSwitching ? (
+                <>
+                  <Loader2 className="environment-switch-spinner" size={14} />
+                  <span>Switching...</span>
+                </>
+              ) : (
+                <span>Use Mainnet</span>
+              )}
+            </button>
           </div>
           
           {explanatoryText && (
@@ -125,22 +142,7 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
               faucet.polkadot.io/westend
             </a>
           </div>
-
-          <button
-            onClick={handleSwitch}
-            disabled={isSwitching}
-            className="environment-switch-btn mainnet"
-          >
-            {isSwitching ? (
-              <>
-                <Loader2 className="environment-switch-spinner" size={16} />
-                <span>Switching...</span>
-              </>
-            ) : (
-              <span>Use Mainnet</span>
-            )}
-          </button>
-        </>
+        </div>
       )}
     </div>
   );
