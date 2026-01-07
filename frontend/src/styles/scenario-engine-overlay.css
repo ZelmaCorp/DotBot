@@ -10,11 +10,11 @@
 
 .scenario-overlay {
   position: fixed;
-  top: 0;
+  top: 50px; /* Leave space for navbar */
   right: 0;
   width: 30%;
-  height: 100vh;
-  z-index: 9999;
+  height: calc(100vh - 50px); /* Adjust height to account for navbar */
+  z-index: 999; /* Lower than modals but higher than content */
   font-family: 'Courier New', 'Consolas', monospace;
   animation: slideInRight 0.3s ease-out;
 }
@@ -40,7 +40,7 @@
               inset 0 0 20px rgba(0, 255, 65, 0.05);
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -505,6 +505,8 @@
   .scenario-overlay {
     width: 100%;
     left: 0;
+    top: 60px; /* Slightly smaller navbar on mobile */
+    height: calc(100vh - 60px);
   }
 }
 
