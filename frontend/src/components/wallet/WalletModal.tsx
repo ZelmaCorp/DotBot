@@ -12,6 +12,7 @@ import { Environment } from '../../lib/index';
 import { useWalletStore } from '../../stores/walletStore';
 import { WalletAccount } from '../../types/wallet';
 import { web3AuthService } from '../../lib/services/web3AuthService';
+import { useDebouncedClick } from '../../hooks/useDebounce';
 import WalletModalHeader from './WalletModalHeader';
 import WalletConnectedState from './WalletConnectedState';
 import WalletDisconnectedState from './WalletDisconnectedState';
@@ -69,7 +70,7 @@ const WalletModal: React.FC<WalletModalProps> = ({
     return availableWallets.flatMap(wallet => wallet.accounts);
   };
 
-  const handleConnectAccount = async (account: WalletAccount) => {
+  const handleConnectAccountInternal = async (account: WalletAccount) => {
     console.log('Modal: Connecting to account:', account);
     
     const wasAlreadyConnected = isConnected;
@@ -108,10 +109,16 @@ const WalletModal: React.FC<WalletModalProps> = ({
     }
   };
 
-  const handleDisconnect = async () => {
+  // Debounced version to prevent multiple rapid clicks
+  const handleConnectAccount = useDebouncedClick(handleConnectAccountInternal, 1000);
+
+  const handleDisconnectInternal = async () => {
     await disconnect();
     onClose();
   };
+
+  // Debounced version to prevent multiple rapid clicks
+  const handleDisconnect = useDebouncedClick(handleDisconnectInternal, 500);
 
   const accounts = getAllAccounts();
 
