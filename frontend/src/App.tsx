@@ -14,6 +14,7 @@ import CollapsibleSidebar from './components/layout/CollapsibleSidebar';
 import WelcomeScreen from './components/chat/WelcomeScreen';
 import Chat from './components/chat/Chat';
 import ChatHistory from './components/history/ChatHistory';
+import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOverlay';
 import { DotBot, Environment } from './lib';
 import type { ChatInstanceData } from './lib/types/chatInstance';
 import { useWalletStore } from './stores/walletStore';
@@ -23,6 +24,11 @@ import './styles/globals.css';
 import './styles/execution-flow.css';
 import './styles/chat-history.css';
 import './styles/chat-history-card.css';
+
+// =============================================================================
+// SCENARIO ENGINE FEATURE FLAG
+// =============================================================================
+const ENABLE_SCENARIO_ENGINE = true; // Set to true to show ScenarioEngine overlay
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +47,7 @@ const App: React.FC = () => {
   const [conversationRefresh, setConversationRefresh] = useState(0);
   const [chatHistoryRefresh, setChatHistoryRefresh] = useState(0);
   const [showChatHistory, setShowChatHistory] = useState(false);
+  const [showScenarioEngine, setShowScenarioEngine] = useState(ENABLE_SCENARIO_ENGINE);
   
   // DotBot State
   const [dotbot, setDotbot] = useState<DotBot | null>(null);
@@ -316,6 +323,11 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* ScenarioEngine Overlay */}
+        {showScenarioEngine && (
+          <ScenarioEngineOverlay onClose={() => setShowScenarioEngine(false)} />
+        )}
 
       </ThemeProvider>
     </QueryClientProvider>
