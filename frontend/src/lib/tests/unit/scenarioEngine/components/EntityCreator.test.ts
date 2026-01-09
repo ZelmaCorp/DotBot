@@ -23,16 +23,11 @@ jest.mock('@polkadot/util-crypto', () => ({
   },
   blake2AsU8a: (data: Uint8Array, bitLength?: number) => {
     // Simple mock: return deterministic hash
-    if (!data || !(data instanceof Uint8Array)) {
-      console.error('blake2AsU8a mock received invalid data:', data);
-      return new Uint8Array(32);
-    }
     const byteLength = bitLength ? bitLength / 8 : 32;
     const hash = new Uint8Array(byteLength);
     for (let i = 0; i < byteLength; i++) {
       hash[i] = (data[i % data.length] + i) % 256;
     }
-    console.log(`blake2AsU8a mock called with data length=${data.length}, bitLength=${bitLength}, returning hash length=${hash.length}`);
     return hash;
   },
 }));
@@ -47,7 +42,6 @@ jest.mock('@polkadot/util', () => ({
       result.set(arr, offset);
       offset += arr.length;
     }
-    console.log(`u8aConcat mock called with ${arrays.length} arrays, total length=${totalLength}`);
     return result;
   },
 }));
