@@ -419,6 +419,13 @@ export class ScenarioEngine {
     return new Map(this.state.entities);
   }
 
+  /**
+   * Get the executor (for UI callbacks)
+   */
+  getExecutor(): ScenarioExecutor | null {
+    return this.executor;
+  }
+
   private validateScenario(scenario: Scenario): void {
     if (!scenario.id) {
       throw new Error('Scenario must have an id');
