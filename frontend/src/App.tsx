@@ -355,6 +355,7 @@ const App: React.FC = () => {
                       }}
                       currentChatId={dotbot.currentChat?.id}
                       refreshTrigger={chatHistoryRefresh}
+                      isLoadingChat={isInitializing}
                     />
                   )}
                 </div>

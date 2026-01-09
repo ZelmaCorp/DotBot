@@ -576,10 +576,17 @@
    ============================================================================= */
 
 .scenario-report {
+  cursor: text;
   padding: 20px;
   max-height: calc(100vh - 200px);
   overflow-y: auto;
   overflow-x: hidden;
+  position: relative;
+}
+
+/* Show pointer cursor when typing animation is active (click to finish) */
+.scenario-report:has(.scenario-cursor) {
+  cursor: pointer;
 }
 
 .scenario-report::-webkit-scrollbar {

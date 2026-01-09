@@ -21,6 +21,7 @@ interface ChatHistoryCardProps {
   onRenamed?: () => void;
   onDeleted?: () => void;
   isSelected?: boolean;
+  isLoading?: boolean; // Whether this chat is currently being loaded
 }
 
 const ChatHistoryCard: React.FC<ChatHistoryCardProps> = ({ 
@@ -29,7 +30,8 @@ const ChatHistoryCard: React.FC<ChatHistoryCardProps> = ({
   onClick,
   onRenamed,
   onDeleted,
-  isSelected = false 
+  isSelected = false,
+  isLoading = false
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedTitle, setEditedTitle] = useState(chat.title || '');
@@ -160,8 +162,8 @@ const ChatHistoryCard: React.FC<ChatHistoryCardProps> = ({
 
   return (
     <div 
-      className={`chat-history-card ${isSelected ? 'selected' : ''}`}
-      onClick={() => !isEditing && onClick(chat)}
+      className={`chat-history-card ${isSelected ? 'selected' : ''} ${isLoading ? 'loading' : ''}`}
+      onClick={() => !isEditing && !isLoading && onClick(chat)}
     >
       <div className="chat-history-card-header">
         {isEditing ? (
@@ -215,6 +217,10 @@ const ChatHistoryCard: React.FC<ChatHistoryCardProps> = ({
           </span>
         )}
       </div>
+      
+      {isLoading && (
+        <div className="chat-history-card-loading-spinner" />
+      )}
 
       <ConfirmationModal
         isOpen={showDeleteModal}

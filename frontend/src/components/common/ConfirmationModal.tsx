@@ -6,7 +6,7 @@
 
 import React, { useEffect } from 'react';
 import { X, AlertTriangle } from 'lucide-react';
-import '../styles/confirmation-modal.css';
+import '../../styles/confirmation-modal.css';
 
 interface ConfirmationModalProps {
   isOpen: boolean;
@@ -31,9 +31,20 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   variant = 'danger',
   isLoading = false,
 }) => {
-  // Close on ESC key
+  // Close on ESC key and prevent body interaction when modal is open
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      // Remove modal-open class when modal closes
+      document.body.classList.remove('modal-open');
+      return;
+    }
+
+    // Add modal-open class to body to prevent all interactions
+    document.body.classList.add('modal-open');
+
+    // Prevent body scroll when modal is open
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
 
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isLoading) {
@@ -42,7 +53,12 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     };
 
     window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
+    
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+      document.body.classList.remove('modal-open');
+      document.body.style.overflow = originalOverflow;
+    };
   }, [isOpen, onClose, isLoading]);
 
   if (!isOpen) return null;
