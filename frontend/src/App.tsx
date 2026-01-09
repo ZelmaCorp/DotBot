@@ -15,7 +15,7 @@ import WelcomeScreen from './components/chat/WelcomeScreen';
 import Chat from './components/chat/Chat';
 import ChatHistory from './components/history/ChatHistory';
 import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOverlay';
-import { DotBot, Environment } from './lib';
+import { DotBot, Environment, ScenarioEngine } from './lib';
 import type { ChatInstanceData } from './lib/types/chatInstance';
 import { useWalletStore } from './stores/walletStore';
 import { ASIOneService } from './lib/services/asiOneService';
@@ -54,6 +54,13 @@ const App: React.FC = () => {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [asiOne] = useState(() => new ASIOneService());
   const [isInitializing, setIsInitializing] = useState(false);
+  
+  // ScenarioEngine State
+  const [scenarioEngine] = useState(() => new ScenarioEngine({
+    logLevel: 'info',
+    autoSaveResults: true,
+  }));
+  const [isScenarioEngineReady, setIsScenarioEngineReady] = useState(false);
   
   // Environment preference (for when wallet is not connected yet)
   const [preferredEnvironment, setPreferredEnvironment] = useState<Environment>('mainnet');
@@ -123,6 +130,23 @@ const App: React.FC = () => {
       });
       
       setDotbot(dotbotInstance);
+      
+      // Initialize ScenarioEngine with DotBot's API
+      try {
+        await scenarioEngine.initialize();
+        const api = await dotbotInstance.getApi();
+        scenarioEngine.setDependencies({
+          api,
+          getEntityKeypair: (entityName: string) => {
+            const entity = scenarioEngine.getEntity(entityName);
+            return entity?.mnemonic ? { mnemonic: entity.mnemonic } : undefined;
+          }
+        });
+        setIsScenarioEngineReady(true);
+        console.log('[ScenarioEngine] Initialized and ready');
+      } catch (error) {
+        console.error('[ScenarioEngine] Failed to initialize:', error);
+      }
     } catch (error) {
       console.error('Failed to initialize DotBot:', error);
     } finally {
@@ -325,8 +349,13 @@ const App: React.FC = () => {
         </div>
 
         {/* ScenarioEngine Overlay */}
-        {showScenarioEngine && (
-          <ScenarioEngineOverlay onClose={() => setShowScenarioEngine(false)} />
+        {showScenarioEngine && dotbot && isScenarioEngineReady && (
+          <ScenarioEngineOverlay 
+            engine={scenarioEngine}
+            dotbot={dotbot}
+            onClose={() => setShowScenarioEngine(false)}
+            onSendMessage={handleSendMessage}
+          />
         )}
 
       </ThemeProvider>
