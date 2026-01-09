@@ -294,15 +294,46 @@ export class ScenarioEngine {
    * Create test entities without running a scenario
    * 
    * Useful for pre-populating entities before running tests
+   * 
+   * NOTE: Entities are mode-specific. If entities exist for a different mode,
+   * they will be cleared and recreated.
    */
   async createEntities(
     entityConfigs: EntityConfig[],
     environment: { chain: ScenarioChain; mode: ScenarioMode }
   ): Promise<void> {
-    this.log('info', `Creating ${entityConfigs.length} entities...`);
+    // Check if entities exist for a different mode/chain
+    const currentEntityMode = this.state.entityMode;
+    const currentEntityChain = this.state.entityChain;
     
-    // Create entity creator if not already created
-    if (!this.entityCreator) {
+    if (currentEntityMode && currentEntityMode !== environment.mode) {
+      this.log('warn', `Clearing entities from ${currentEntityMode} mode (switching to ${environment.mode})`);
+      if (this.entityCreator) {
+        this.entityCreator.clear();
+      }
+      this.updateState({
+        entities: new Map(),
+        entityMode: undefined,
+        entityChain: undefined,
+      });
+    }
+    
+    if (currentEntityChain && currentEntityChain !== environment.chain) {
+      this.log('warn', `Clearing entities from ${currentEntityChain} chain (switching to ${environment.chain})`);
+      if (this.entityCreator) {
+        this.entityCreator.clear();
+      }
+      this.updateState({
+        entities: new Map(),
+        entityMode: undefined,
+        entityChain: undefined,
+      });
+    }
+    
+    this.log('info', `Creating ${entityConfigs.length} entities for ${environment.mode} mode on ${environment.chain}...`);
+    
+    // Create entity creator if not already created or if mode changed
+    if (!this.entityCreator || currentEntityMode !== environment.mode || currentEntityChain !== environment.chain) {
       this.entityCreator = createEntityCreator(environment.mode, {
         ss58Format: this.getSS58Format(environment.chain),
       });
@@ -312,12 +343,14 @@ export class ScenarioEngine {
     // Create entities from configs
     await this.entityCreator.createFromConfigs(entityConfigs);
 
-    // Update state with entities
+    // Update state with entities and their mode
     this.updateState({
       entities: this.entityCreator.getAllEntities(),
+      entityMode: environment.mode,
+      entityChain: environment.chain,
     });
 
-    this.log('info', `Created ${this.state.entities.size} entities`);
+    this.log('info', `Created ${this.state.entities.size} entities for ${environment.mode} mode`);
   }
 
   // ===========================================================================
@@ -443,6 +476,18 @@ export class ScenarioEngine {
    */
   getEntity(name: string): TestEntity | undefined {
     return this.state.entities.get(name);
+  }
+
+  /**
+   * Get entity by address
+   */
+  getEntityByAddress(address: string): TestEntity | undefined {
+    for (const entity of this.state.entities.values()) {
+      if (entity.address === address) {
+        return entity;
+      }
+    }
+    return undefined;
   }
 
   /**

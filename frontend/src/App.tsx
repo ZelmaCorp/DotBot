@@ -135,11 +135,37 @@ const App: React.FC = () => {
       setDotbot(dotbotInstance);
       
       // Initialize ScenarioEngine with DotBot's API
+      // NOTE: The API is always connected to the real chain (Westend/Mainnet).
+      // For synthetic mode, the executor uses queryBalance (mocked) instead of api.
+      // For emulated mode, we'd need to pass a Chopsticks API instance (TODO).
+      // For live mode, the real API is used.
       try {
         await scenarioEngine.initialize();
         const api = await dotbotInstance.getApi();
+        const environment = dotbotInstance.getEnvironment();
+        
         scenarioEngine.setDependencies({
-          api,
+          api, // Real API (Westend/Mainnet) - used for live mode
+          // For synthetic mode, provide mocked balance queries from scenario state
+          queryBalance: async (address: string) => {
+            // Look up entity by address
+            const entity = scenarioEngine.getEntityByAddress(address);
+            if (entity) {
+              // Get balance from current scenario's walletState
+              const state = scenarioEngine.getState();
+              const scenario = state.currentScenario;
+              if (scenario?.walletState?.accounts) {
+                const account = scenario.walletState.accounts.find(
+                  a => a.entityName === entity.name
+                );
+                if (account?.balance) {
+                  return account.balance;
+                }
+              }
+            }
+            // Default: return 0 DOT if not found in scenario state
+            return '0 DOT';
+          },
           getEntityKeypair: (entityName: string) => {
             const entity = scenarioEngine.getEntity(entityName);
             return entity?.mnemonic ? { mnemonic: entity.mnemonic } : undefined;

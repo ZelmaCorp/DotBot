@@ -564,6 +564,12 @@ export interface ScenarioEngineState {
   /** Entities created */
   entities: Map<string, TestEntity>;
   
+  /** Mode that entities belong to (entities are mode-specific) */
+  entityMode?: ScenarioMode;
+  
+  /** Chain that entities belong to */
+  entityChain?: ScenarioChain;
+  
   /** Results so far */
   partialResults?: Partial<ScenarioResult>;
   

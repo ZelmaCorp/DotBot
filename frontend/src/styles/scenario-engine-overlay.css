@@ -201,6 +201,85 @@
 }
 
 /* =============================================================================
+   MODE SELECTOR
+   ============================================================================= */
+
+.scenario-mode-selector {
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+  background: rgba(0, 255, 65, 0.03);
+}
+
+.scenario-mode-label {
+  color: #00ff41;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  margin-bottom: 10px;
+}
+
+.scenario-mode-options {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.scenario-mode-button {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(0, 255, 65, 0.1);
+  border: 1px solid rgba(0, 255, 65, 0.3);
+  color: #00cc33;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.scenario-mode-button:hover {
+  background: rgba(0, 255, 65, 0.15);
+  border-color: rgba(0, 255, 65, 0.5);
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+}
+
+.scenario-mode-button.active {
+  background: rgba(0, 255, 65, 0.25);
+  border-color: #00ff41;
+  color: #00ff41;
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.4);
+  font-weight: bold;
+}
+
+.scenario-mode-description {
+  color: #00cc33;
+  font-size: 10px;
+  font-style: italic;
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+.scenario-entity-mode-info {
+  color: #00ff41;
+  font-size: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 255, 65, 0.2);
+}
+
+.scenario-entity-mode-info strong {
+  color: #00ff41;
+  font-weight: bold;
+}
+
+.scenario-entity-warning {
+  color: #ffaa00;
+  font-size: 10px;
+  margin-top: 8px;
+  text-align: center;
+  opacity: 0.9;
+}
+
+/* =============================================================================
    ENTITIES
    ============================================================================= */
 

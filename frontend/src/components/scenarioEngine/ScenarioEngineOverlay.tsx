@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { ScenarioEngine, DotBot, Scenario } from '../../lib';
+import { ScenarioEngine, DotBot, Scenario, TestEntity } from '../../lib';
 import { 
   HAPPY_PATH_TESTS,
   ADVERSARIAL_TESTS,
@@ -55,16 +55,24 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
   const [entities, setEntities] = useState<any[]>(EMPTY_ENTITIES);
   const [runningScenario, setRunningScenario] = useState<string | null>(null);
   const [isCreatingEntities, setIsCreatingEntities] = useState(false);
+  const [executionMode, setExecutionMode] = useState<'synthetic' | 'emulated' | 'live'>('synthetic');
   
   // Subscribe to engine events
   useEffect(() => {
     const handleEvent = (event: any) => {
       if (event.type === 'inject-prompt') {
-        // Engine wants to inject a prompt - send it through the UI
         handlePromptInjection(event.prompt);
       } else if (event.type === 'log') {
-        // Append log messages to report
         appendToReport(`[${event.level.toUpperCase()}] ${event.message}\n`);
+      } else if (event.type === 'state-change' && event.state.entities) {
+        const engineEntities = Array.from(event.state.entities.values()) as TestEntity[];
+        setEntities(engineEntities.map((e: TestEntity) => ({
+          name: e.name,
+          address: e.address,
+          type: e.type,
+          mnemonic: e.mnemonic,
+          balance: '0 DOT'
+        })));
       } else if (event.type === 'scenario-complete') {
         setRunningScenario(null);
         const result = event.result;
@@ -77,185 +85,171 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
     };
     
     engine.addEventListener(handleEvent);
-    
-    return () => {
-      engine.removeEventListener(handleEvent);
-    };
+    return () => engine.removeEventListener(handleEvent);
   }, [engine]);
   
   /**
+   * Get the last bot response from DotBot chat
+   */
+  const getLastBotResponse = (): string | null => {
+    if (!dotbot.currentChat) return null;
+    const messages = dotbot.currentChat.messages;
+    const lastMessage = messages[messages.length - 1];
+    return (lastMessage && (lastMessage.type === 'bot' || lastMessage.type === 'user')) 
+      ? lastMessage.content 
+      : null;
+  };
+
+  /**
    * Handle prompt injection from ScenarioEngine
-   * This runs the prompt through the normal UI flow
+   * All modes use real DotBot - differences are in blockchain state handling
    */
   const handlePromptInjection = async (prompt: string) => {
-    appendToReport(`[UI] Injecting prompt: "${prompt}"\n`);
-    
-    // Notify engine that we received the prompt
     const executor = engine.getExecutor();
-    if (executor) {
-      executor.notifyPromptProcessed();
-    }
+    executor?.notifyPromptProcessed();
     
-    // Send through normal UI (this will call dotbot.chat())
     await onSendMessage(prompt);
     
-    // Get the result from the last chat
-    if (dotbot.currentChat) {
-      const messages = dotbot.currentChat.messages;
-      const lastMessage = messages[messages.length - 1];
-      
-      if (lastMessage && (lastMessage.type === 'bot' || lastMessage.type === 'user')) {
-        appendToReport(`[RESPONSE] Received from DotBot\n`);
-        // Notify engine that response was received
-        if (executor) {
-          executor.notifyResponseReceived({
-            response: lastMessage.content,
-            // Add other fields as needed
-          });
-        }
-      }
+    const response = getLastBotResponse();
+    if (executor && response) {
+      executor.notifyResponseReceived({ response, plan: null });
     }
+  };
+  
+
+  const getModeDescription = (mode: string): string => {
+    const descriptions: Record<string, string> = {
+      synthetic: '→ Fast mocked tests (no blockchain)',
+      emulated: '→ Realistic Chopsticks fork (simulated chain)',
+      live: '→ Real Westend transactions (actual testnet)',
+    };
+    return descriptions[mode] || '';
   };
 
   const toggleCategory = (category: string) => {
     setExpandedCategories(prev => {
       const next = new Set(prev);
-      if (next.has(category)) {
-        next.delete(category);
-      } else {
-        next.add(category);
-      }
+      next.has(category) ? next.delete(category) : next.add(category);
       return next;
     });
   };
 
-  const typeText = async (text: string) => {
-    setIsTyping(true);
-    setReport('');
-    
-    for (let i = 0; i < text.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 20));
-      setReport(prev => prev + text[i]);
-    }
-    
-    setIsTyping(false);
-  };
-  
   const appendToReport = (text: string) => {
     setReport(prev => prev + text);
   };
   
   // Tests are now full Scenario objects, no conversion needed
 
+  /**
+   * Verify entity creation was successful
+   */
+  const verifyEntities = (entities: any[], mode: string): void => {
+    const requiredNames = ['Alice', 'Bob', 'Charlie'];
+    const createdNames = entities.map(e => e.name);
+    const missing = requiredNames.filter(n => !createdNames.includes(n));
+    
+    if (missing.length > 0) {
+      appendToReport(`[VERIFY] ❌ Missing: ${missing.join(', ')}\n`);
+      return;
+    }
+    
+    const invalidAddresses = entities.filter(e => 
+      !e.address || !e.address.startsWith('5') || e.address.length < 40 || e.address.length > 50
+    );
+    
+    if (invalidAddresses.length > 0) {
+      appendToReport(`[VERIFY] ❌ Invalid addresses: ${invalidAddresses.map(e => e.name).join(', ')}\n`);
+      return;
+    }
+    
+    if (mode === 'live') {
+      const withMnemonics = entities.filter(e => e.mnemonic);
+      if (withMnemonics.length > 0) {
+        appendToReport(`[VERIFY] ⚠️ Live mode should not have mnemonics\n`);
+      }
+    } else {
+      const withoutMnemonics = entities.filter(e => !e.mnemonic);
+      if (withoutMnemonics.length > 0) {
+        appendToReport(`[VERIFY] ⚠️ Missing mnemonics: ${withoutMnemonics.map(e => e.name).join(', ')}\n`);
+      }
+    }
+    
+    appendToReport(`[VERIFY] ✅ All ${entities.length} entities valid\n`);
+  };
+
   const createEntities = async () => {
     setIsCreatingEntities(true);
-    setActiveTab('report');
-    
-    appendToReport(`[INIT] EntityCreator initializing...\n`);
-    appendToReport(`[MODE] Deterministic keypair generation\n`);
-    appendToReport(`[SS58] Format: 42 (Westend)\n\n`);
     
     try {
-      // Get environment from dotbot
       const environment = dotbot.getEnvironment();
       const chain = environment === 'mainnet' ? 'polkadot' : 'westend';
       
-      // Create a dummy scenario with entities to trigger entity creation
-      const dummyScenario: Scenario = {
-        id: 'entity-setup',
-        name: 'Entity Setup',
-        description: 'Initialize test entities',
-        category: 'happy-path',
-        environment: {
-          chain: chain as 'westend' | 'polkadot',
-          mode: 'synthetic',
-        },
-        entities: [
+      await engine.createEntities(
+        [
           { name: 'Alice', type: 'keypair' },
           { name: 'Bob', type: 'keypair' },
           { name: 'Charlie', type: 'keypair' },
         ],
-        walletState: {
-          accounts: [
-            { entityName: 'Alice', balance: '100 DOT' },
-            { entityName: 'Bob', balance: '50 DOT' },
-            { entityName: 'Charlie', balance: '50 DOT' },
-          ]
-        },
-        steps: [],
-        expectations: [],
-      };
+        { chain: chain as 'westend' | 'polkadot', mode: executionMode }
+      );
       
-      // Actually run the scenario to create entities
-      // Since steps array is empty, this will only set up entities
-      await engine.runScenario(dummyScenario);
-      
-      // Get the created entities from the engine
       const engineEntities = Array.from(engine.getEntities().values());
+      const entityData = engineEntities.map(e => ({
+        name: e.name,
+        address: e.address,
+        type: e.type,
+        mnemonic: e.mnemonic,
+        balance: '0 DOT'
+      }));
       
-      if (engineEntities.length > 0) {
-        setEntities(engineEntities.map(e => ({
-          name: e.name,
-          address: e.address,
-          type: e.type,
-          balance: '0 DOT' // Real balance would come from chain query
-        })));
-        
-        appendToReport(`[CREATE] ✅ ${engineEntities.length} entities created\n`);
-        
-        // Log each entity
-        engineEntities.forEach(e => {
-          appendToReport(`  • ${e.name}: ${e.address}\n`);
-        });
-        
-        appendToReport(`\n[READY] Entities ready for testing\n\n`);
-      } else {
-        appendToReport(`[WARN] No entities were created\n\n`);
-      }
+      setEntities(entityData);
+      
+      appendToReport(`[CREATE] ${engineEntities.length} entities created (${executionMode} mode)\n`);
+      engineEntities.forEach(e => {
+        const mnemonicInfo = executionMode === 'live' ? ' (no mnemonic)' : (e.mnemonic ? ' (mnemonic)' : '');
+        appendToReport(`  ${e.name}: ${e.address}${mnemonicInfo}\n`);
+      });
+      
+      verifyEntities(entityData, executionMode);
       
     } catch (error) {
-      appendToReport(`[ERROR] Failed to create entities: ${error}\n`);
+      appendToReport(`[ERROR] ${error}\n`);
       console.error('Entity creation failed:', error);
+    } finally {
+      setIsCreatingEntities(false);
     }
-    
-    setIsCreatingEntities(false);
   };
 
   const runScenario = async (scenario: Scenario) => {
     setActiveTab('report');
     setRunningScenario(scenario.name);
     
-    // Get the first step's input for the test description
-    const firstStepInput = scenario.steps[0]?.input || scenario.name;
-    
-    appendToReport(
-      `[TEST] ${firstStepInput}\n` +
-      `[STATUS] Initializing...\n\n`
-    );
-    
     try {
-      // Check if entities exist (for scenarios that need them)
+      const state = engine.getState();
       const engineEntities = Array.from(engine.getEntities().values());
-      if (engineEntities.length === 0) {
-        appendToReport(
-          `[INFO] No test entities found.\n` +
-          `[INFO] Entities will be created during scenario execution.\n` +
-          `[TIP] You can pre-create entities in the ENTITIES tab for faster execution.\n\n`
-        );
+      
+      if (engineEntities.length > 0 && state.entityMode !== executionMode) {
+        appendToReport(`[WARN] Entity mode mismatch: ${state.entityMode} → ${executionMode}\n`);
       }
       
-      appendToReport(`[SCENARIO] Running: ${scenario.name}\n`);
-      appendToReport(`[CATEGORY] ${scenario.category}\n`);
-      appendToReport(`[ENVIRONMENT] ${scenario.environment?.mode || 'synthetic'} mode\n\n`);
+      const environment = dotbot.getEnvironment();
+      const chain = environment === 'mainnet' ? 'polkadot' : 'westend';
       
-      // Run the scenario through the real engine
-      const result = await engine.runScenario(scenario);
+      const modifiedScenario: Scenario = {
+        ...scenario,
+        environment: {
+          chain: scenario.environment?.chain || (chain as 'westend' | 'polkadot'),
+          mode: executionMode,
+          ...scenario.environment?.chopsticksConfig && { chopsticksConfig: scenario.environment.chopsticksConfig },
+        }
+      };
       
-      // Result is already appended by event handlers
-      appendToReport(`\n[COMPLETE] Scenario execution finished\n`);
+      appendToReport(`[SCENARIO] ${scenario.name} (${executionMode})\n\n`);
+      
+      await engine.runScenario(modifiedScenario);
       
     } catch (error) {
-      appendToReport(`\n[ERROR] Scenario failed: ${error}\n`);
+      appendToReport(`[ERROR] ${error}\n`);
       console.error('Scenario execution failed:', error);
       setRunningScenario(null);
     }
@@ -306,6 +300,43 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
               <div className="scenario-panel-header">
                 {'>'} TEST ENTITIES
               </div>
+              
+              {/* Entity Mode Selector */}
+              <div className="scenario-mode-selector">
+                <div className="scenario-mode-label">{'>'} ENTITY MODE:</div>
+                <div className="scenario-mode-options">
+                  <button
+                    className={`scenario-mode-button ${executionMode === 'synthetic' ? 'active' : ''}`}
+                    onClick={() => setExecutionMode('synthetic')}
+                    title="Synthetic: Mocked blockchain (fast, no real transactions)"
+                  >
+                    SYNTHETIC
+                  </button>
+                  <button
+                    className={`scenario-mode-button ${executionMode === 'emulated' ? 'active' : ''}`}
+                    onClick={() => setExecutionMode('emulated')}
+                    title="Emulated: Chopsticks (realistic simulation with fork)"
+                  >
+                    CHOPSTICKS
+                  </button>
+                  <button
+                    className={`scenario-mode-button ${executionMode === 'live' ? 'active' : ''}`}
+                    onClick={() => setExecutionMode('live')}
+                    title="Live: Real Westend testnet (actual transactions)"
+                  >
+                    LIVE
+                  </button>
+                </div>
+                <div className="scenario-mode-description">
+                  {getModeDescription(executionMode)}
+                </div>
+                {entities.length > 0 && (
+                  <div className="scenario-entity-mode-info">
+                    {'>'} Entities created for: <strong>{executionMode.toUpperCase()}</strong> mode
+                  </div>
+                )}
+              </div>
+              
               <div className="scenario-entities">
                 {entities.length === 0 ? (
                   <div className="scenario-empty-state">
@@ -339,10 +370,19 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
                 <button 
                   className="scenario-btn scenario-btn-primary"
                   onClick={createEntities}
-                  disabled={isCreatingEntities || entities.length > 0}
+                  disabled={isCreatingEntities}
                 >
-                  {isCreatingEntities ? 'CREATING...' : entities.length > 0 ? 'ENTITIES CREATED' : 'CREATE ENTITIES'}
+                  {isCreatingEntities 
+                    ? 'CREATING...' 
+                    : entities.length > 0 
+                      ? `RECREATE ENTITIES (${executionMode.toUpperCase()})` 
+                      : 'CREATE ENTITIES'}
                 </button>
+                {entities.length > 0 && (
+                  <div className="scenario-entity-warning">
+                    {'>'} Entities will be cleared if mode changes
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -353,6 +393,38 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
               <div className="scenario-panel-header">
                 {'>'} TEST SCENARIOS
               </div>
+              
+              {/* Execution Mode Selector */}
+              <div className="scenario-mode-selector">
+                <div className="scenario-mode-label">{'>'} EXECUTION MODE:</div>
+                <div className="scenario-mode-options">
+                  <button
+                    className={`scenario-mode-button ${executionMode === 'synthetic' ? 'active' : ''}`}
+                    onClick={() => setExecutionMode('synthetic')}
+                    title="Synthetic: Mocked blockchain (fast, no real transactions)"
+                  >
+                    SYNTHETIC
+                  </button>
+                  <button
+                    className={`scenario-mode-button ${executionMode === 'emulated' ? 'active' : ''}`}
+                    onClick={() => setExecutionMode('emulated')}
+                    title="Emulated: Chopsticks (realistic simulation with fork)"
+                  >
+                    CHOPSTICKS
+                  </button>
+                  <button
+                    className={`scenario-mode-button ${executionMode === 'live' ? 'active' : ''}`}
+                    onClick={() => setExecutionMode('live')}
+                    title="Live: Real Westend testnet (actual transactions)"
+                  >
+                    LIVE
+                  </button>
+                </div>
+                <div className="scenario-mode-description">
+                  {getModeDescription(executionMode)}
+                </div>
+              </div>
+              
               <div className="scenario-list">
                 {TEST_CATEGORIES.map((category) => (
                   <div key={category.category} className="scenario-category">
