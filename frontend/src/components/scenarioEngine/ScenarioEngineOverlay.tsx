@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { ScenarioEngine, DotBot, Scenario } from '../../lib';
+import { ScenarioEngine, DotBot, Scenario, ScenarioChain } from '../../lib';
 import { X } from 'lucide-react';
 import { EntitiesTab } from './components/EntitiesTab';
 import { ScenariosTab } from './components/ScenariosTab';
@@ -129,24 +129,45 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
       }
       
       const environment = dotbot.getEnvironment();
-      const chain = environment === 'mainnet' ? 'polkadot' : 'westend';
+      const network = dotbot.getNetwork();
+      
+      // Default to Asset Hub for testnet scenarios (where users typically fund accounts)
+      // Use relay chain for mainnet or if explicitly specified in scenario
+      let defaultChain: ScenarioChain;
+      if (scenario.environment?.chain) {
+        // Use chain from scenario if explicitly set
+        defaultChain = scenario.environment.chain;
+      } else if (environment === 'mainnet') {
+        defaultChain = 'polkadot';
+      } else {
+        // For testnet, default to Asset Hub (where users typically fund accounts for testing)
+        defaultChain = network === 'polkadot' ? 'asset-hub-polkadot' : 'asset-hub-westend';
+      }
+      
+      const isAssetHub = defaultChain.includes('asset-hub');
+      const chainType = isAssetHub ? 'Asset Hub' : 'Relay Chain';
       
       const modifiedScenario: Scenario = {
         ...scenario,
         environment: {
-          chain: scenario.environment?.chain || (chain as 'westend' | 'polkadot'),
+          chain: defaultChain,
           mode: executionMode,
           ...scenario.environment?.chopsticksConfig && { chopsticksConfig: scenario.environment.chopsticksConfig },
         }
       };
+      
+      appendToReport(`[INFO] Using chain: ${defaultChain} (${chainType})\n`);
       
       appendToReport(`[SCENARIO] ${scenario.name} (${executionMode})\n\n`);
       
       await engine.runScenario(modifiedScenario);
       
     } catch (error) {
-      appendToReport(`[ERROR] ${error}\n`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      appendToReport(`[ERROR] Scenario failed: ${errorMessage}\n`);
       console.error('Scenario execution failed:', error);
+    } finally {
+      // Always clear running state so user can retry immediately
       setRunningScenario(null);
     }
   };
