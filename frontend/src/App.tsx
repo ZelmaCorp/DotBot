@@ -168,7 +168,7 @@ const App: React.FC = () => {
           },
           getEntityKeypair: (entityName: string) => {
             const entity = scenarioEngine.getEntity(entityName);
-            return entity?.mnemonic ? { mnemonic: entity.mnemonic } : undefined;
+            return entity?.uri ? { uri: entity.uri } : undefined;
           }
         });
         setIsScenarioEngineReady(true);

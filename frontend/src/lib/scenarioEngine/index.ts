@@ -199,6 +199,7 @@ export {
   STRESS_TESTS,
   CONTEXT_AWARENESS_TESTS,
   KNOWLEDGE_TESTS,
+  STATE_ALLOCATION_TESTS,
   
   // Helper functions
   getTestsByType,

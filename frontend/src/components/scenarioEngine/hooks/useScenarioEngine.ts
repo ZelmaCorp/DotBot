@@ -56,7 +56,7 @@ export const useScenarioEngine = ({
           name: e.name,
           address: e.address,
           type: e.type,
-          mnemonic: e.mnemonic,
+          uri: e.uri,
           balance: '0 DOT'
         })));
       } else if (event.type === 'scenario-complete') {

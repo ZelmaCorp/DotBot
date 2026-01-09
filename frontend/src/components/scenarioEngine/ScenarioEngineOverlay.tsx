@@ -31,7 +31,7 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
   onSendMessage 
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('entities');
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['happy-path']));
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['state-allocation', 'happy-path']));
   const [report, setReport] = useState<string>('');
   const [isCreatingEntities, setIsCreatingEntities] = useState(false);
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('synthetic');
@@ -76,14 +76,14 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
         name: e.name,
         address: e.address,
         type: e.type,
-        mnemonic: e.mnemonic,
+        uri: e.uri,
         balance: '0 DOT'
       }));
       
       appendToReport(`[CREATE] ${engineEntities.length} entities created (${executionMode} mode)\n`);
       engineEntities.forEach(e => {
-        const mnemonicInfo = executionMode === 'live' ? ' (no mnemonic)' : (e.mnemonic ? ' (mnemonic)' : '');
-        appendToReport(`  ${e.name}: ${e.address}${mnemonicInfo}\n`);
+        const uriInfo = executionMode === 'live' ? ' (no URI - security)' : (e.uri ? ` (${e.uri})` : '');
+        appendToReport(`  ${e.name}: ${e.address}${uriInfo}\n`);
       });
       
       verifyEntities(entityData, executionMode, appendToReport);

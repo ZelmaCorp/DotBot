@@ -13,7 +13,7 @@ interface Entity {
   name: string;
   address: string;
   type: string;
-  mnemonic?: string;
+  uri?: string;
   balance: string;
 }
 

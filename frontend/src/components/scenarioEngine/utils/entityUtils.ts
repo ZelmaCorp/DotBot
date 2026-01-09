@@ -8,7 +8,7 @@ interface Entity {
   name: string;
   address: string;
   type: string;
-  mnemonic?: string;
+  uri?: string;
 }
 
 /**
@@ -38,14 +38,14 @@ export const verifyEntities = (
   }
   
   if (mode === 'live') {
-    const withMnemonics = entities.filter(e => e.mnemonic);
-    if (withMnemonics.length > 0) {
-      appendToReport(`[VERIFY] ⚠️ Live mode should not have mnemonics\n`);
+    const withURIs = entities.filter(e => e.uri);
+    if (withURIs.length > 0) {
+      appendToReport(`[VERIFY] ⚠️ Live mode should not expose URIs (security)\n`);
     }
   } else {
-    const withoutMnemonics = entities.filter(e => !e.mnemonic);
-    if (withoutMnemonics.length > 0) {
-      appendToReport(`[VERIFY] ⚠️ Missing mnemonics: ${withoutMnemonics.map(e => e.name).join(', ')}\n`);
+    const withoutURIs = entities.filter(e => !e.uri);
+    if (withoutURIs.length > 0) {
+      appendToReport(`[VERIFY] ⚠️ Missing URIs: ${withoutURIs.map(e => e.name).join(', ')} (cannot sign)\n`);
     }
   }
   

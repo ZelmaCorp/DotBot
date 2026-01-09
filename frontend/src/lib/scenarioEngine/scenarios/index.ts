@@ -23,3 +23,7 @@ export {
   getSmokeTests,
 } from './testPrompts';
 
+export {
+  STATE_ALLOCATION_TESTS,
+} from './stateAllocationTests';
+
