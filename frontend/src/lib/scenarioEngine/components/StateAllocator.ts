@@ -89,6 +89,12 @@ export interface StateAllocatorConfig {
   
   /** RPC endpoint (for live mode, optional if rpcManagerProvider provided) */
   rpcEndpoint?: string;
+  
+  /** SS58 format for address encoding (0 = Polkadot, 42 = Westend) */
+  ss58Format?: number;
+  
+  /** Seed prefix for deterministic generation */
+  seedPrefix?: string;
 }
 
 export interface AllocationResult {
@@ -125,7 +131,15 @@ export class StateAllocator {
   private chatManager: ChatInstanceManager;
 
   constructor(config: StateAllocatorConfig) {
-    this.config = config;
+    // Set defaults for ss58Format and seedPrefix
+    const ss58Format = config.ss58Format ?? (config.chain === 'polkadot' || config.chain === 'asset-hub-polkadot' ? 0 : 42);
+    const seedPrefix = config.seedPrefix ?? 'dotbot-scenario';
+    
+    this.config = {
+      ...config,
+      ss58Format,
+      seedPrefix,
+    };
     this.chatManager = new ChatInstanceManager();
   }
 
@@ -324,6 +338,98 @@ export class StateAllocator {
       errors: [],
     };
 
+    // For live mode, check dev account balance first
+    let devAccount: any = null;
+    let devAccountAddress: string | null = null;
+    if (this.config.mode === 'live') {
+      devAccount = this.getDevAccount();
+      if (devAccount) {
+        devAccountAddress = devAccount.address;
+        // Check if dev account has sufficient balance
+        const totalNeeded = config.accounts.reduce((sum, acc) => {
+          const parsed = this.parseBalance(acc.balance);
+          return sum.add(new BN(parsed.planck));
+        }, new BN(0));
+        
+        try {
+          const accountInfo = await this.api!.query.system.account(devAccountAddress);
+          // AccountInfo has structure: { data: { free, reserved, ... }, nonce, ... }
+          const accountData = (accountInfo as any).data;
+          const freeBalance = new BN(accountData.free.toString());
+          const reservedBalance = new BN(accountData.reserved.toString());
+          const availableBalance = freeBalance.sub(reservedBalance);
+          
+          // Reserve some balance for fees (rough estimate: 0.1 DOT)
+          const feeReserve = this.parseBalance('0.1 DOT').planck;
+          const requiredBalance = totalNeeded.add(new BN(feeReserve));
+          
+          if (availableBalance.lt(requiredBalance)) {
+            const neededDOT = this.formatBalance(requiredBalance.sub(availableBalance).toString());
+            const faucetLink = this.config.chain === 'westend' 
+              ? 'https://faucet.polkadot.io/westend'
+              : 'https://faucet.polkadot.io';
+            
+            const token = this.config.chain.includes('polkadot') ? 'DOT' : 'WND';
+            result.warnings.push(
+              `⚠️  DEV ACCOUNT NEEDS FUNDING\n` +
+              `\n` +
+              `   Dev Account Address:\n` +
+              `   ${devAccountAddress}\n` +
+              `\n` +
+              `   Current Balance: ${this.formatBalance(availableBalance.toString(), token)}\n` +
+              `   Required: ${neededDOT} (for ${config.accounts.length} entities + transaction fees)\n` +
+              `\n` +
+              `   Next Step: Fund the dev account via faucet:\n` +
+              `   ${faucetLink}\n` +
+              `\n` +
+              `   After funding, re-run the scenario.`
+            );
+            // Still track expected balances even if we can't transfer
+            for (const accountConfig of config.accounts) {
+              const entity = this.config.entityResolver(accountConfig.entityName);
+              if (entity) {
+                const parsed = this.parseBalance(accountConfig.balance);
+                result.balances.set(entity.address, { free: parsed.planck });
+              }
+            }
+            return result;
+          }
+        } catch (error) {
+          result.errors.push(`Failed to check dev account balance: ${error}`);
+          result.success = false;
+          return result;
+        }
+      } else {
+        // No dev account configured - show instructions
+        const devAccountAddress = this.getDevAccountAddress();
+        const faucetLink = this.config.chain === 'westend' 
+          ? 'https://faucet.polkadot.io/westend'
+          : 'https://faucet.polkadot.io';
+        
+        const token = this.config.chain.includes('polkadot') ? 'DOT' : 'WND';
+        result.warnings.push(
+          `⚠️  DEV ACCOUNT REQUIRED FOR LIVE MODE\n` +
+          `\n` +
+          `   Dev Account Address:\n` +
+          `   ${devAccountAddress}\n` +
+          `\n` +
+          `   Next Step: Fund the dev account via faucet:\n` +
+          `   ${faucetLink}\n` +
+          `\n` +
+          `   After funding, re-run the scenario.`
+        );
+        // Still track expected balances
+        for (const accountConfig of config.accounts) {
+          const entity = this.config.entityResolver(accountConfig.entityName);
+          if (entity) {
+            const parsed = this.parseBalance(accountConfig.balance);
+            result.balances.set(entity.address, { free: parsed.planck });
+          }
+        }
+        return result;
+      }
+    }
+
     for (const accountConfig of config.accounts) {
       try {
         // Resolve entity name to address
@@ -338,7 +444,8 @@ export class StateAllocator {
         await this.allocateBalance(
           entity.address,
           accountConfig.balance,
-          result
+          result,
+          devAccount
         );
 
         // Allocate assets if specified
@@ -482,7 +589,8 @@ export class StateAllocator {
   private async allocateBalance(
     address: string,
     balance: string,
-    result: AllocationResult
+    result: AllocationResult,
+    devAccount?: any
   ): Promise<void> {
     const parsedBalance = this.parseBalance(balance);
     
@@ -499,8 +607,8 @@ export class StateAllocator {
         break;
         
       case 'live':
-        // In live mode, transfer from faucet or funded account
-        await this.transferLiveBalance(address, parsedBalance.planck, result);
+        // In live mode, transfer from dev account
+        await this.transferLiveBalance(address, parsedBalance.planck, result, devAccount);
         break;
     }
   }
@@ -554,28 +662,23 @@ export class StateAllocator {
   private async transferLiveBalance(
     address: string,
     planck: string,
-    result: AllocationResult
+    result: AllocationResult,
+    devAccount?: any
   ): Promise<void> {
     if (!this.api) {
       throw new Error('API not initialized for live mode');
     }
 
-    try {
-      // For live mode, we need a funded account to transfer from
-      // This should be provided via config or use a faucet
-      // For now, we'll use a deterministic dev account based on the scenario seed
-      const devAccount = this.getDevAccount();
-      
-      if (!devAccount) {
-        result.warnings.push(
-          `Live balance transfer requires a funded dev account. ` +
-          `Please fund ${address} manually or configure a dev account.`
-        );
-        // Still track the expected balance
-        result.balances.set(address, { free: planck });
-        return;
-      }
+    if (!devAccount) {
+      // This should not happen if allocateWalletState checked properly
+      result.errors.push(
+        `Dev account not available for transfer to ${address}`
+      );
+      result.balances.set(address, { free: planck });
+      return;
+    }
 
+    try {
       // Create transfer extrinsic
       const amountBN = new BN(planck);
       const transferExtrinsic = this.api.tx.balances.transferKeepAlive(
@@ -615,19 +718,49 @@ export class StateAllocator {
    * Uses a deterministic account based on scenario seed
    */
   private getDevAccount(): any | null {
-    // For live mode, we need a real funded account
-    // This could be:
-    // 1. A configured dev account mnemonic in config
-    // 2. A deterministic account from scenario seed
-    // 3. A faucet account
-    
-    // For now, return null and let the caller handle it
-    // In a real implementation, this would:
-    // - Check config for devAccountMnemonic
-    // - Or use a deterministic account from scenario seed
-    // - Or use a faucet service
-    
-    return null;
+    if (this.config.mode !== 'live' || !this.api) {
+      return null;
+    }
+
+    try {
+      // Create a deterministic dev account using the same pattern as entities
+      // Use a fixed seed prefix for the dev account
+      const keyring = new Keyring({ 
+        type: 'sr25519', 
+        ss58Format: this.config.ss58Format 
+      });
+      
+      // Use a deterministic URI for the dev account: //{seedPrefix}/dev
+      const devUri = `//${this.config.seedPrefix}/dev`;
+      const devPair = keyring.addFromUri(devUri);
+      
+      return devPair;
+    } catch (error) {
+      console.error('[StateAllocator] Failed to create dev account:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get the dev account address (for display purposes)
+   */
+  private getDevAccountAddress(): string {
+    if (this.config.mode !== 'live') {
+      return '';
+    }
+
+    try {
+      const keyring = new Keyring({ 
+        type: 'sr25519', 
+        ss58Format: this.config.ss58Format 
+      });
+      const devUri = `//${this.config.seedPrefix}/dev`;
+      const devPair = keyring.addFromUri(devUri);
+      return devPair.address;
+    } catch (error) {
+      console.error('[StateAllocator] Failed to get dev account address:', error);
+      return '';
+    }
   }
 
   // ===========================================================================
@@ -875,6 +1008,27 @@ export class StateAllocator {
     const planck = whole + paddedFraction;
     // Remove leading zeros but keep at least one digit
     return planck.replace(/^0+/, '') || '0';
+  }
+
+  /**
+   * Format planck value to human-readable balance
+   */
+  private formatBalance(planck: string, token?: string): string {
+    const decimals = this.getDecimals(token);
+    const planckBN = new BN(planck);
+    const divisor = new BN(10).pow(new BN(decimals));
+    const whole = planckBN.div(divisor);
+    const fraction = planckBN.mod(divisor);
+    
+    // Format with appropriate decimals
+    const fractionStr = fraction.toString().padStart(decimals, '0');
+    const trimmedFraction = fractionStr.replace(/0+$/, '');
+    
+    if (trimmedFraction === '') {
+      return `${whole.toString()} ${token || (this.config.chain.includes('polkadot') ? 'DOT' : 'WND')}`;
+    }
+    
+    return `${whole.toString()}.${trimmedFraction} ${token || (this.config.chain.includes('polkadot') ? 'DOT' : 'WND')}`;
   }
 }
 
