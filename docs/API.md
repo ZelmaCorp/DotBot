@@ -623,11 +623,44 @@ console.log(result.response);
 ```
 
 **Breaking Changes:**
-- ⚠️ v0.2.0: No longer auto-executes. Returns `executed: false`. User must approve.
+- ⚠️ v0.2.0: No longer auto-executes. Returns `executed: false`. User must approve via `startExecution()`.
+
+**Migration:**
+```typescript
+// OLD (v0.1.0) - Auto-execution
+const result = await dotbot.chat("Send 2 DOT");
+// Execution happened automatically
+
+// NEW (v0.2.0) - Two-step
+const result = await dotbot.chat("Send 2 DOT");
+// result.executed = false
+// UI shows ExecutionFlow with "Accept & Start" button
+// User clicks → dotbot.startExecution(executionId)
+```
 
 **Version History:**
-- v0.2.0 (January 2026): Changed to two-step execution (prepare, then user approves)
+- v0.2.0 (PR #44, #45, January 2026): Changed to two-step execution (prepare, then user approves)
 - v0.1.0: Initial implementation (auto-executed immediately)
+
+---
+
+#### `DotBot.prepareExecution()`
+
+**NEW** in v0.2.0: Prepare execution plan (orchestrates and adds to chat, but does NOT execute).
+
+```typescript
+private async prepareExecution(plan: ExecutionPlan): Promise<void>
+```
+
+**Note:** This is called automatically by `chat()` when an ExecutionPlan is detected. You typically don't call this directly.
+
+**Behavior:**
+1. Orchestrates ExecutionPlan → calls agents → creates ExecutionArray
+2. Adds ExecutionMessage to chat timeline
+3. UI shows ExecutionFlow component for user review
+4. Does NOT execute - waits for user approval
+
+**Version Added:** v0.2.0 (PR #44, January 2026)
 
 ---
 
@@ -646,6 +679,12 @@ async startExecution(
 - `executionId` (string): Unique ID from `ExecutionMessage.executionId`
 - `options` (ExecutionOptions, optional): Execution options (e.g., `autoApprove`)
 
+**Behavior:**
+- If execution was interrupted, rebuilds ExecutionArray from ExecutionPlan
+- Restores state from saved ExecutionArrayState (preserves progress)
+- Executes the ExecutionArray
+- Updates ExecutionMessage in chat as execution progresses
+
 **Usage:**
 ```typescript
 // After chat() prepares execution
@@ -659,8 +698,9 @@ await dotbot.startExecution(executionMessage.executionId);
 **Throws:**
 - Error if no active chat
 - Error if executionId not found
+- Error if execution rebuild fails
 
-**Version Added:** v0.2.0 (January 2026)
+**Version Added:** v0.2.0 (PR #44, January 2026)
 
 ---
 
@@ -796,6 +836,307 @@ const execution = dotbot.currentChat?.getExecutionArray(executionId);
 ```
 
 **See:** ChatInstance API for full details
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getAllMessages()`
+
+Get all conversation items (messages + execution flows) from current chat.
+
+```typescript
+getAllMessages(): ConversationItem[]
+```
+
+**Returns:** Array of all conversation items (TextMessage, ExecutionMessage, SystemMessage, etc.)
+
+**Example:**
+```typescript
+const messages = dotbot.getAllMessages();
+messages.forEach(item => {
+  if (item.type === 'text') {
+    console.log(item.content);
+  } else if (item.type === 'execution') {
+    console.log('Execution flow:', item.executionId);
+  }
+});
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getHistory()`
+
+Get conversation history for LLM context (text messages only).
+
+```typescript
+getHistory(): ConversationMessage[]
+```
+
+**Returns:** Array of conversation messages in LLM format (role + content)
+
+**Note:** This is different from `getAllMessages()` - it only returns text messages in LLM format, not execution flows.
+
+**Example:**
+```typescript
+const history = dotbot.getHistory();
+// Pass to LLM for context
+const response = await llm.chat(message, { history });
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getExecutionArrayState()`
+
+Get current execution array state (if any).
+
+```typescript
+getExecutionArrayState(): ExecutionArrayState | null
+```
+
+**Returns:** Current execution state or `null` if no active execution
+
+**Example:**
+```typescript
+const state = dotbot.getExecutionArrayState();
+if (state) {
+  console.log(`Execution: ${state.items.length} items, ${state.items.filter(i => i.status === 'completed').length} completed`);
+}
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getRpcHealth()`
+
+Get RPC endpoint health status for both Relay Chain and Asset Hub.
+
+```typescript
+getRpcHealth(): {
+  relayChain: {
+    current: string;
+    endpoints: HealthStatus[];
+  };
+  assetHub: {
+    current: string;
+    endpoints: HealthStatus[];
+  };
+}
+```
+
+**Returns:** Health status for all endpoints
+
+**Example:**
+```typescript
+const health = dotbot.getRpcHealth();
+console.log('Relay Chain:', health.relayChain.current);
+console.log('Asset Hub:', health.assetHub.current);
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getConnectedEndpoints()`
+
+Get currently connected RPC endpoints.
+
+```typescript
+getConnectedEndpoints(): {
+  relayChain: string;
+  assetHub: string | null;
+}
+```
+
+**Returns:** Currently active endpoints
+
+**Example:**
+```typescript
+const endpoints = dotbot.getConnectedEndpoints();
+console.log('Relay Chain:', endpoints.relayChain);
+console.log('Asset Hub:', endpoints.assetHub || 'Not connected');
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getBalance()`
+
+Get account balance from both Relay Chain and Asset Hub.
+
+```typescript
+getBalance(): Promise<{
+  relayChain: {
+    free: string;
+    reserved: string;
+    frozen: string;
+  };
+  assetHub: {
+    free: string;
+    reserved: string;
+    frozen: string;
+  } | null;
+  total: string;
+}>
+```
+
+**Returns:** Balance information for current wallet account
+
+**Example:**
+```typescript
+const balance = await dotbot.getBalance();
+console.log('Total balance:', balance.total);
+console.log('Relay Chain free:', balance.relayChain.free);
+if (balance.assetHub) {
+  console.log('Asset Hub free:', balance.assetHub.free);
+}
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getChainInfo()`
+
+Get chain information (name and version).
+
+```typescript
+getChainInfo(): Promise<{
+  chain: string;
+  version: string;
+}>
+```
+
+**Returns:** Chain name and version
+
+**Example:**
+```typescript
+const info = await dotbot.getChainInfo();
+console.log(`Connected to ${info.chain} (${info.version})`);
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getApi()`
+
+Get Polkadot API instance (for advanced usage).
+
+```typescript
+getApi(): ApiPromise
+```
+
+**Returns:** Relay Chain ApiPromise instance
+
+**Example:**
+```typescript
+const api = dotbot.getApi();
+const balance = await api.query.system.account(address);
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getAssetHubApi()`
+
+Get Asset Hub API instance (for advanced usage).
+
+```typescript
+getAssetHubApi(): ApiPromise | null
+```
+
+**Returns:** Asset Hub ApiPromise instance or `null` if not connected
+
+**Example:**
+```typescript
+const assetHubApi = dotbot.getAssetHubApi();
+if (assetHubApi) {
+  const balance = await assetHubApi.query.system.account(address);
+}
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.getWallet()`
+
+Get current wallet account.
+
+```typescript
+getWallet(): WalletAccount
+```
+
+**Returns:** Current wallet account
+
+**Example:**
+```typescript
+const wallet = dotbot.getWallet();
+console.log('Address:', wallet.address);
+console.log('Source:', wallet.source);
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.loadChatInstance()`
+
+Load a specific chat instance by ID. Switches environment/network if needed.
+
+```typescript
+async loadChatInstance(chatId: string): Promise<void>
+```
+
+**Parameters:**
+- `chatId` (string): Chat instance ID to load
+
+**Behavior:**
+- Loads chat instance from storage
+- Switches environment/network if needed
+- Reconnects APIs for new network
+- Restores chat state
+
+**Throws:**
+- Error if chat instance not found
+
+**Example:**
+```typescript
+// Load a previous chat
+await dotbot.loadChatInstance('chat_1234567890_abc');
+console.log('Loaded chat:', dotbot.currentChat?.id);
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+#### `DotBot.disconnect()`
+
+Disconnect all API connections and cleanup.
+
+```typescript
+async disconnect(): Promise<void>
+```
+
+**Behavior:**
+- Disconnects Relay Chain API
+- Disconnects Asset Hub API (if connected)
+- Cleans up resources
+
+**Example:**
+```typescript
+// Cleanup when done
+await dotbot.disconnect();
+```
 
 **Version Added:** v0.2.0 (January 2026)
 
@@ -2092,11 +2433,14 @@ export class CustomAgent extends BaseAgent {
 
 ### Simulation Status Tracking
 
+**Note:** Simulation is optional. Status callbacks are only invoked when simulation is enabled.
+
 ```typescript
 agent.initialize(
   relayApi,
   assetHubApi,
   (status) => {
+    // Only called when simulation is enabled
     console.log(`[${status.phase}] ${status.message}`);
     
     if (status.progress !== undefined) {
@@ -2117,6 +2461,11 @@ agent.initialize(
 - `'executing'` - Executing extrinsic
 - `'complete'` - Simulation successful
 - `'error'` - Simulation failed
+
+**When simulation is disabled:**
+- Status callback is never invoked
+- Execution items start with `'ready'` status (not `'pending'`)
+- Execution proceeds directly to signing phase
 
 ---
 
@@ -2218,14 +2567,20 @@ interface ExecutionItem {
 
 // Execution status
 type ExecutionStatus =
-  | 'pending'
-  | 'ready'
-  | 'simulating'
-  | 'signing'
-  | 'broadcasting'
-  | 'finalized'
-  | 'failed'
-  | 'cancelled';
+  | 'pending'      // Waiting for simulation (only when simulation enabled)
+  | 'ready'        // Ready for signing (initial status when simulation disabled, or after simulation passes)
+  | 'executing'    // Currently executing
+  | 'signing'      // User is signing transaction
+  | 'broadcasting' // Transaction being broadcast to network
+  | 'in_block'     // Transaction included in block
+  | 'finalized'    // Transaction finalized
+  | 'completed'    // Operation completed successfully
+  | 'failed'       // Operation failed
+  | 'cancelled';   // User cancelled operation
+
+// Note: Initial status depends on simulation setting:
+// - When simulation enabled: Items start as 'pending' (will be simulated)
+// - When simulation disabled: Items start as 'ready' (ready for signing)
 
 // Execution result
 interface ExecutionResult {
@@ -2350,9 +2705,103 @@ if (new BN(balance.available).lt(required)) {
 
 ---
 
+## Breaking Changes
+
+### v0.2.0 (January 2026)
+
+**⚠️ IMPORTANT:** These changes require code updates. See migration guide below.
+
+**Removed Methods:**
+- ⚠️ **`DotBot.executeWithArrayTracking(plan, options)`** - Removed in v0.2.0
+  - **Replacement**: Use `prepareExecution(plan)` + `startExecution(executionId)` instead
+  - **Reason**: Two-step execution pattern provides better UX and safety
+  
+- ⚠️ **`DotBot.onExecutionArrayUpdate(callback)`** - Removed in v0.2.0
+  - **Replacement**: Use `dotbot.currentChat.onExecutionUpdate(executionId, callback)` instead
+  - **Reason**: Execution state now belongs to ChatInstance, not DotBot
+  
+- ⚠️ **`DotBot.currentExecutionArray`** (property) - Removed in v0.2.0
+  - **Replacement**: Use `dotbot.currentChat.getExecutionArray(executionId)` instead
+  - **Reason**: Multiple execution flows per conversation, each with unique ID
+
+**Changed Behavior:**
+- ⚠️ **`DotBot.chat()`** - No longer auto-executes. Returns `executed: false`. User must approve via `startExecution()`.
+- ⚠️ **Type Renames:**
+  - `ChatMessage` → `ConversationItem` (union type for all conversation elements)
+  - `ChatInstance` (interface) → `ChatInstanceData` (data structure)
+  - `ChatInstance` is now a class (not an interface)
+
+**Migration Guide:**
+
+**Before (v0.1.0):**
+```typescript
+// Auto-execution
+const result = await dotbot.chat("Send 2 DOT to Alice");
+// Execution happens automatically
+
+// Execution tracking
+dotbot.onExecutionArrayUpdate((state) => {
+  console.log('Progress:', state);
+});
+
+// Access execution
+const array = dotbot.currentExecutionArray;
+```
+
+**After (v0.2.0):**
+```typescript
+// Two-step execution
+const result = await dotbot.chat("Send 2 DOT to Alice");
+// result.executed = false (user must approve)
+
+// Get execution message
+const messages = dotbot.currentChat.getDisplayMessages();
+const execMessage = messages.find(m => m.type === 'execution');
+
+// User clicks "Accept & Start" → execute
+await dotbot.startExecution(execMessage.executionId);
+
+// Execution tracking
+dotbot.currentChat.onExecutionUpdate(execMessage.executionId, (state) => {
+  console.log('Progress:', state);
+});
+
+// Access execution
+const array = dotbot.currentChat.getExecutionArray(execMessage.executionId);
+```
+
+---
+
 ## Version History
 
-### Current Version (v1.0.0)
+### v0.2.0 (January 2026)
+
+**Breaking Changes:**
+- Removed `executeWithArrayTracking()`, `onExecutionArrayUpdate()`, `currentExecutionArray`
+- `chat()` no longer auto-executes (requires user approval)
+- Type renames: `ChatMessage` → `ConversationItem`, `ChatInstance` interface → `ChatInstanceData`
+
+**New Features:**
+- Environment system (mainnet/testnet) with environment-bound chat instances
+- Two-step execution pattern (`prepareExecution()` + `startExecution()`)
+- ChatInstance class with full lifecycle management
+- ChatInstanceManager for CRUD operations
+- DataManager for GDPR compliance
+- Storage abstraction layer (IChatStorage)
+- Optional simulation with status-aware initialization
+- UI components: EnvironmentBadge, EnvironmentSwitch, ChatHistory
+- useDebounce hook for Connect button
+- Message component with avatar, name, date structure
+- Multiple execution flows per conversation
+- Execution flow rebuild and resume capability
+
+**Improvements:**
+- Better developer UX (DotBot manages ChatInstanceManager internally)
+- Clearer separation of concerns
+- Environment isolation prevents cross-environment operations
+- User approval required before execution (safer)
+
+### v0.1.0 (January 2026)
 
 **Breaking Changes:**
 - Agent must create extrinsics (not just metadata)

@@ -124,7 +124,10 @@ agents/
         ├── safeExtrinsicBuilder.ts  # Extrinsic creation with fallbacks
         ├── capabilityDetectors.ts   # Method detection helpers
         ├── addressEncoder.ts        # SS58 address encoding
-        └── amountNormalizer.ts      # Amount conversion (human → Planck)
+        ├── addressValidation.ts     # Address format validation
+        ├── amountNormalizer.ts      # Amount conversion (human → Planck)
+        ├── amountParser.ts          # Amount parsing utilities
+        └── balanceValidator.ts      # Balance validation helpers
 ```
 
 **Key Classes:**
@@ -149,26 +152,41 @@ agents/
 executionEngine/
 ├── executioner.ts           # Main execution coordinator
 ├── executionArray.ts        # Transaction queue management
+├── orchestrator.ts          # Execution plan orchestration
+├── system.ts                # ExecutionSystem (high-level API)
+├── utils.ts                 # Execution utilities
 ├── types.ts                 # Execution-related types
 ├── simulation/              # Pre-execution simulation
 │   └── executionSimulator.ts
 ├── signing/                 # Transaction signing
 │   └── executionSigner.ts
-└── broadcasting/            # Network broadcasting
-    └── executionBroadcaster.ts
+├── broadcasting/            # Network broadcasting
+│   └── executionBroadcaster.ts
+└── signers/                 # Signer implementations
+    ├── browserSigner.ts     # Browser wallet signer
+    ├── keyringSigner.ts     # Keyring signer (CLI/backend)
+    └── types.ts             # Signer types
 ```
 
 **Flow:**
 1. **Simulation**: Validate with Chopsticks (optional)
+   - If enabled: Items start as `'pending'`, simulation runs before signing
+   - If disabled: Items start as `'ready'`, execution proceeds directly to signing
 2. **Signing**: Get user approval and sign
 3. **Broadcasting**: Send to network
 4. **Monitoring**: Wait for finalization
 
 **Key Principle**: Executioner is **generic** - it doesn't know about specific agents. It only knows how to:
-- Simulate any extrinsic
+- Optionally simulate any extrinsic (if simulation enabled)
 - Sign any extrinsic
 - Broadcast any extrinsic
 - Monitor any transaction
+
+**Status Initialization:**
+- Items initialize with status based on simulation setting:
+  - `'pending'` when simulation enabled (will be simulated first)
+  - `'ready'` when simulation disabled (ready for immediate signing)
+- This ensures UI correctly reflects execution flow
 
 ---
 
@@ -283,6 +301,53 @@ lib/
 - Validate environment/network compatibility
 
 **Design Principle**: Conversations are first-class entities that own their execution state, not just message logs.
+
+---
+
+### Frontend Components (`frontend/src/components/`)
+
+**Purpose**: React UI components for DotBot interface.
+
+**Key Components:**
+
+1. **Environment Management**
+   - `EnvironmentBadge` - Visual indicator for current environment (mainnet/testnet)
+   - `EnvironmentSwitch` - Toggle between mainnet and testnet environments
+   - Integrated with DotBot's `switchEnvironment()` method
+
+2. **Chat Interface**
+   - `ChatHistory` - List of previous conversations with search capability
+   - `Message` - Individual message component with avatar, name, date, and content
+   - Supports both user and bot messages with proper styling
+
+3. **Execution Flow**
+   - `ExecutionFlow` - Visual representation of ExecutionArray
+   - Shows transaction steps, status, and progress
+   - "Accept & Start" button for user approval
+   - Respects simulation setting (shows/hides simulation UI)
+
+4. **Wallet Integration**
+   - `WalletModal` - Wallet connection and account management
+   - `WalletAccountItem` - Individual account display
+   - `WalletAccountsList` - List of available accounts
+   - `WalletConnectedState` - Connected wallet state display
+   - `WalletEmptyState` - Empty state when no wallet connected
+
+**Hooks:**
+- `useDebounce` - Debounces function calls (used for Connect button to prevent rapid clicks)
+- `useDebouncedClick` - Specialized hook for debouncing click handlers
+
+**Styling:**
+- Theme-aware CSS variables for light/dark mode
+- Environment-specific styling (amber for testnet in light mode)
+- Message bubble styling with proper border-radius and colors
+- Responsive design considerations
+
+**Design Principles:**
+- Components are environment-aware
+- UI reflects simulation state correctly
+- Clear visual separation between mainnet and testnet
+- User approval required before execution
 
 ---
 
@@ -459,59 +524,70 @@ async execute(item) {
 
 ---
 
-### Decision 3: Chopsticks Simulation Before Execution
+### Decision 3: Optional Chopsticks Simulation Before Execution
 
 **Context:**
 - Users can't predict if transaction will succeed
 - Failed transactions waste fees
 - Some errors only appear during runtime execution
+- Simulation adds latency (1-3 seconds) which may not always be desired
 
 **Decision:**
-Optionally simulate all extrinsics with Chopsticks before signing.
+Simulation is **optional** and can be enabled/disabled. When enabled, all extrinsics are simulated with Chopsticks before signing. When disabled, execution proceeds directly to signing. Execution items initialize with status based on simulation setting (`'pending'` when enabled, `'ready'` when disabled).
 
 **Rationale:**
-1. **Error Prevention**: Catch failures before spending fees
-2. **User Confidence**: Show balance changes preview
-3. **Better UX**: Explain why transaction would fail
-4. **Optional**: Can be disabled for speed
+1. **Error Prevention**: Catch failures before spending fees (when enabled)
+2. **User Confidence**: Show balance changes preview (when enabled)
+3. **Better UX**: Explain why transaction would fail (when enabled)
+4. **Flexibility**: Can be disabled for speed or when simulation infrastructure unavailable
+5. **Status-Aware Initialization**: UI correctly reflects execution flow based on simulation setting
 
 **Alternatives Considered:**
-1. ❌ **No simulation**: Just send transactions and hope
+1. ❌ **Always simulate**: Required simulation for all transactions
+   - Problem: Adds latency even when not needed
+   - Problem: Requires Chopsticks infrastructure always available
+   
+2. ❌ **No simulation**: Just send transactions and hope
    - Poor UX
    - Wasted fees on failures
    
-2. ❌ **RPC dry-run only**: Use `paymentInfo()` or `dryRun()`
+3. ❌ **RPC dry-run only**: Use `paymentInfo()` or `dryRun()`
    - Doesn't actually execute runtime logic
    - Misses balance/permission issues
    
-3. ✅ **Chopsticks simulation**: Real runtime execution locally
-   - Most accurate
-   - Shows actual balance changes
-   - Falls back to dry-run if unavailable
+4. ✅ **Optional Chopsticks simulation**: Real runtime execution locally (when enabled)
+   - Most accurate when enabled
+   - Shows actual balance changes when enabled
+   - Falls back to dry-run if Chopsticks unavailable
+   - Can be disabled for speed
+   - Status initialization adapts to simulation setting
 
 **Consequences:**
-- Requires Chopsticks dependency
-- Adds latency (1-3 seconds)
-- Greatly improves UX
-- Reduces failed transactions
+- **When enabled**: Requires Chopsticks dependency, adds latency (1-3 seconds), greatly improves UX, reduces failed transactions
+- **When disabled**: Faster execution, no simulation infrastructure needed, items start as `'ready'` instead of `'pending'`
+- **Status Flow**: Items initialize with `'pending'` status when simulation enabled (will be simulated), `'ready'` when disabled (ready for signing)
 
 **Implementation:**
 ```typescript
-// Automatic simulation
-const simulationResult = await simulateTransaction(
-  api,
-  endpoints,
-  extrinsic,
-  address
-);
+// Simulation control (executionSimulator.ts)
+export function shouldSimulate(): boolean {
+  return false;  // Toggle to enable/disable
+}
 
-if (!simulationResult.success) {
-  // Show error before signing
-  throw new Error(simulationResult.error);
+// Status-aware initialization (executionArray.ts, utils.ts)
+const initialStatus = shouldSimulate() ? 'pending' : 'ready';
+
+// Execution flow (executioner.ts)
+if (shouldSimulate()) {
+  await runSimulation(extrinsic, context, executionArray, item);
+} else {
+  executionArray.updateStatus(item.id, 'ready');
 }
 ```
 
-(Updated: January 2026)
+**History:**
+- v0.2.0 (PR #49, January 2026): Made simulation optional with status-aware initialization
+- v0.1.0 (January 2026): Initial implementation (simulation always attempted)
 
 ---
 
@@ -620,7 +696,68 @@ class CustomSigner implements Signer { ... }
 
 ---
 
-### Decision 6: Multi-Network Architecture
+### Decision 6: Environment System (Mainnet/Testnet)
+
+**Context:**
+- Users need clear separation between production (mainnet) and testing (testnet) environments
+- Chat instances should be isolated by environment to prevent accidental cross-environment operations
+- UI needs to clearly indicate which environment is active
+- Users should be able to switch environments easily
+- Chat history should be searchable and filterable by environment
+
+**Decision:**
+Implement an environment system with:
+1. `Environment` type: `'mainnet' | 'testnet'` (extensible for future environments)
+2. Environment-bound chat instances (immutable environment binding)
+3. Environment-aware UI components (EnvironmentBadge, EnvironmentSwitch)
+4. Chat history with environment filtering
+5. Automatic environment validation when switching networks
+
+**Rationale:**
+1. **Safety**: Prevents accidental testnet operations on mainnet
+2. **Clarity**: Users always know which environment they're using
+3. **Isolation**: Chat instances cannot mix environments
+4. **UX**: Easy switching between environments with clear visual indicators
+5. **Future-Proof**: Extensible to additional environments (devnet, etc.)
+
+**Implementation:**
+```typescript
+type Environment = 'mainnet' | 'testnet';
+
+// Chat instances bound to environment
+class ChatInstance {
+  readonly environment: Environment;  // Immutable
+  readonly network: Network;          // Mutable within environment
+}
+
+// Environment validation
+const ENVIRONMENT_NETWORKS: Record<Environment, Network[]> = {
+  mainnet: ['polkadot', 'kusama'],
+  testnet: ['westend']
+};
+
+// UI components
+<EnvironmentBadge environment={dotbot.getEnvironment()} />
+<EnvironmentSwitch 
+  currentEnvironment={dotbot.getEnvironment()}
+  onSwitch={async (env) => await dotbot.switchEnvironment(env)}
+/>
+```
+
+**Consequences:**
+- **Breaking**: Chat instances are now environment-bound (cannot change)
+- **Feature**: Environment switching creates new chat instance
+- **Feature**: Chat history can filter by environment
+- **UI**: Clear visual indicators for current environment
+- **Safety**: Prevents cross-environment operations
+
+**History:**
+- v0.2.0 (PR #44, #45, #46, January 2026): Initial environment system implementation
+- v0.1.0: No environment concept (mainnet only)
+
+---
+
+### Decision 7: Multi-Network Architecture
 
 **Context:**
 - DotBot initially focused solely on Polkadot mainnet
@@ -791,7 +928,7 @@ This architecture enables:
 
 ---
 
-### Decision 7: Chat Instance Architecture
+### Decision 8: Chat Instance Architecture
 
 **Context:**
 - Initial implementation had execution state (ExecutionArray) as a global singleton in DotBot
@@ -933,7 +1070,7 @@ await dotbot.startExecution(executionMessage.executionId);
 
 ---
 
-### Decision 8: Storage Abstraction and GDPR Compliance
+### Decision 9: Storage Abstraction and GDPR Compliance
 
 **Context:**
 - Chat instances need persistence (localStorage initially)
@@ -1109,9 +1246,13 @@ export const STORAGE_KEYS = {
 │                                                             │
 │    ┌─────────────────────────────────────────┐           │
 │    │ a) Simulation (optional)                │           │
-│    │    - Chopsticks runtime execution       │           │
-│    │    - Show balance changes               │           │
-│    │    - Catch errors early                 │           │
+│    │    - If enabled:                        │           │
+│    │      • Chopsticks runtime execution      │           │
+│    │      • Show balance changes              │           │
+│    │      • Catch errors early                │           │
+│    │    - If disabled:                        │           │
+│    │      • Skip simulation                   │           │
+│    │      • Status: 'ready'                   │           │
 │    └─────────────────────────────────────────┘           │
 │                     ↓                                       │
 │    ┌─────────────────────────────────────────┐           │
@@ -1401,6 +1542,60 @@ class AgentError extends Error {
 4. **Performance**: Simulation adds latency
 
 ---
+
+### Decision 10: Two-Step Execution Pattern
+
+**Context:**
+- Initial implementation auto-executed transactions immediately after LLM response
+- Users had no opportunity to review transactions before signing
+- Execution state was global in DotBot, preventing multiple concurrent flows
+- No way to resume interrupted execution flows
+
+**Decision:**
+Implement two-step execution pattern:
+1. **Prepare**: `prepareExecution(plan)` - Orchestrates plan, adds ExecutionMessage to chat, shows UI for review
+2. **Execute**: `startExecution(executionId)` - Executes when user clicks "Accept & Start"
+
+**Rationale:**
+1. **User Safety**: Users can review transactions before signing
+2. **Better UX**: Clear separation between planning and execution
+3. **Multiple Flows**: Supports multiple independent execution flows per conversation
+4. **Resumable**: Interrupted flows can be rebuilt and resumed
+5. **State Ownership**: Execution state belongs to ChatInstance, not DotBot
+
+**Implementation:**
+```typescript
+// Step 1: Prepare (automatic after LLM response)
+await dotbot.prepareExecution(plan);
+// → Orchestrates ExecutionPlan → ExecutionArray
+// → Adds ExecutionMessage to chat timeline
+// → UI shows ExecutionFlow component with "Accept & Start" button
+
+// Step 2: Execute (user-triggered)
+await dotbot.startExecution(executionMessage.executionId);
+// → Executes specific ExecutionArray by ID
+// → Updates ExecutionMessage in chat as execution progresses
+```
+
+**Breaking Changes:**
+- ⚠️ **Removed**: `executeWithArrayTracking()` → use `prepareExecution()` + `startExecution(id)`
+- ⚠️ **Removed**: `onExecutionArrayUpdate()` → use `chat.onExecutionUpdate(id, callback)`
+- ⚠️ **Removed**: `currentExecutionArray` property → use `chat.getExecutionArray(id)`
+- ⚠️ **Changed**: `chat()` no longer auto-executes → returns `executed: false`, user must approve
+
+**Consequences:**
+- **Breaking**: Existing code using removed methods must migrate
+- **Feature**: User approval required before execution
+- **Feature**: Multiple execution flows per conversation
+- **Feature**: Execution flows can be resumed after interruption
+- **DX**: Cleaner API, better separation of concerns
+
+**History:**
+- v0.2.0 (PR #44, #45, January 2026): Two-step execution pattern introduced
+- v0.1.0: Auto-execution immediately after LLM response
+
+---
+
 
 ## References
 
