@@ -22,8 +22,10 @@ Transaction executes on-chain
 
 1. **Agent-First Design**: Specialized AI agents handle different operations
 2. **User Control**: You always control your private keys and approve transactions
-3. **Multi-Chain Ready**: Built for Polkadot, Kusama, and parachains
-4. **Production-Safe**: Automatic fallbacks and runtime capability detection
+3. **Environment Support**: Clear separation between mainnet and testnet environments
+4. **Multi-Chain Ready**: Built for Polkadot, Kusama, and parachains
+5. **Production-Safe**: Automatic fallbacks and runtime capability detection
+6. **Chat History**: Persistent conversation history with search and filtering
 
 ## Quick Start
 
@@ -52,11 +54,15 @@ npm start
 
 1. Open http://localhost:3000
 2. Connect your Polkadot wallet
-3. Type: "Send 1 DOT to [address]"
-4. Review the transaction details
-5. Approve and sign
+3. Select environment (Mainnet or Testnet) using EnvironmentSwitch
+4. Type: "Send 1 DOT to [address]"
+5. Review the transaction details in ExecutionFlow
+6. Click "Accept & Start" to approve
+7. Sign in your wallet
 
 That's it! DotBot handles the complexity behind the scenes.
+
+**Note:** Transactions now require explicit user approval before execution (two-step pattern).
 
 ## Architecture Overview
 
@@ -87,7 +93,7 @@ DotBot follows a clean, scalable architecture:
 │  │  Simulator   │→ │    Signer    │→ │ Broadcaster  │  │
 │  └──────────────┘  └──────────────┘  └──────────────┘  │
 │                                                           │
-│  - Simulates with Chopsticks                             │
+│  - Optionally simulates with Chopsticks (if enabled)     │
 │  - Signs with user's wallet                              │
 │  - Broadcasts to network                                 │
 │  - Monitors for finalization                             │
@@ -172,6 +178,33 @@ const result = await agent.transfer({
 - Governance Agent (voting, delegation)
 - Multisig Agent (coordination)
 
+---
+
+## Environment System
+
+DotBot supports multiple environments with clear separation:
+
+- **Mainnet**: Production environment (Polkadot, Kusama)
+- **Testnet**: Testing environment (Westend)
+
+**Key Features:**
+- Environment-bound chat instances (cannot mix environments)
+- Environment switching creates new chat instance
+- Chat history filterable by environment
+- Clear visual indicators (EnvironmentBadge, EnvironmentSwitch)
+
+---
+
+## Chat History
+
+**NEW** in v0.2.0: Persistent chat history with search capability.
+
+- All conversations saved to localStorage (or external storage)
+- Search by title, content, or date
+- Filter by environment (mainnet/testnet)
+- Load previous conversations
+- Auto-generated titles from first message
+
 ## Core Features
 
 ### 1. Production-Safe Extrinsics
@@ -182,13 +215,18 @@ All agents create production-safe extrinsics with:
 - Chain-specific SS58 encoding
 - Existential deposit validation
 
-### 2. Chopsticks Simulation
+### 2. Optional Chopsticks Simulation
 
-Before executing transactions, DotBot simulates them using Chopsticks:
+Simulation is **optional**. When enabled, DotBot simulates transactions using Chopsticks before execution:
 - Real runtime execution
 - Balance change preview
 - Error detection before signing
 - Gas estimation
+
+**When simulation is disabled:**
+- Execution proceeds directly to signing (faster)
+- Items start with `'ready'` status (ready for signing)
+- No simulation infrastructure required
 
 ### 3. Multi-Chain Support
 
@@ -306,13 +344,18 @@ interface AgentResult {
 }
 ```
 
-### Execution Flow
+### Execution Flow (v0.2.0)
 
-1. **Agent Phase**: Creates extrinsic
-2. **Simulation Phase**: Validates with Chopsticks (optional)
-3. **Signing Phase**: User approves and signs
-4. **Broadcasting Phase**: Sends to network
-5. **Monitoring Phase**: Waits for finalization
+1. **LLM Phase**: User message → LLM generates ExecutionPlan
+2. **Preparation Phase**: `prepareExecution()` orchestrates plan, adds ExecutionMessage to chat
+3. **Review Phase**: UI shows ExecutionFlow component, user reviews transaction details
+4. **Approval Phase**: User clicks "Accept & Start" → `startExecution()` called
+5. **Simulation Phase**: Optionally validates with Chopsticks (if simulation enabled)
+6. **Signing Phase**: User approves and signs in wallet
+7. **Broadcasting Phase**: Sends signed transaction to network
+8. **Monitoring Phase**: Waits for finalization, updates ExecutionMessage in chat
+
+**Note:** Execution now requires explicit user approval (two-step pattern: prepare → approve → execute).
 
 ### Error Handling
 
