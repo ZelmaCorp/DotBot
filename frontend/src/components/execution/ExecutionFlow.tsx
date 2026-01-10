@@ -102,14 +102,19 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
     item.status === 'pending' || item.status === 'ready'
   );
   
-  // Check if flow is executing
-  const isExecuting = executionState.isExecuting || executionState.items.some(item => 
-    item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting'
+  // Check if flow is complete (all items in terminal states)
+  const isComplete = executionState.items.every(item => 
+    item.status === 'completed' || item.status === 'finalized' || item.status === 'failed' || item.status === 'cancelled'
   );
   
-  // Check if flow is complete
-  const isComplete = !isExecuting && executionState.items.every(item => 
-    item.status === 'completed' || item.status === 'finalized' || item.status === 'failed' || item.status === 'cancelled'
+  // Check if flow is executing
+  // Only consider executing if NOT complete and either:
+  // 1. The executionState flag says so, OR
+  // 2. Any item is actively executing/signing/broadcasting
+  const isExecuting = !isComplete && (
+    executionState.isExecuting || executionState.items.some(item => 
+      item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting'
+    )
   );
 
   const toggleExpand = (itemId: string) => {

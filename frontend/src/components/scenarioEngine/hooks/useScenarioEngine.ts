@@ -168,6 +168,10 @@ export const useScenarioEngine = ({
           onPhaseChange?.(updated);
           return updated;
         });
+        // Update status when execution completes
+        if (event.activity.includes('Execution completed') || event.activity.includes('completed')) {
+          onStatusChange?.('');
+        }
         // Report content is handled by ScenarioEngine - no need to append here
       } else if (event.type === 'inject-prompt') {
         handlePromptInjection(event.prompt);
