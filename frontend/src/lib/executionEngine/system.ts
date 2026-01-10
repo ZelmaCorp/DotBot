@@ -133,6 +133,7 @@ export class ExecutionSystem {
    * @param assetHubManager RPC manager for Asset Hub
    * @param accountAddress Account address for simulation
    * @param onSimulationStatus Optional callback for simulation status
+   * @param executionId Optional execution ID to preserve when rebuilding (prevents duplicate ExecutionMessages)
    * @returns ExecutionArray ready for execution
    */
   async prepareExecutionArray(
@@ -140,7 +141,8 @@ export class ExecutionSystem {
     relayChainManager: RpcManager,
     assetHubManager: RpcManager,
     accountAddress: string,
-    onSimulationStatus?: SimulationStatusCallback
+    onSimulationStatus?: SimulationStatusCallback,
+    executionId?: string
   ): Promise<ExecutionArray> {
     this.cleanupExecutionSessions();
     
@@ -148,7 +150,7 @@ export class ExecutionSystem {
       await this.createExecutionSessions(relayChainManager, assetHubManager);
       this.initializeWithSessions();
       
-      const result = await this.orchestrator.orchestrate(plan);
+      const result = await this.orchestrator.orchestrate(plan, {}, executionId);
       if (!result.success && result.errors.length > 0) {
         const errorMessages = result.errors.map(e => `• ${e.error}`).join('\n');
         throw new Error(`Failed to prepare transaction:\n\n${errorMessages}`);

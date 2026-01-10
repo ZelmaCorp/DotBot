@@ -127,16 +127,18 @@ export class ExecutionOrchestrator {
    * 
    * @param plan ExecutionPlan from LLM
    * @param options Orchestration options
+   * @param executionId Optional execution ID to preserve when rebuilding (prevents duplicate ExecutionMessages)
    * @returns OrchestrationResult with populated ExecutionArray
    */
   async orchestrate(
     plan: ExecutionPlan,
-    options: OrchestrationOptions = {}
+    options: OrchestrationOptions = {},
+    executionId?: string
   ): Promise<OrchestrationResult> {
     this.ensureInitialized();
     
     const startTime = Date.now();
-    const executionArray = new ExecutionArray();
+    const executionArray = new ExecutionArray(executionId);
     const errors = this.validatePlanIfNeeded(plan, options);
     
     if (errors.length > 0 && options.stopOnError) {
@@ -312,13 +314,28 @@ export class ExecutionOrchestrator {
   
   /**
    * Call agent function
+   * Type-safe wrapper for calling agent methods dynamically
    */
   private async callAgentFunction(
     agent: BaseAgent,
     step: ExecutionStep,
     params: any
   ): Promise<AgentResult> {
-    return await (agent as any)[step.functionName](params);
+    // Type-safe agent method call
+    // All agent methods follow the pattern: async methodName(params: SomeParams): Promise<AgentResult>
+    // Cast through 'unknown' first to allow index signature access
+    const agentMethods = agent as unknown as Record<string, (params: any) => Promise<AgentResult>>;
+    const method = agentMethods[step.functionName];
+    
+    if (typeof method !== 'function') {
+      throw new AgentError(
+        `Function '${step.functionName}' is not callable on agent '${step.agentClassName}'`,
+        'FUNCTION_NOT_CALLABLE',
+        { agentClassName: step.agentClassName, functionName: step.functionName }
+      );
+    }
+    
+    return await method.call(agent, params);
   }
   
   /**

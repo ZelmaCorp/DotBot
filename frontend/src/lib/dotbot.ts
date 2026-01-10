@@ -590,21 +590,18 @@ export class DotBot {
       throw new Error('No active chat. Cannot start execution.');
     }
     
-    // Validate execution sessions are still active
-    if (!(await this.executionSystem.validateExecutionSessions())) {
-      throw new Error('Execution session expired. Please prepare the execution again.');
-    }
-    
     let executionArray = this.currentChat.getExecutionArray(executionId);
+    const needsRebuild = !executionArray || (executionArray.isInterrupted() && this.currentChat);
     
     // If not found or interrupted, try to rebuild from ExecutionPlan
-    if (!executionArray || (executionArray.isInterrupted() && this.currentChat)) {
+    if (needsRebuild) {
       const executionMessage = this.currentChat.getDisplayMessages()
         .find(m => m.type === 'execution' && (m as any).executionId === executionId) as any;
       
       if (executionMessage?.executionPlan) {
         // Rebuild requires new sessions
-        await this.prepareExecution(executionMessage.executionPlan);
+        // CRITICAL: Pass the original executionId to preserve the ExecutionMessage and prevent duplicates
+        await this.prepareExecution(executionMessage.executionPlan, executionId);
         executionArray = this.currentChat.getExecutionArray(executionId);
         if (!executionArray) {
           throw new Error('Failed to rebuild execution array');
@@ -614,6 +611,17 @@ export class DotBot {
       }
       // If executionArray exists but is interrupted and no ExecutionPlan, continue with broken extrinsics
       // (will fail, but that's expected for old flows without ExecutionPlan)
+    } else {
+      // Only validate sessions if we're NOT rebuilding (using existing executionArray)
+      // If we rebuild, prepareExecution will create new sessions
+      if (!(await this.executionSystem.validateExecutionSessions())) {
+        throw new Error('Execution session expired. Please prepare the execution again.');
+      }
+    }
+    
+    // Ensure executionArray is defined before executing
+    if (!executionArray) {
+      throw new Error(`Execution ${executionId} not found after preparation.`);
     }
     
     try {
@@ -821,15 +829,11 @@ export class DotBot {
    * 
    * CRITICAL: Creates execution sessions to lock API instances for the transaction lifecycle.
    * This prevents metadata mismatches if RPC endpoints fail during execution.
-   */
-  /**
-   * Prepare execution (orchestrate + add to chat)
-   * Does NOT auto-execute - waits for user approval
    * 
-   * CRITICAL: Creates execution sessions to lock API instances for the transaction lifecycle.
-   * This prevents metadata mismatches if RPC endpoints fail during execution.
+   * @param plan ExecutionPlan from LLM
+   * @param executionId Optional execution ID to preserve when rebuilding (prevents duplicate ExecutionMessages)
    */
-  private async prepareExecution(plan: ExecutionPlan): Promise<void> {
+  private async prepareExecution(plan: ExecutionPlan, executionId?: string): Promise<void> {
     try {
       // ExecutionSystem handles: session creation, orchestration, simulation
       const executionArray = await this.executionSystem.prepareExecutionArray(
@@ -837,7 +841,8 @@ export class DotBot {
         this.relayChainManager,
         this.assetHubManager,
         this.wallet.address,
-        this.config?.onSimulationStatus
+        this.config?.onSimulationStatus,
+        executionId
       );
       
       // Store sessions for validation in startExecution
@@ -859,15 +864,31 @@ export class DotBot {
     if (!this.currentChat) return;
     
     const state = executionArray.getState();
-    const execMessage = await this.currentChat.addExecutionMessage(state, plan);
-    this.currentChat.setExecutionArray(state.id, executionArray);
     
-    this.emit({ 
-      type: 'execution-message-added', 
-      executionId: state.id, 
-      plan, 
-      timestamp: Date.now() 
-    });
+    // Check if execution message already exists for this executionId
+    const existingMessage = this.currentChat.getDisplayMessages()
+      .find(m => m.type === 'execution' && (m as any).executionId === state.id) as any;
+    
+    let execMessage: any;
+    if (existingMessage) {
+      // Update existing message instead of creating a new one
+      await this.currentChat.updateExecutionMessage(existingMessage.id, {
+        executionArray: state,
+        executionPlan: plan,
+      });
+      execMessage = existingMessage;
+    } else {
+      // Create new message only if it doesn't exist
+      execMessage = await this.currentChat.addExecutionMessage(state, plan);
+      this.emit({ 
+        type: 'execution-message-added', 
+        executionId: state.id, 
+        plan, 
+        timestamp: Date.now() 
+      });
+    }
+    
+    this.currentChat.setExecutionArray(state.id, executionArray);
     
     executionArray.onStatusUpdate(() => {
       if (this.currentChat) {
