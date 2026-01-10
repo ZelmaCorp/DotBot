@@ -22,7 +22,6 @@ export interface TestCategory {
 }
 
 export const TEST_CATEGORIES: TestCategory[] = [
-  { category: 'state-allocation', name: 'State Allocation Tests', tests: STATE_ALLOCATION_TESTS },
   { category: 'happy-path', name: 'Happy Path Tests', tests: HAPPY_PATH_TESTS },
   { category: 'adversarial', name: 'Security Tests', tests: ADVERSARIAL_TESTS },
   { category: 'jailbreak', name: 'Jailbreak Attempts', tests: JAILBREAK_TESTS },
@@ -31,6 +30,7 @@ export const TEST_CATEGORIES: TestCategory[] = [
   { category: 'stress', name: 'Stress Tests', tests: STRESS_TESTS },
   { category: 'context', name: 'Context Awareness', tests: CONTEXT_AWARENESS_TESTS },
   { category: 'knowledge', name: 'Knowledge Base', tests: KNOWLEDGE_TESTS },
+  { category: 'state-allocation', name: 'State Allocation Tests', tests: STATE_ALLOCATION_TESTS },
 ];
 
 export type TabType = 'entities' | 'scenarios' | 'report';

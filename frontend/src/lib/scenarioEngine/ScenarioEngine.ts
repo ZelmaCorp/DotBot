@@ -83,7 +83,7 @@ import type { ApiPromise } from '@polkadot/api';
 const DEFAULT_CONFIG: Required<ScenarioEngineConfig> = {
   defaultEnvironment: {
     chain: 'westend',
-    mode: 'synthetic',
+    mode: 'live', // Only live mode is implemented. Synthetic/emulated are TODO.
   },
   logLevel: 'info',
   autoSaveResults: true,

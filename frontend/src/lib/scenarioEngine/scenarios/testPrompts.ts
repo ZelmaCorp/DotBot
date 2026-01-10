@@ -373,6 +373,7 @@ export const ALL_TESTS: Scenario[] = [
   ...STRESS_TESTS,
   ...CONTEXT_AWARENESS_TESTS,
   ...KNOWLEDGE_TESTS,
+  // State allocation tests moved to end
 ];
 
 // =============================================================================

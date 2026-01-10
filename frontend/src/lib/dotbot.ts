@@ -670,14 +670,15 @@ export class DotBot {
       console.error('Execution preparation failed:', error);
       const errorMsg = error instanceof Error ? error.message : String(error);
       
-      return {
-        response: `Unable to prepare your transaction:\n\n${errorMsg}\n\nPlease check the parameters and try again.`,
-        plan,
-        executed: false,
-        success: false,
-        completed: 0,
-        failed: 1
-      };
+      // Let the LLM generate a helpful error response
+      // This ensures context-aware, user-friendly error messages
+      const errorContextMessage = `I tried to prepare the transaction you requested ("${plan.originalRequest || 'your request'}"), but it failed with this error:\n\n${errorMsg}\n\nPlease provide a helpful, user-friendly explanation of what went wrong and what the user can do to fix it. Be specific about the issue (e.g., if it's insufficient balance, mention their current balance from context and what's needed). Respond with helpful TEXT only - do NOT generate another ExecutionPlan.`;
+      
+      // Get LLM response for the error
+      const errorResponse = await this.getLLMResponse(errorContextMessage, options);
+      
+      // Handle as conversation response (text, not execution)
+      return await this.handleConversationResponse(errorResponse);
     }
     
     // Generate friendly message (pre-execution)

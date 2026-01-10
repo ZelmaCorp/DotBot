@@ -19,6 +19,9 @@ export const EntityItem: React.FC<EntityItemProps> = ({
   type,
   balance,
 }) => {
+  // Format type for display
+  const typeLabel = type === 'keypair' ? 'Keypair' : type === 'multisig' ? 'Multisig' : type === 'proxy' ? 'Proxy' : type;
+  
   return (
     <div className="scenario-entity">
       <div className="scenario-entity-name">
@@ -28,7 +31,8 @@ export const EntityItem: React.FC<EntityItemProps> = ({
       <div className="scenario-entity-details">
         <div className="scenario-entity-address">{address}</div>
         <div className="scenario-entity-meta">
-          <span className="scenario-entity-type">{type}</span>
+          <span className="scenario-entity-type">{typeLabel}</span>
+          <span className="scenario-entity-separator">•</span>
           <span className="scenario-entity-balance">{balance}</span>
         </div>
       </div>
