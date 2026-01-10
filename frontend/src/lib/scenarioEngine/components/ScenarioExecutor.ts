@@ -390,8 +390,39 @@ export class ScenarioExecutor {
     await this.waitForPromptProcessed();
     
     // Wait for user to submit and get response from DotBot (via UI)
+    this.emit({ 
+      type: 'dotbot-activity', 
+      activity: 'Processing user prompt...',
+      details: `Prompt: "${input.substring(0, 80)}${input.length > 80 ? '...' : ''}"`
+    });
+    
     const chatResult = await this.waitForResponseReceived();
     const response = chatResult?.response || '';
+    
+    // Track DotBot's response with more detail
+    const responseType = this.detectResponseType(response);
+    const responsePreview = response.substring(0, 100);
+    
+    // Log detailed response information
+    if (responseType === 'execution') {
+      this.emit({ 
+        type: 'dotbot-activity', 
+        activity: 'Generated execution plan',
+        details: chatResult?.plan ? `Plan has ${chatResult.plan.steps?.length || 0} step(s)` : 'Execution plan created'
+      });
+    } else if (responseType === 'error') {
+      this.emit({ 
+        type: 'dotbot-activity', 
+        activity: 'Responded with error',
+        details: `${responsePreview}${response.length > 100 ? '...' : ''}`
+      });
+    } else {
+      this.emit({ 
+        type: 'dotbot-activity', 
+        activity: `Responded with ${responseType}`,
+        details: `${responsePreview}${response.length > 100 ? '...' : ''}`
+      });
+    }
 
     const endTime = Date.now();
 
@@ -418,11 +449,13 @@ export class ScenarioExecutor {
       throw new Error('Action step requires action');
     }
 
-    this.emit({ type: 'log', level: 'debug', message: `Executing action: ${action.type}` });
+    this.emit({ type: 'log', level: 'info', message: `Executing action: ${action.type}${action.asEntity ? ` (as ${action.asEntity})` : ''}` });
 
     await this.performAction(action);
 
     const endTime = Date.now();
+    
+    this.emit({ type: 'log', level: 'info', message: `Action completed: ${action.type} (${endTime - startTime}ms)` });
 
     return {
       stepId: step.id,
@@ -463,11 +496,19 @@ export class ScenarioExecutor {
       throw new Error('Assert step requires assertion');
     }
 
-    this.emit({ type: 'log', level: 'debug', message: `Checking assertion: ${assertion.type}` });
+    this.emit({ type: 'log', level: 'info', message: `Checking assertion: ${assertion.type}` });
 
     const assertionResult = await this.checkAssertion(assertion);
 
     const endTime = Date.now();
+    
+    // Log assertion result
+    const icon = assertionResult.passed ? '✓' : '✗';
+    this.emit({ 
+      type: 'log', 
+      level: assertionResult.passed ? 'info' : 'warn', 
+      message: `${icon} Assertion: ${assertionResult.message}` 
+    });
 
     return {
       stepId: step.id,

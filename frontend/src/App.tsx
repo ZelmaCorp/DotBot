@@ -20,6 +20,7 @@ import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOve
 import LoadingOverlay from './components/common/LoadingOverlay';
 import { DotBot, Environment, ScenarioEngine } from './lib';
 import type { ChatInstanceData } from './lib/types/chatInstance';
+import type { ChatResult } from './lib';
 import { useWalletStore } from './stores/walletStore';
 import { ASIOneService } from './lib/services/asiOneService';
 import { SigningRequest, BatchSigningRequest } from './lib';
@@ -202,8 +203,13 @@ const AppContent: React.FC = () => {
           getEntityAddress: (entityName: string) => {
             const entity = scenarioEngine.getEntity(entityName);
             return entity?.address;
-          }
+          },
         });
+        
+        // Subscribe to DotBot events for automatic response capture
+        // This is the DEEP integration - ScenarioEngine listens at library level
+        // All DotBot responses are automatically captured without UI-level hooking
+        scenarioEngine.subscribeToDotBot(dotbotInstance);
         
         // Set RPC manager provider for StateAllocator (so it can use Asset Hub or Relay Chain as needed)
         scenarioEngine.setRpcManagerProvider(() => {
@@ -239,7 +245,8 @@ const AppContent: React.FC = () => {
         throw new Error('Please connect your wallet first');
       }
 
-      await dotbot.chat(message, {
+      // Capture the chat result to return it (for scenario engine)
+      const chatResult = await dotbot.chat(message, {
         llm: async (msg, systemPrompt, llmContext) => {
           const response = await asiOne.sendMessage(msg, {
             systemPrompt,
@@ -252,15 +259,27 @@ const AppContent: React.FC = () => {
       });
 
       setConversationRefresh(prev => prev + 1);
+      
+      // Return the chat result for scenario engine
+      return chatResult;
     } catch (error) {
       console.error('Error:', error);
       
+      const errorMessage = `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
       if (dotbot?.currentChat) {
-        await dotbot.currentChat.addBotMessage(
-          `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
+        await dotbot.currentChat.addBotMessage(errorMessage);
         setConversationRefresh(prev => prev + 1);
       }
+      
+      // Return error result for scenario engine
+      return {
+        response: errorMessage,
+        executed: false,
+        success: false,
+        completed: 0,
+        failed: 1,
+      };
     } finally {
       setIsTyping(false);
     }
@@ -422,7 +441,7 @@ const AppContent: React.FC = () => {
 
 // Wrapper component that uses ChatInput context (must be inside provider)
 const AppWithChatInputWrapper: React.FC<{
-  handleSendMessage: (message: string) => Promise<void>;
+  handleSendMessage: (message: string) => Promise<ChatResult | undefined>;
   dotbot: DotBot | null;
   isTyping: boolean;
   showWelcomeScreen: boolean;
@@ -456,33 +475,19 @@ const AppWithChatInputWrapper: React.FC<{
   const { pendingPrompt, executor, setPendingPrompt, setExecutor } = useChatInput();
 
   // Override handleSendMessage to detect scenario prompts
+  // NOTE: We no longer need to manually notify executor - ScenarioEngine
+  // automatically subscribes to DotBot events at the library level!
   const handleSendMessageWithContext = async (message: string) => {
-    await props.handleSendMessage(message);
-
-    // Check if this was a scenario prompt (filled by ScenarioEngine)
+    // Check if this is a scenario prompt
     const isScenarioPrompt = pendingPrompt && message.trim() === pendingPrompt.trim();
     
-    // If this was a scenario prompt, notify the executor
-    if (isScenarioPrompt && executor && props.dotbot) {
-      // Wait a bit for the response to be added to chat
-      setTimeout(() => {
-        // Get the last bot response
-        const messages = props.dotbot!.currentChat?.messages || [];
-        const lastMessage = messages[messages.length - 1];
-        const response = (lastMessage && lastMessage.type === 'bot') ? lastMessage.content : '';
-        
-        // Get the execution plan if available
-        const lastExecutionPlan = (window as any).__lastExecutionPlan;
-        
-        executor.notifyResponseReceived({ 
-          response, 
-          plan: lastExecutionPlan || null 
-        });
-        
-        // Clear pending prompt and executor reference
-        setPendingPrompt(null);
-        setExecutor(null);
-      }, 100);
+    // Send the message (DotBot events will automatically notify ScenarioEngine)
+    await props.handleSendMessage(message);
+    
+    // Clear pending prompt and executor reference after sending
+    if (isScenarioPrompt) {
+      setPendingPrompt(null);
+      setExecutor(null);
     }
   };
 

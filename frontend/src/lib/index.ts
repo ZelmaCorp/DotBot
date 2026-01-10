@@ -9,7 +9,14 @@
 // OUT OF THE BOX INTERFACE - Start here!
 // ============================================================================
 export { DotBot } from './dotbot';
-export type { DotBotConfig, ChatResult, ChatOptions, ConversationMessage } from './dotbot';
+export type { 
+  DotBotConfig, 
+  ChatResult, 
+  ChatOptions, 
+  ConversationMessage,
+  DotBotEvent,
+  DotBotEventListener,
+} from './dotbot';
 
 // RPC Manager - For advanced endpoint management
 export { 

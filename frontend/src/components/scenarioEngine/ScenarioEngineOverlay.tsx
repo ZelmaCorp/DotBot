@@ -45,6 +45,8 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['state-allocation', 'happy-path']));
   const [report, setReport] = useState<string>('');
   const [isCreatingEntities, setIsCreatingEntities] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [executionPhase, setExecutionPhase] = useState<{ phase: 'beginning' | 'cycle' | 'final-report' | null; messages: string[]; stepCount: number; dotbotActivity?: string } | null>(null);
   // Only LIVE mode is implemented - synthetic/emulated are TODO
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('live');
 
@@ -66,6 +68,8 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
     dotbot,
     onSendMessage,
     onAppendReport: appendToReport,
+    onStatusChange: setStatusMessage,
+    onPhaseChange: setExecutionPhase,
   });
 
   const toggleCategory = (category: string) => {
@@ -243,6 +247,8 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
               report={report}
               isTyping={!!runningScenario}
               isRunning={!!runningScenario}
+              statusMessage={statusMessage}
+              executionPhase={executionPhase}
               onClear={clearReport}
             />
           )}

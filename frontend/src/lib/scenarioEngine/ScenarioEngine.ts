@@ -61,6 +61,8 @@ import type {
   ScenarioMode,
 } from './types';
 
+import type { DotBot, DotBotEventListener, ChatResult } from '../dotbot';
+
 import {
   EntityCreator,
   createEntityCreator,
@@ -117,6 +119,16 @@ export class ScenarioEngine {
   // Wallet account and signer for live mode transfers
   private walletAccount?: { address: string; name?: string; source: string };
   private walletSigner?: any;
+  
+  // DotBot instance for event subscription
+  private dotbot: DotBot | null = null;
+  private dotbotEventListener: DotBotEventListener | null = null;
+  
+  // Report builder - accumulates all execution data for display
+  private reportContent: string = '';
+  private currentStepIndex: number = -1;
+  private currentStepPrompt: string | null = null;
+  private pendingDotBotResponse: ChatResult | null = null;
 
   constructor(config: ScenarioEngineConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -147,8 +159,14 @@ export class ScenarioEngine {
       // Initialize executor
       this.executor = createScenarioExecutor();
 
-      // Forward executor events
-      this.executor.addEventListener((event) => this.emit(event));
+      // Forward executor events AND build report
+      this.executor.addEventListener((event) => {
+        // Forward to external listeners
+        this.emit(event);
+        
+        // Build report internally
+        this.handleExecutorEventForReport(event);
+      });
 
       this.log('info', 'ScenarioEngine initialized');
       this.updateState({ status: 'idle' });
@@ -171,6 +189,264 @@ export class ScenarioEngine {
       this.executor.setDependencies(deps);
     }
     this.log('debug', 'Executor dependencies set');
+  }
+  
+  /**
+   * Subscribe to DotBot events for automatic response capture
+   * 
+   * This is the DEEP integration - ScenarioEngine listens to DotBot at the library level,
+   * automatically capturing all responses without UI-level hooking.
+   * 
+   * @param dotbot The DotBot instance to subscribe to
+   */
+  subscribeToDotBot(dotbot: DotBot): void {
+    // Unsubscribe from previous DotBot if any
+    if (this.dotbot && this.dotbotEventListener) {
+      this.dotbot.removeEventListener(this.dotbotEventListener);
+    }
+    
+    this.dotbot = dotbot;
+    
+    // Create event listener that automatically notifies executor AND builds report
+    this.dotbotEventListener = (event) => {
+      if (!this.executor) return;
+      
+      let chatResult: ChatResult | null = null;
+      
+      switch (event.type) {
+        case 'chat-started':
+          // Track when chat starts (for report)
+          if (this.currentStepPrompt) {
+            this.appendToReport(`\nDotBot: Processing prompt...\n`);
+          }
+          break;
+          
+        case 'chat-complete':
+          // Automatically notify executor when DotBot completes a chat
+          // This captures the FULL response including execution plans
+          chatResult = event.result;
+          this.pendingDotBotResponse = chatResult;
+          this.executor.notifyResponseReceived(chatResult);
+          this.appendDotBotResponseToReport(chatResult);
+          break;
+          
+        case 'bot-message-added':
+          // Also capture bot messages (for text-only responses)
+          // Create a ChatResult-like object
+          chatResult = {
+            response: event.message,
+            executed: false,
+            success: true,
+            completed: 0,
+            failed: 0,
+          };
+          this.pendingDotBotResponse = chatResult;
+          this.executor.notifyResponseReceived(chatResult);
+          this.appendDotBotResponseToReport(chatResult);
+          break;
+          
+        case 'execution-message-added':
+          // Capture execution plans
+          chatResult = {
+            response: `Execution plan prepared with ${event.plan?.steps.length || 0} step(s)`,
+            plan: event.plan,
+            executed: false,
+            success: true,
+            completed: 0,
+            failed: 0,
+          };
+          this.pendingDotBotResponse = chatResult;
+          this.executor.notifyResponseReceived(chatResult);
+          this.appendDotBotResponseToReport(chatResult);
+          break;
+          
+        case 'chat-error':
+          // Capture errors
+          chatResult = {
+            response: event.error.message,
+            executed: false,
+            success: false,
+            completed: 0,
+            failed: 1,
+          };
+          this.pendingDotBotResponse = chatResult;
+          this.executor.notifyResponseReceived(chatResult);
+          this.appendDotBotResponseToReport(chatResult);
+          break;
+      }
+    };
+    
+    // Subscribe to DotBot events
+    dotbot.addEventListener(this.dotbotEventListener);
+    this.log('info', 'Subscribed to DotBot events for automatic response capture');
+  }
+  
+  /**
+   * Append DotBot response to report
+   */
+  private appendDotBotResponseToReport(result: ChatResult): void {
+    if (!result.response) return;
+    
+    this.appendToReport(`\n  ┌─ DotBot Response ─────────────────────────────────────\n`);
+    
+    // Split response into lines and indent each line
+    const lines = result.response.split('\n');
+    lines.forEach((line: string) => {
+      this.appendToReport(`  │ ${line}\n`);
+    });
+    
+    this.appendToReport(`  └───────────────────────────────────────────────────────\n`);
+    
+    // Add execution plan info if available
+    if (result.plan) {
+      this.appendToReport(`  ✓ Execution Plan: ${result.plan.steps.length} step(s)\n`);
+      if (result.plan.steps.length > 0) {
+        this.appendToReport(`    Steps:\n`);
+        result.plan.steps.forEach((step, idx) => {
+          this.appendToReport(`      ${idx + 1}. ${step.description || step.agentClassName}.${step.functionName}\n`);
+        });
+      }
+    }
+    
+    // Add execution status
+    if (result.executed) {
+      this.appendToReport(`  ✓ Executed: ${result.completed} completed, ${result.failed} failed\n`);
+    }
+  }
+  
+  /**
+   * Append text to report and emit update event
+   */
+  private appendToReport(text: string): void {
+    this.reportContent += text;
+    this.emit({ type: 'report-update', content: text });
+  }
+  
+  /**
+   * Clear report
+   */
+  private clearReport(): void {
+    this.reportContent = '';
+    this.emit({ type: 'report-clear' });
+  }
+  
+  /**
+   * Get current report content
+   */
+  getReport(): string {
+    return this.reportContent;
+  }
+  
+  /**
+   * Handle executor events to build report
+   */
+  private handleExecutorEventForReport(event: any): void {
+    switch (event.type) {
+      case 'step-start':
+        this.currentStepIndex = event.index || -1;
+        this.currentStepPrompt = event.step?.input || null;
+        this.pendingDotBotResponse = null;
+        
+        const stepNum = (event.index || 0) + 1;
+        const stepTypeMap: Record<string, string> = {
+          'prompt': 'Prompt',
+          'action': 'Action',
+          'wait': 'Wait',
+          'assert': 'Assertion',
+        };
+        const stepTypeLabel = stepTypeMap[event.step?.type] || event.step?.type || 'Unknown';
+        
+        this.appendToReport(`\n[STEP ${stepNum}] ${stepTypeLabel}`);
+        if (event.step?.id) {
+          this.appendToReport(` (${event.step.id})`);
+        }
+        this.appendToReport(`\n`);
+        
+        if (event.step?.input) {
+          this.appendToReport(`  Input: "${event.step.input.substring(0, 100)}${event.step.input.length > 100 ? '...' : ''}"\n`);
+        } else if (event.step?.action) {
+          this.appendToReport(`  Action: ${event.step.action.type}\n`);
+          if (event.step.action.asEntity) {
+            this.appendToReport(`  As Entity: ${event.step.action.asEntity}\n`);
+          }
+        } else if (event.step?.waitMs) {
+          this.appendToReport(`  Duration: ${event.step.waitMs}ms\n`);
+        } else if (event.step?.assertion) {
+          this.appendToReport(`  Assertion Type: ${event.step.assertion.type}\n`);
+        }
+        break;
+        
+      case 'step-complete':
+        if (event.result) {
+          this.appendToReport(`  ✓ Response Type: ${event.result.response?.type || 'N/A'}\n`);
+          this.appendToReport(`  ✓ Duration: ${event.result.duration}ms\n`);
+          
+          // DotBot response should already be in report from DotBot events
+          // But if it's missing, add it here
+          if (event.result.response?.content && !this.pendingDotBotResponse) {
+            this.appendDotBotResponseToReport({
+              response: event.result.response.content,
+              executed: false,
+              success: event.result.success,
+              completed: 0,
+              failed: event.result.success ? 0 : 1,
+            });
+          }
+          
+          // Show assertion results if any
+          if (event.result.assertions && event.result.assertions.length > 0) {
+            this.appendToReport(`\n  Assertions:\n`);
+            event.result.assertions.forEach((assertion: { passed: boolean; message: string }) => {
+              const icon = assertion.passed ? '✓' : '✗';
+              this.appendToReport(`    ${icon} ${assertion.message}\n`);
+            });
+          }
+          
+          // Show errors if any
+          if (event.result.error) {
+            this.appendToReport(`  ✗ Error: ${event.result.error.message}\n`);
+            if (event.result.error.stack) {
+              const stackLines = event.result.error.stack.split('\n').slice(0, 5);
+              stackLines.forEach((line: string) => {
+                this.appendToReport(`    ${line}\n`);
+              });
+            }
+          }
+        }
+        this.appendToReport(`\n`);
+        break;
+        
+      case 'log':
+        // Only show non-debug logs in report
+        if (event.level !== 'debug') {
+          this.appendToReport(`[${event.level.toUpperCase()}] ${event.message}\n`);
+        }
+        break;
+        
+      case 'error':
+        this.appendToReport(`\n[ERROR] ${event.error}\n`);
+        if (event.step) {
+          this.appendToReport(`  Step: ${event.step.id || 'unknown'}\n`);
+        }
+        break;
+        
+      case 'dotbot-activity':
+        // DotBot activity is tracked but full response comes from DotBot events
+        // This is just for status updates
+        break;
+    }
+  }
+  
+  /**
+   * Unsubscribe from DotBot events
+   */
+  unsubscribeFromDotBot(): void {
+    if (this.dotbot && this.dotbotEventListener) {
+      this.dotbot.removeEventListener(this.dotbotEventListener);
+      this.dotbot = null;
+      this.dotbotEventListener = null;
+      this.log('info', 'Unsubscribed from DotBot events');
+    }
   }
 
   /**
@@ -248,17 +524,41 @@ export class ScenarioEngine {
         currentStepIndex: 0,
       });
 
-      // Phase 1: Create entities
+      // Phase 1: BEGINNING - Setup
+      this.emit({ type: 'phase-start', phase: 'beginning', details: 'Setting up scenario environment' });
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('[PHASE] BEGINNING - Setup\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('Setting up scenario environment\n\n');
+      
+      this.emit({ type: 'phase-update', phase: 'beginning', message: 'Creating test entities...' });
+      this.appendToReport('  → Creating test entities...\n');
       await this.setupEntities(scenario);
-
-      // Phase 2: Allocate state
+      
+      this.emit({ type: 'phase-update', phase: 'beginning', message: 'Allocating initial state...' });
+      this.appendToReport('  → Allocating initial state...\n');
       await this.setupState(scenario);
+      this.emit({ type: 'phase-update', phase: 'beginning', message: 'Setup complete' });
+      this.appendToReport('  → Setup complete\n');
 
-      // Phase 3: Execute steps
+      // Phase 2: CYCLE - Execute steps (unknown number of rounds)
+      this.emit({ type: 'phase-start', phase: 'cycle', details: 'Executing scenario steps' });
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('[PHASE] CYCLE - Execution\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('Executing scenario steps\n\n');
       this.updateState({ status: 'running' });
       const stepResults = await this.executor!.executeScenario(scenario);
 
-      // Phase 4: Evaluate
+      // Phase 3: FINAL REPORT - Evaluate
+      this.emit({ type: 'phase-start', phase: 'final-report', details: 'Evaluating results' });
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('[PHASE] FINAL REPORT - Evaluation\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('Evaluating results\n\n');
+      
+      this.emit({ type: 'phase-update', phase: 'final-report', message: 'Analyzing scenario results...' });
+      this.appendToReport('  → Analyzing scenario results...\n');
       const evaluation = this.evaluator!.evaluate(scenario, stepResults);
 
       const endTime = Date.now();
@@ -277,6 +577,11 @@ export class ScenarioEngine {
       if (this.config.autoSaveResults) {
         this.saveResult(result);
       }
+
+      // Add final result to report
+      this.appendToReport(`\n[COMPLETE] ${evaluation.passed ? '✅ PASSED' : '❌ FAILED'}\n`);
+      this.appendToReport(`[SCORE] ${evaluation.score}/100\n`);
+      this.appendToReport(`[DURATION] ${endTime - startTime}ms\n`);
 
       this.updateState({ status: 'completed' });
       this.emit({ type: 'scenario-complete', result });

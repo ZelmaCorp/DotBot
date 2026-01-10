@@ -7,10 +7,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trash2 } from 'lucide-react';
 
+interface ExecutionPhase {
+  phase: 'beginning' | 'cycle' | 'final-report' | null;
+  messages: string[];
+  stepCount: number;
+  dotbotActivity?: string;
+}
+
 interface ReportTabProps {
   report: string;
   isTyping: boolean;
   isRunning?: boolean;  // Whether a scenario is currently running
+  statusMessage?: string;  // Current status message (e.g., "Executing prompt...")
+  executionPhase?: ExecutionPhase | null;  // Current execution phase and activity
   onClear?: () => void;
 }
 
@@ -18,6 +27,8 @@ export const ReportTab: React.FC<ReportTabProps> = ({
   report,
   isTyping: externalIsTyping,
   isRunning = false,
+  statusMessage,
+  executionPhase,
   onClear,
 }) => {
   // Initialize displayedText to current report on mount (no animation for existing content)
@@ -68,6 +79,17 @@ export const ReportTab: React.FC<ReportTabProps> = ({
 
       // Only animate the NEW characters
       const newChars = report.slice(lastProcessedLength);
+      
+      // If there's a very large backlog (e.g., ongoing process with many steps),
+      // skip animation entirely to keep up with real-time updates
+      if (newChars.length > 500) {
+        // Skip animation for very large updates - show immediately
+        setDisplayedText(report);
+        lastProcessedLengthRef.current = report.length;
+        setIsTyping(false);
+        return;
+      }
+      
       let charIndex = 0;
       setIsTyping(true);
 
@@ -83,18 +105,45 @@ export const ReportTab: React.FC<ReportTabProps> = ({
         }
 
         if (charIndex < newChars.length) {
-          const currentLength = lastProcessedLength + charIndex + 1;
+          const currentLength = lastProcessedLength + charIndex;
+          const unprintedChars = newChars.length - charIndex;
+          
           // Make sure we don't go beyond current report length
-          if (currentLength <= currentReportLength) {
-            setDisplayedText(report.slice(0, currentLength));
-            charIndex++;
-            timeoutRef.current = setTimeout(typeNextChar, 20); // 20ms per character
+          if (currentLength < currentReportLength) {
+            // Batch process multiple characters when there's a large backlog
+            // This keeps the display responsive during ongoing processes with many steps
+            let charsToProcess = 1;
+            let delay = 20; // Default delay
+            
+            if (unprintedChars > 100) {
+              // Very large backlog: process 50 chars at a time, no delay
+              charsToProcess = 50;
+              delay = 0;
+            } else if (unprintedChars > 50) {
+              // Large backlog: process 20 chars at a time, minimal delay
+              charsToProcess = 20;
+              delay = 1;
+            } else if (unprintedChars > 10) {
+              // Medium backlog: process 5 chars at a time, fast
+              charsToProcess = 5;
+              delay = 5;
+            }
+            
+            // Don't process more than what's available
+            charsToProcess = Math.min(charsToProcess, newChars.length - charIndex, currentReportLength - currentLength);
+            
+            setDisplayedText(report.slice(0, currentLength + charsToProcess));
+            charIndex += charsToProcess;
+            
+            timeoutRef.current = setTimeout(typeNextChar, delay);
           } else {
+            // Caught up - show everything
             setIsTyping(false);
             lastProcessedLengthRef.current = currentReportLength;
             setDisplayedText(report);
           }
         } else {
+          // Finished processing new chars
           setIsTyping(false);
           lastProcessedLengthRef.current = currentReportLength;
           setDisplayedText(report);
@@ -157,7 +206,25 @@ export const ReportTab: React.FC<ReportTabProps> = ({
         <pre className="scenario-report-text">
           {displayedText || '> Awaiting scenario execution...\n> Run a scenario to see results.'}
           {isTyping && <span className="scenario-cursor">█</span>}
-          {isRunning && !isTyping && <span className="scenario-loading-dots">...</span>}
+          {isRunning && !isTyping && executionPhase && (
+            <span className="scenario-status-message">
+              {executionPhase.phase === 'beginning' && 'Setting up...'}
+              {executionPhase.phase === 'cycle' && (
+                executionPhase.dotbotActivity 
+                  ? `DotBot: ${executionPhase.dotbotActivity.substring(0, 50)}${executionPhase.dotbotActivity.length > 50 ? '...' : ''}`
+                  : `Executing step ${executionPhase.stepCount}...`
+              )}
+              {executionPhase.phase === 'final-report' && 'Generating final report...'}
+              {!executionPhase.phase && statusMessage && statusMessage}
+              {!executionPhase.phase && !statusMessage && 'Running...'}
+            </span>
+          )}
+          {isRunning && !isTyping && !executionPhase && statusMessage && (
+            <span className="scenario-status-message">{statusMessage}</span>
+          )}
+          {isRunning && !isTyping && !executionPhase && !statusMessage && (
+            <span className="scenario-loading-dots">...</span>
+          )}
         </pre>
       </div>
     </div>
