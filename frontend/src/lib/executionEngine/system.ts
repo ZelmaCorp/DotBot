@@ -13,7 +13,7 @@
 
 import { ApiPromise } from '@polkadot/api';
 import { ExecutionPlan } from '../prompts/system/execution/types';
-import { ExecutionOrchestrator } from './orchestrator';
+import { ExecutionOrchestrator, OrchestrationResult } from './orchestrator';
 import { Executioner } from './executioner';
 import { ExecutionOptions, SigningRequest, BatchSigningRequest, ExecutionItem } from './types';
 import { ExecutionArray } from './executionArray';
@@ -387,8 +387,27 @@ export class ExecutionSystem {
       onComplete?: (success: boolean, completed: number, failed: number) => void;
     }
   ): Promise<void> {
-    // Phase 1: Orchestrate (convert LLM plan to agent calls)
-    const orchestrationResult = await this.orchestrator.orchestrate(plan, {
+    const orchestrationResult = await this.orchestrateWithCallbacks(plan, callbacks);
+    const executionArray = this.processOrchestrationResult(orchestrationResult, callbacks);
+    
+    if (!executionArray) {
+      return;
+    }
+    
+    await this.executeWithCallbacks(executionArray, options, callbacks);
+  }
+  
+  /**
+   * Orchestrate plan with callback handling
+   */
+  private async orchestrateWithCallbacks(
+    plan: ExecutionPlan,
+    callbacks?: {
+      onPreparingStep?: (description: string, current: number, total: number) => void;
+      onError?: (error: string) => void;
+    }
+  ) {
+    return await this.orchestrator.orchestrate(plan, {
       onProgress: (step, index, total) => {
         if (callbacks?.onPreparingStep) {
           callbacks.onPreparingStep(step.description, index + 1, total);
@@ -400,7 +419,17 @@ export class ExecutionSystem {
         }
       }
     });
-    
+  }
+  
+  /**
+   * Process orchestration result and handle errors
+   */
+  private processOrchestrationResult(
+    orchestrationResult: OrchestrationResult,
+    callbacks?: {
+      onError?: (error: string) => void;
+    }
+  ): ExecutionArray | null {
     if (!orchestrationResult.success && callbacks?.onError) {
       callbacks.onError(
         `Orchestration completed with ${orchestrationResult.errors.length} error(s)`
@@ -413,10 +442,23 @@ export class ExecutionSystem {
       if (callbacks?.onError) {
         callbacks.onError('No operations to execute');
       }
-      return;
+      return null;
     }
     
-    // Subscribe to execution status
+    return executionArray;
+  }
+  
+  /**
+   * Execute with callback handling
+   */
+  private async executeWithCallbacks(
+    executionArray: ExecutionArray,
+    options: ExecutionOptions,
+    callbacks?: {
+      onExecutingStep?: (description: string, status: string) => void;
+      onComplete?: (success: boolean, completed: number, failed: number) => void;
+    }
+  ): Promise<void> {
     const unsubscribe = executionArray.onStatusUpdate((item) => {
       if (callbacks?.onExecutingStep) {
         callbacks.onExecutingStep(item.description, item.status);
@@ -424,7 +466,6 @@ export class ExecutionSystem {
     });
     
     try {
-      // Phase 2: Execute
       await this.executioner.execute(executionArray, options);
       
       const state = executionArray.getState();

@@ -9,6 +9,7 @@ import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ExecutionItem, ExecutionResult } from '../types';
 import { ExecutionArray } from '../executionArray';
 import { RpcManager, RpcEndpoints } from '../../rpcManager';
+import { markItemAsFailed } from '../errorHandlers';
 
 export interface SimulationContext {
   api: ApiPromise;
@@ -114,13 +115,7 @@ async function runChopsticksSimulation(
       });
     }
 
-    executionArray.updateStatus(item.id, 'failed', 'Transaction simulation failed');
-    executionArray.updateResult(item.id, {
-      success: false,
-      error: cleanError,
-      errorCode: 'SIMULATION_FAILED',
-      rawError: errorMessage,
-    });
+    markItemAsFailed(executionArray, item.id, cleanError, 'SIMULATION_FAILED', errorMessage);
 
     throw new Error(cleanError);
   }

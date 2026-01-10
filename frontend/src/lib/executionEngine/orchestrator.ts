@@ -272,7 +272,23 @@ export class ExecutionOrchestrator {
     this.ensureInitialized();
     
     const agent = this.getAgentInstance(step.agentClassName);
+    this.validateAgentFunction(agent, step);
     
+    const paramsWithCallback = this.prepareAgentParameters(step);
+    
+    try {
+      const result = await this.callAgentFunction(agent, step, paramsWithCallback);
+      this.validateAgentResult(result, step);
+      return result;
+    } catch (error) {
+      throw this.wrapAgentError(error, step);
+    }
+  }
+  
+  /**
+   * Validate agent function exists
+   */
+  private validateAgentFunction(agent: BaseAgent, step: ExecutionStep): void {
     if (typeof (agent as any)[step.functionName] !== 'function') {
       throw new AgentError(
         `Function '${step.functionName}' not found on agent '${step.agentClassName}'`,
@@ -280,47 +296,64 @@ export class ExecutionOrchestrator {
         { agentClassName: step.agentClassName, functionName: step.functionName }
       );
     }
-    
+  }
+  
+  /**
+   * Prepare agent parameters with callback
+   */
+  private prepareAgentParameters(step: ExecutionStep): any {
     // Add status callback to parameters if not present
     // NOTE: Simulation is now handled by Executioner only, not by agents
-    const paramsWithCallback = {
+    return {
       ...step.parameters,
       onSimulationStatus: step.parameters.onSimulationStatus || this.onStatusUpdate || undefined,
     };
-    
-    // Call the agent function
-    // Agent will create the extrinsic and return AgentResult
-    try {
-      const result = await (agent as any)[step.functionName](paramsWithCallback);
-      
-      if (!this.isValidAgentResult(result)) {
-        throw new AgentError(
-          `Agent function '${step.agentClassName}.${step.functionName}' did not return a valid AgentResult`,
-          'INVALID_AGENT_RESULT',
-          { result }
-        );
-      }
-      
-      return result;
-      
-    } catch (error) {
-      // Re-throw AgentErrors
-      if (error instanceof AgentError) {
-        throw error;
-      }
-      
-      // Wrap other errors
+  }
+  
+  /**
+   * Call agent function
+   */
+  private async callAgentFunction(
+    agent: BaseAgent,
+    step: ExecutionStep,
+    params: any
+  ): Promise<AgentResult> {
+    return await (agent as any)[step.functionName](params);
+  }
+  
+  /**
+   * Validate agent result
+   */
+  private validateAgentResult(result: any, step: ExecutionStep): void {
+    if (!this.isValidAgentResult(result)) {
       throw new AgentError(
-        `Error calling ${step.agentClassName}.${step.functionName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'AGENT_CALL_ERROR',
-        {
-          agentClassName: step.agentClassName,
-          functionName: step.functionName,
-          parameters: step.parameters,
-          originalError: error instanceof Error ? error.message : String(error),
-        }
+        `Agent function '${step.agentClassName}.${step.functionName}' did not return a valid AgentResult`,
+        'INVALID_AGENT_RESULT',
+        { result }
       );
     }
+  }
+  
+  /**
+   * Wrap error in AgentError if needed
+   */
+  private wrapAgentError(error: unknown, step: ExecutionStep): AgentError {
+    // Re-throw AgentErrors
+    if (error instanceof AgentError) {
+      return error;
+    }
+    
+    // Wrap other errors
+    return new AgentError(
+      `Error calling ${step.agentClassName}.${step.functionName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'AGENT_CALL_ERROR',
+      {
+        agentClassName: step.agentClassName,
+        functionName: step.functionName,
+        parameters: step.parameters,
+        originalError: error instanceof Error ? error.message : String(error),
+      }
+    );
   }
   
   /**
