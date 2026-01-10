@@ -1202,19 +1202,21 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Wait for the UI to process a prompt (fill ChatInput and submit)
+   * Wait for the UI to process a prompt (fill ChatInput)
+   * Note: This only waits for the input to be filled, not for user submission
+   * User submission is handled separately via waitForResponseReceived()
    */
   private waitForPromptProcessed(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.promptProcessedResolver = resolve;
       
-      // Timeout
+      // Shorter timeout - just filling input should be fast
       setTimeout(() => {
         if (this.promptProcessedResolver) {
           this.promptProcessedResolver = null;
-          reject(new Error('Timeout waiting for prompt to be processed by UI'));
+          reject(new Error('Timeout waiting for prompt to be injected into UI'));
         }
-      }, this.config.responseTimeout);
+      }, 5000); // 5 seconds should be enough to fill input
     });
   }
 

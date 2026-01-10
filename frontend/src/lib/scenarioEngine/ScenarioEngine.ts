@@ -128,7 +128,7 @@ export class ScenarioEngine {
   private reportContent: string = '';
   private currentStepIndex: number = -1;
   private currentStepPrompt: string | null = null;
-  private pendingDotBotResponse: ChatResult | null = null;
+  private lastDotBotResponse: ChatResult | null = null; // Track last response to avoid duplicates
 
   constructor(config: ScenarioEngineConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -208,10 +208,10 @@ export class ScenarioEngine {
     this.dotbot = dotbot;
     
     // Create event listener that automatically notifies executor AND builds report
+    // IMPORTANT: Only handle chat-complete - it contains everything we need
+    // bot-message-added and execution-message-added fire BEFORE chat-complete and are redundant
     this.dotbotEventListener = (event) => {
       if (!this.executor) return;
-      
-      let chatResult: ChatResult | null = null;
       
       switch (event.type) {
         case 'chat-started':
@@ -222,56 +222,36 @@ export class ScenarioEngine {
           break;
           
         case 'chat-complete':
-          // Automatically notify executor when DotBot completes a chat
-          // This captures the FULL response including execution plans
-          chatResult = event.result;
-          this.pendingDotBotResponse = chatResult;
+          // PRIMARY event - contains full ChatResult with response, plan, execution status
+          // This fires AFTER bot-message-added and execution-message-added
+          // It's the authoritative source - use this and ignore the others
+          const chatResult = event.result;
+          this.lastDotBotResponse = chatResult;
           this.executor.notifyResponseReceived(chatResult);
           this.appendDotBotResponseToReport(chatResult);
           break;
           
         case 'bot-message-added':
-          // Also capture bot messages (for text-only responses)
-          // Create a ChatResult-like object
-          chatResult = {
-            response: event.message,
-            executed: false,
-            success: true,
-            completed: 0,
-            failed: 0,
-          };
-          this.pendingDotBotResponse = chatResult;
-          this.executor.notifyResponseReceived(chatResult);
-          this.appendDotBotResponseToReport(chatResult);
+          // IGNORE - chat-complete will fire after this with the same data
+          // Only used for UI display, not for scenario execution
           break;
           
         case 'execution-message-added':
-          // Capture execution plans
-          chatResult = {
-            response: `Execution plan prepared with ${event.plan?.steps.length || 0} step(s)`,
-            plan: event.plan,
-            executed: false,
-            success: true,
-            completed: 0,
-            failed: 0,
-          };
-          this.pendingDotBotResponse = chatResult;
-          this.executor.notifyResponseReceived(chatResult);
-          this.appendDotBotResponseToReport(chatResult);
+          // IGNORE - chat-complete will fire after this with the same plan
+          // Only used for UI display, not for scenario execution
           break;
           
         case 'chat-error':
-          // Capture errors
-          chatResult = {
+          const errorResult: ChatResult = {
             response: event.error.message,
             executed: false,
             success: false,
             completed: 0,
             failed: 1,
           };
-          this.pendingDotBotResponse = chatResult;
-          this.executor.notifyResponseReceived(chatResult);
-          this.appendDotBotResponseToReport(chatResult);
+          this.lastDotBotResponse = errorResult;
+          this.executor.notifyResponseReceived(errorResult);
+          this.appendDotBotResponseToReport(errorResult);
           break;
       }
     };
@@ -345,7 +325,7 @@ export class ScenarioEngine {
       case 'step-start':
         this.currentStepIndex = event.index || -1;
         this.currentStepPrompt = event.step?.input || null;
-        this.pendingDotBotResponse = null;
+        this.lastDotBotResponse = null; // Reset for new step
         
         const stepNum = (event.index || 0) + 1;
         const stepTypeMap: Record<string, string> = {
@@ -382,8 +362,8 @@ export class ScenarioEngine {
           this.appendToReport(`  ✓ Duration: ${event.result.duration}ms\n`);
           
           // DotBot response should already be in report from DotBot events
-          // But if it's missing, add it here
-          if (event.result.response?.content && !this.pendingDotBotResponse) {
+          // Only add if missing (fallback needed
+          if (event.result.response?.content && !this.lastDotBotResponse) {
             this.appendDotBotResponseToReport({
               response: event.result.response.content,
               executed: false,

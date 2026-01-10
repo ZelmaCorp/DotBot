@@ -43,7 +43,6 @@ export const useScenarioEngine = ({
 
   const handlePromptInjection = async (prompt: string) => {
     const executor = engine.getExecutor();
-    executor?.notifyPromptProcessed();
     
     // Fill the ChatInput but DON'T send the message
     // User can review and submit manually
@@ -52,83 +51,10 @@ export const useScenarioEngine = ({
     // Store the prompt and executor reference for App.tsx to detect submission
     setPendingPrompt(prompt);
     setExecutor(executor);
-  };
-
-  // Generate analysis of scenario results
-  const generateAnalysis = (result: any): string => {
-    let analysis = '[ANALYSIS]\n';
-    analysis += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
     
-    // Overall result
-    if (result.success) {
-      analysis += '✅ Scenario PASSED\n';
-    } else {
-      analysis += '❌ Scenario FAILED\n';
-    }
-    
-    // What DotBot said/did
-    if (result.stepResults && result.stepResults.length > 0) {
-      const lastStep = result.stepResults[result.stepResults.length - 1];
-      if (lastStep.response) {
-        analysis += `\n📝 DotBot Response:\n`;
-        analysis += `   Type: ${lastStep.response.type}\n`;
-        if (lastStep.response.content) {
-          const preview = lastStep.response.content.substring(0, 200);
-          analysis += `   Content: ${preview}${lastStep.response.content.length > 200 ? '...' : ''}\n`;
-        }
-      }
-    }
-    
-    // What was expected vs what happened
-    if (result.evaluation && result.evaluation.expectations) {
-      analysis += `\n🎯 Expectations:\n`;
-      result.evaluation.expectations.forEach((exp: any, idx: number) => {
-        analysis += `   ${idx + 1}. ${exp.met ? '✅' : '❌'} ${exp.expectation.description || 'Unknown expectation'}\n`;
-        if (!exp.met && exp.details) {
-          analysis += `      Details: ${exp.details}\n`;
-        }
-      });
-    }
-    
-    // Why it failed/passed
-    if (!result.success && result.evaluation) {
-      analysis += `\n🔍 Failure Analysis:\n`;
-      if (result.evaluation.score < 50) {
-        analysis += `   • Critical failure: Score below 50/100\n`;
-      }
-      if (result.evaluation.expectations) {
-        const failed = result.evaluation.expectations.filter((e: any) => !e.met);
-        if (failed.length > 0) {
-          analysis += `   • ${failed.length} expectation(s) not met\n`;
-          failed.forEach((exp: any) => {
-            if (exp.details) {
-              analysis += `     - ${exp.details}\n`;
-            }
-          });
-        }
-      }
-    } else if (result.success) {
-      analysis += `\n✅ Success Analysis:\n`;
-      analysis += `   • All expectations met\n`;
-      analysis += `   • Score: ${result.evaluation?.score || 'N/A'}/100\n`;
-    }
-    
-    // Summary (if available)
-    if (result.evaluation?.summary) {
-      analysis += `\n📋 Summary:\n`;
-      analysis += `   ${result.evaluation.summary}\n`;
-    }
-    
-    // Recommendations
-    if (result.evaluation?.recommendations && result.evaluation.recommendations.length > 0) {
-      analysis += `\n💡 Recommendations:\n`;
-      result.evaluation.recommendations.forEach((rec: string) => {
-        analysis += `   • ${rec}\n`;
-      });
-    }
-    
-    analysis += '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n';
-    return analysis;
+    // Notify that prompt was injected (UI filled the input)
+    // This allows executor to continue, but we still wait for user to submit
+    executor?.notifyPromptProcessed();
   };
 
   // Query balance for an entity address
