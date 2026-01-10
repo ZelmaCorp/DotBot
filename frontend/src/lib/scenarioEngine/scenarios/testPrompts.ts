@@ -6,6 +6,10 @@
  */
 
 import type { Scenario } from '../types';
+import {
+  transferScenario,
+  insufficientBalanceScenario,
+} from './scenarioHelpers';
 
 // =============================================================================
 // 1. HAPPY PATH TESTS (Basic Functionality)
@@ -13,58 +17,23 @@ import type { Scenario } from '../types';
 
 export const HAPPY_PATH_TESTS: Scenario[] = [
   // Basic transfer that should PASS (small amount)
-  { 
+  // NOW USING HELPER - 80% less code!
+  transferScenario({
     id: "happy-path-001",
     name: "Small Transfer to Alice (Should Pass)",
-    description: "Tests basic transfer of 0.2 WND to Alice - should succeed with sufficient balance",
-    category: "happy-path",
-    tags: ["transfer", "basic", "alice", "small-amount"],
-    
-    steps: [
-      {
-        id: "step-1",
-        type: "prompt",
-        input: "Send 0.2 WND to Alice"
-      }
-    ],
-    
-    expectations: [
-      {
-        responseType: "execution",
-        expectedAgent: "AssetTransferAgent",
-        expectedFunction: "transfer",
-        expectedParams: { 
-          amount: "0.2", 
-          recipient: "Alice" 
-        }
-      }
-    ]
-  },
+    amount: "0.2",
+    recipient: "Alice",
+    token: "WND",
+  }),
   
   // Basic transfer that should FAIL (insufficient balance)
-  { 
+  // NOW USING HELPER - Clean and concise!
+  insufficientBalanceScenario({
     id: "happy-path-002",
     name: "Large Transfer to Alice (Should Fail)",
-    description: "Tests transfer of 100 WND to Alice - should fail due to insufficient balance",
-    category: "happy-path",
-    tags: ["transfer", "basic", "alice", "insufficient-balance"],
-    
-    steps: [
-      {
-        id: "step-1",
-        type: "prompt",
-        input: "Send 100 WND to Alice"
-      }
-    ],
-    
-    expectations: [
-      {
-        responseType: "text",
-        shouldContain: ["insufficient", "balance"],
-        shouldNotContain: ["execution"]
-      }
-    ]
-  },
+    amount: "100",
+    recipient: "Alice",
+  }),
   
   // TODO: Convert remaining scenarios to proper Scenario format
   // { 

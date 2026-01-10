@@ -400,8 +400,21 @@ export class ScenarioExecutor {
     const chatResult = await this.waitForResponseReceived();
     const response = chatResult?.response || '';
     
-    // Track DotBot's response with more detail
-    const responseType = this.detectResponseType(response);
+    // Capture execution plan if available (check this FIRST for accurate response type)
+    const executionPlan = chatResult?.plan ? {
+      id: chatResult.plan.id,
+      steps: chatResult.plan.steps.map((s: ExecutionStep) => ({
+        agentClassName: s.agentClassName,
+        functionName: s.functionName,
+        parameters: s.parameters,
+        description: s.description,
+        executionType: s.executionType,
+      })),
+      requiresApproval: chatResult.plan.requiresApproval,
+    } : undefined;
+
+    // Determine response type: prioritize execution plan over text analysis
+    const responseType = executionPlan ? 'execution' : this.detectResponseType(response);
     const responsePreview = response.substring(0, 100);
     
     // Log detailed response information
@@ -427,19 +440,6 @@ export class ScenarioExecutor {
 
     const endTime = Date.now();
 
-    // Capture execution plan if available
-    const executionPlan = chatResult?.plan ? {
-      id: chatResult.plan.id,
-      steps: chatResult.plan.steps.map((s: ExecutionStep) => ({
-        agentClassName: s.agentClassName,
-        functionName: s.functionName,
-        parameters: s.parameters,
-        description: s.description,
-        executionType: s.executionType,
-      })),
-      requiresApproval: chatResult.plan.requiresApproval,
-    } : undefined;
-
     // Capture execution statistics if available
     const executionStats = chatResult ? {
       executed: chatResult.executed,
@@ -455,7 +455,7 @@ export class ScenarioExecutor {
       endTime,
       duration: endTime - startTime,
       response: {
-        type: this.detectResponseType(response),
+        type: responseType, // Use the correctly determined type
         content: response,
         parsed: this.tryParseResponse(response),
       },

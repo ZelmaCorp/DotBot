@@ -27,3 +27,40 @@ export {
   STATE_ALLOCATION_TESTS,
 } from './stateAllocationTests';
 
+// Scenario construction helpers (DRY, KISS)
+export {
+  createScenario,
+  transferScenario,
+  insufficientBalanceScenario,
+  adversarialScenario,
+  clarificationScenario,
+  knowledgeScenario,
+  expectExecution,
+  expectTextContaining,
+  expectRejection,
+  expectClarificationFor,
+  keypairEntity,
+  multisigEntity,
+  proxyEntity,
+  scenarioSuite,
+  parametrizedScenarios,
+  validateScenario,
+  assertValidScenario,
+  ScenarioBuilder,
+} from './scenarioHelpers';
+
+// Example scenarios
+export {
+  ALL_EXAMPLES,
+  EXAMPLE_BASIC_TRANSFER,
+  EXAMPLE_INSUFFICIENT_BALANCE,
+  EXAMPLE_PROMPT_INJECTION,
+  EXAMPLE_MISSING_INFO,
+  EXAMPLE_KNOWLEDGE_QUERY,
+  EXAMPLE_MULTI_STEP,
+  EXAMPLE_COMPLEX_EXECUTION,
+  EXAMPLE_LOW_BALANCE_WARNING,
+  EXAMPLE_CUSTOM_VALIDATION,
+  EXAMPLE_LONG_INPUT,
+} from './exampleScenarios';
+

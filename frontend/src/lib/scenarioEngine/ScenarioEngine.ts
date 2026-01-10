@@ -138,6 +138,8 @@ export class ScenarioEngine {
   private executionSubscriptions: Map<string, () => void> = new Map();
   // Track last reported status for each execution item to avoid duplicates
   private lastReportedStatus: Map<string, Map<string, string>> = new Map(); // executionId -> itemId -> status
+  // Track which executions have had completion events emitted (to avoid duplicates)
+  private lastExecutionCompleteState: Set<string> | null = null;
 
   constructor(config: ScenarioEngineConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -159,8 +161,10 @@ export class ScenarioEngine {
     this.updateState({ status: 'preparing' });
 
     try {
-      // Initialize evaluator (no async setup needed)
-      this.evaluator = createEvaluator();
+      // Initialize evaluator with entity resolver
+      this.evaluator = createEvaluator({
+        entityResolver: (name: string) => this.state.entities.get(name)?.address,
+      });
 
       // Forward evaluator events (LLM-consumable logs)
       this.evaluator.addEventListener((event) => this.emit(event));
@@ -338,13 +342,36 @@ export class ScenarioEngine {
     }
     const statusMap = this.lastReportedStatus.get(executionId)!;
     
-    // Track overall execution status
-    const isExecuting = state.isExecuting || state.items.some((item: any) => 
-      item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting'
-    );
-    const isComplete = !isExecuting && state.items.every((item: any) => 
+    // Track overall execution status (same logic as ExecutionFlow component)
+    const isComplete = state.items.every((item: any) => 
       item.status === 'completed' || item.status === 'finalized' || item.status === 'failed' || item.status === 'cancelled'
     );
+    const isExecuting = !isComplete && (
+      state.isExecuting || state.items.some((item: any) => 
+        item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting'
+      )
+    );
+    
+    // Emit dotbot-activity update when execution completes
+    if (isComplete && !this.lastExecutionCompleteState?.has(executionId)) {
+      const completedCount = state.items.filter((item: any) => 
+        item.status === 'completed' || item.status === 'finalized'
+      ).length;
+      const failedCount = state.items.filter((item: any) => item.status === 'failed').length;
+      
+      if (completedCount > 0) {
+        this.emit({
+          type: 'dotbot-activity',
+          activity: `Execution completed: ${completedCount} succeeded${failedCount > 0 ? `, ${failedCount} failed` : ''}`,
+        });
+      }
+      
+      // Track that we've emitted completion for this execution
+      if (!this.lastExecutionCompleteState) {
+        this.lastExecutionCompleteState = new Set();
+      }
+      this.lastExecutionCompleteState.add(executionId);
+    }
     
     // Find items with status changes (only report if status changed)
     state.items.forEach((item: any, index: number) => {
@@ -475,7 +502,7 @@ export class ScenarioEngine {
           this.appendToReport(`  ✓ Duration: ${event.result.duration}ms\n`);
           
           // DotBot response should already be in report from DotBot events
-          // Only add if missing (fallback needed
+          // Only add if missing (fallback needed)
           if (event.result.response?.content && !this.lastDotBotResponse) {
             this.appendDotBotResponseToReport({
               response: event.result.response.content,
@@ -484,6 +511,26 @@ export class ScenarioEngine {
               completed: 0,
               failed: event.result.success ? 0 : 1,
             });
+          }
+          
+          // Show execution plan from StepResult if available (more reliable than ChatResult)
+          if (event.result.executionPlan) {
+            this.appendToReport(`  ✓ Execution Plan: ${event.result.executionPlan.steps.length} step(s)\n`);
+            if (event.result.executionPlan.steps.length > 0) {
+              this.appendToReport(`    Steps:\n`);
+              event.result.executionPlan.steps.forEach((step: any, idx: number) => {
+                const stepDesc = step.description || `${step.agentClassName}.${step.functionName}`;
+                this.appendToReport(`      ${idx + 1}. ${stepDesc}\n`);
+              });
+            }
+          }
+          
+          // Show execution statistics if available
+          if (event.result.executionStats) {
+            const stats = event.result.executionStats;
+            if (stats.executed) {
+              this.appendToReport(`  ✓ Executed: ${stats.completed} completed, ${stats.failed} failed\n`);
+            }
           }
           
           // Show assertion results if any
@@ -760,7 +807,55 @@ export class ScenarioEngine {
     }
     
     // Get current step results
-    const stepResults = this.executor?.getContext()?.results || [];
+    let stepResults = this.executor?.getContext()?.results || [];
+    
+    // Refresh execution state for any step results that have execution plans
+    // This ensures we have the latest execution status even if execution completed after step result was captured
+    if (this.dotbot?.currentChat && stepResults.length > 0) {
+      const chatInstance = this.dotbot.currentChat;
+      stepResults = await Promise.all(stepResults.map(async (result) => {
+        // If this step has an execution plan, try to find the corresponding execution message
+        // and get the latest execution state
+        if (result.executionPlan?.id) {
+          try {
+            // Find execution message that matches this plan ID
+            const executionMessages = chatInstance.messages.filter(
+              (msg: any): msg is any => msg.type === 'execution' && msg.executionPlan?.id === result.executionPlan?.id
+            );
+            
+            if (executionMessages.length > 0) {
+              const executionMessage = executionMessages[0];
+              const executionArray = chatInstance.getExecutionArray(executionMessage.executionId);
+              
+              if (executionArray) {
+                const latestState = executionArray.getState();
+                // Update execution stats from latest state
+                if (latestState.items.length > 0) {
+                  const completed = latestState.items.filter(item => 
+                    item.status === 'completed' || item.status === 'finalized'
+                  ).length;
+                  const failed = latestState.items.filter(item => item.status === 'failed').length;
+                  
+                  return {
+                    ...result,
+                    executionStats: {
+                      executed: true,
+                      success: failed === 0 && completed > 0,
+                      completed,
+                      failed,
+                    },
+                  };
+                }
+              }
+            }
+          } catch (error) {
+            // If we can't get execution state, use what we have
+            console.debug('Could not refresh execution state:', error);
+          }
+        }
+        return result;
+      }));
+    }
     
     // Jump to evaluation phase
     this.emit({ type: 'phase-start', phase: 'final-report', details: 'Evaluating results (ended early)' });
@@ -772,7 +867,7 @@ export class ScenarioEngine {
     this.emit({ type: 'phase-update', phase: 'final-report', message: 'Analyzing scenario results...' });
     this.appendToReport('  → Analyzing scenario results...\n');
     
-    // Evaluate with current results
+    // Evaluate with current results (now with refreshed execution state)
     const evaluation = this.evaluator!.evaluate(scenario, stepResults);
     
     const endTime = Date.now();

@@ -34,6 +34,9 @@ export interface EvaluatorConfig {
   
   /** Custom scorer function */
   customScorer?: (result: StepResult, expectation: ScenarioExpectation) => number;
+  
+  /** Entity resolver for matching entity names to addresses */
+  entityResolver?: (name: string) => string | undefined;
 }
 
 export interface ExpectationResult {
@@ -228,19 +231,35 @@ export class Evaluator {
     expectations: ScenarioExpectation[],
     stepResults: StepResult[]
   ): ExpectationResult[] {
-    // Get the last response for evaluation
+    // Get the last response for evaluation (for text-based checks)
     const lastResponse = this.getLastResponse(stepResults);
     const allResponses = stepResults
       .filter(r => r.response)
       .map(r => r.response!.content);
     
-    // Get all execution plans for evaluation
+    // Get all execution plans for evaluation (from ALL steps, not just the last one)
+    // This is important because execution plans might be in earlier steps
     const allExecutionPlans = stepResults
       .filter(r => r.executionPlan)
       .map(r => r.executionPlan!);
+    
+    // Find the step result that has the execution plan (for execution-based expectations)
+    // This ensures we evaluate the correct step, not just the last one
+    const stepResultWithExecution = stepResults.find(r => r.executionPlan) || null;
+    
+    // For execution-based expectations, use the step that has the execution plan
+    // For text-based expectations, use the last response
+    // This handles cases where execution plan is in step 1, but step 2 has a different response
 
     return expectations.map(expectation => 
-      this.evaluateSingleExpectation(expectation, lastResponse, allResponses, stepResults, allExecutionPlans)
+      this.evaluateSingleExpectation(
+        expectation, 
+        lastResponse, 
+        allResponses, 
+        stepResults, 
+        allExecutionPlans,
+        stepResultWithExecution
+      )
     );
   }
 
@@ -249,7 +268,8 @@ export class Evaluator {
     lastResponse: string,
     allResponses: string[],
     stepResults: StepResult[],
-    allExecutionPlans: NonNullable<StepResult['executionPlan']>[]
+    allExecutionPlans: NonNullable<StepResult['executionPlan']>[],
+    stepResultWithExecution: StepResult | null
   ): ExpectationResult {
     // Emit evaluation start log
     this.emit({
@@ -465,12 +485,28 @@ export class Evaluator {
 
     const score = checkCount > 0 ? Math.round(totalScore / checkCount) : 100;
 
-    // Emit evaluation result log
+    // Emit evaluation result log with detailed check breakdown
+    const checkSummary = checks
+      ?.map(c => `${c.passed ? '✓' : '✗'} ${c.name}`)
+      .join(', ') || 'no checks';
+    
     this.emit({
       type: 'log',
       level: overallMet ? 'debug' : 'warn',
-      message: `   ${overallMet ? '✅' : '❌'} Expectation ${overallMet ? 'MET' : 'FAILED'} (Score: ${score}/100): ${this.generateExpectationDetails(checks, overallMet)}`,
+      message: `   ${overallMet ? '✅' : '❌'} Expectation ${overallMet ? 'MET' : 'FAILED'} (Score: ${score}/100)\n      Checks: ${checkSummary}`,
     });
+    
+    // Log failed checks with details
+    if (!overallMet && checks) {
+      const failedChecks = checks.filter(c => !c.passed);
+      failedChecks.forEach(check => {
+        this.emit({
+          type: 'log',
+          level: 'warn',
+          message: `      ✗ ${check.name}: ${check.message}`,
+        });
+      });
+    }
 
     return {
       expectation,
@@ -908,6 +944,24 @@ export class Evaluator {
     // Exact match
     if (expected === actual) {
       return true;
+    }
+
+    // Entity name → address resolution
+    // If expected is a short name (like "Alice") and actual is an address,
+    // resolve the entity name and compare
+    if (this.config.entityResolver && expected.length < 20 && actual.length > 40) {
+      const resolvedAddress = this.config.entityResolver(expected);
+      if (resolvedAddress && resolvedAddress.toLowerCase() === actual.toLowerCase()) {
+        return true;
+      }
+    }
+    
+    // Reverse: If actual is a name and expected is an address
+    if (this.config.entityResolver && actual.length < 20 && expected.length > 40) {
+      const resolvedAddress = this.config.entityResolver(actual);
+      if (resolvedAddress && resolvedAddress.toLowerCase() === expected.toLowerCase()) {
+        return true;
+      }
     }
 
     // Partial match (for addresses, entity names, etc.)
