@@ -19,13 +19,6 @@ export interface SimulationContext {
 }
 
 /**
- * Check if simulation should be enabled
- */
-export function shouldSimulate(): boolean {
-  return true;
-}
-
-/**
  * Run simulation for an extrinsic
  */
 export async function runSimulation(

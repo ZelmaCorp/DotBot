@@ -21,7 +21,8 @@ import { WalletAccount } from '../types/wallet';
 import { Signer } from './signers/types';
 import { BrowserWalletSigner } from './signers/browserSigner';
 import { RpcManager } from '../rpcManager';
-import { shouldSimulate, runSimulation, SimulationContext } from './simulation/executionSimulator';
+import { runSimulation, SimulationContext } from './simulation/executionSimulator';
+import { isSimulationEnabled } from './simulation/simulationConfig';
 import {
   createSigningRequest,
   createBatchSigningRequest,
@@ -341,7 +342,7 @@ export class Executioner {
     const extrinsic = agentResult.extrinsic;
     const apiForExtrinsic = this.getApiForExtrinsic(extrinsic);
 
-    if (shouldSimulate()) {
+    if (isSimulationEnabled()) {
       const simulationContext: SimulationContext = {
         api: apiForExtrinsic,
         accountAddress: this.account.address,
@@ -455,7 +456,7 @@ export class Executioner {
 
     const batchExtrinsic = apiForBatch.tx.utility.batchAll(extrinsics);
 
-    if (shouldSimulate()) {
+    if (isSimulationEnabled()) {
       const simulationContext: SimulationContext = {
         api: apiForBatch,
         accountAddress: this.account.address,

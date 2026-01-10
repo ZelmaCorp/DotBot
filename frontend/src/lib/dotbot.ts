@@ -31,6 +31,14 @@ import { detectNetworkFromChainName } from './prompts/system/knowledge';
 import { ChatInstanceManager } from './chatInstanceManager';
 import { ChatInstance } from './chatInstance';
 import type { Environment, ConversationItem } from './types/chatInstance';
+import {
+  getSimulationConfig,
+  updateSimulationConfig,
+  enableSimulation,
+  disableSimulation,
+  isSimulationEnabled,
+  type SimulationConfig,
+} from './executionEngine/simulation/simulationConfig';
 
 export interface DotBotConfig {
   /** Wallet account */
@@ -243,6 +251,43 @@ export class DotBot {
       relayChain: this.relayChainManager.getCurrentEndpoint(),
       assetHub: this.assetHubManager.getCurrentEndpoint()
     };
+  }
+
+  /**
+   * Check if simulation is enabled
+   */
+  isSimulationEnabled(): boolean {
+    return isSimulationEnabled();
+  }
+
+  /**
+   * Enable transaction simulation
+   */
+  enableSimulation(): void {
+    enableSimulation();
+    console.log('[DotBot] Simulation enabled');
+  }
+
+  /**
+   * Disable transaction simulation
+   */
+  disableSimulation(): void {
+    disableSimulation();
+    console.log('[DotBot] Simulation disabled');
+  }
+
+  /**
+   * Get current simulation configuration
+   */
+  getSimulationConfig(): SimulationConfig {
+    return getSimulationConfig();
+  }
+
+  /**
+   * Update simulation configuration
+   */
+  updateSimulationConfig(updates: Partial<SimulationConfig>): void {
+    updateSimulationConfig(updates);
   }
   
   /**

@@ -7,7 +7,7 @@
 import { ExecutionStep, ExecutionPlan } from '../prompts/system/execution/types';
 import { ExecutionItem, ExecutionStatus } from './types';
 import { AgentResult } from '../agents/types';
-import { shouldSimulate } from './simulation/executionSimulator';
+import { isSimulationEnabled } from './simulation/simulationConfig';
 
 /**
  * Convert a prompt system ExecutionStatus to runtime ExecutionStatus
@@ -72,7 +72,7 @@ export function createExecutionItemFromAgentResult(
 ): ExecutionItem {
   // If simulation is disabled, items start as 'ready' (ready for signing)
   // If simulation is enabled, items start as 'pending' (will be simulated first)
-  const initialStatus = shouldSimulate() ? 'pending' : 'ready';
+  const initialStatus = isSimulationEnabled() ? 'pending' : 'ready';
   return {
     id: `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     agentResult,

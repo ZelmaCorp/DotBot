@@ -27,7 +27,7 @@ export {
   STATE_ALLOCATION_TESTS,
 } from './stateAllocationTests';
 
-// Scenario construction helpers (DRY, KISS)
+// Scenario construction helpers
 export {
   createScenario,
   transferScenario,

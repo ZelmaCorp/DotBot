@@ -9,7 +9,7 @@ import React, { useState, useEffect } from 'react';
 import { CheckCircle2, XCircle, Clock, Loader2, AlertTriangle, ChevronRight, Play, X } from 'lucide-react';
 import { ExecutionItem, ExecutionArrayState } from '../../lib/executionEngine/types';
 import type { ExecutionMessage, DotBot } from '../../lib';
-import { shouldSimulate } from '../../lib/executionEngine/simulation/executionSimulator';
+import { isSimulationEnabled } from '../../lib/executionEngine/simulation/simulationConfig';
 import '../../styles/execution-flow.css';
 
 export interface ExecutionFlowProps {
@@ -86,7 +86,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
 
   // Check if simulation is enabled and if any items are being simulated (pending status)
   // Only consider items as "simulating" if simulation is actually enabled
-  const simulationEnabled = shouldSimulate();
+  const simulationEnabled = isSimulationEnabled();
   const isSimulating = simulationEnabled && executionState.items.some(item => item.status === 'pending');
   const simulatingCount = executionState.items.filter(item => item.status === 'pending').length;
   
@@ -220,8 +220,8 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
         )}
       </div>
 
-      {/* Simulation Status Banners */}
-      {isSimulating && (
+      {/* Simulation Status Banners - Only show when simulation is enabled */}
+      {simulationEnabled && isSimulating && (
         <div className="simulation-banner simulation-in-progress">
           <div className="banner-icon">
             <Loader2 className="animate-spin" size={20} />
@@ -235,7 +235,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
         </div>
       )}
 
-      {allSimulationsComplete && hasSimulationSuccess && !hasSimulationFailure && !isExecuting && (
+      {simulationEnabled && allSimulationsComplete && hasSimulationSuccess && !hasSimulationFailure && !isExecuting && (
         <div className="simulation-banner simulation-success">
           <div className="banner-icon">
             <CheckCircle2 size={20} />
@@ -249,7 +249,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
         </div>
       )}
 
-      {allSimulationsComplete && hasSimulationFailure && (
+      {simulationEnabled && allSimulationsComplete && hasSimulationFailure && (
         <div className="simulation-banner simulation-failure">
           <div className="banner-icon">
             <AlertTriangle size={20} />
@@ -263,12 +263,32 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
         </div>
       )}
 
-      {/* Approval message (only show when no banner is active) */}
-      {!isSimulating && !allSimulationsComplete && isWaitingForApproval && (
-        <div className="execution-flow-intro">
-          <p>Review the steps below. Once you accept, your wallet will ask you to sign each transaction.</p>
+      {/* Show simulation disabled message when simulation is off and items are ready */}
+      {!simulationEnabled && isWaitingForApproval && executionState.items.every(item => item.status === 'ready') && (
+        <div className="simulation-banner simulation-disabled">
+          <div className="banner-icon">
+            <AlertTriangle size={20} />
+          </div>
+          <div className="banner-content">
+            <div className="banner-title">Transaction simulation is disabled</div>
+          </div>
         </div>
       )}
+
+      {/* Approval message (only show when no banner is active) */}
+      {(() => {
+        const hasSimulationBanner = 
+          (simulationEnabled && isSimulating) ||
+          (simulationEnabled && allSimulationsComplete && hasSimulationSuccess && !hasSimulationFailure && !isExecuting) ||
+          (simulationEnabled && allSimulationsComplete && hasSimulationFailure) ||
+          (!simulationEnabled && isWaitingForApproval && executionState.items.every(item => item.status === 'ready'));
+        
+        return !hasSimulationBanner && !allSimulationsComplete && isWaitingForApproval && (
+          <div className="execution-flow-intro">
+            <p>Review the steps below. Once you accept, your wallet will ask you to sign each transaction.</p>
+          </div>
+        );
+      })()}
 
       {/* Items List */}
       <div className="execution-flow-items">

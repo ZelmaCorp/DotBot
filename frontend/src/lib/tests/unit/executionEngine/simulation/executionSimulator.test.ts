@@ -22,8 +22,8 @@ jest.mock('@polkadot/util-crypto', () => ({
 
 import {
   runSimulation,
-  shouldSimulate,
 } from '../../../../executionEngine/simulation/executionSimulator';
+import { isSimulationEnabled } from '../../../../executionEngine/simulation/simulationConfig';
 import type { SimulationContext } from '../../../../executionEngine/simulation/executionSimulator';
 import { ExecutionArray } from '../../../../executionEngine/executionArray';
 import { ExecutionItem } from '../../../../executionEngine/types';
@@ -130,9 +130,9 @@ describe('Execution Simulator', () => {
     };
   });
 
-  describe('shouldSimulate()', () => {
+  describe('isSimulationEnabled()', () => {
     it('should return false (simulation disabled by default)', () => {
-      expect(shouldSimulate()).toBe(false);
+      expect(isSimulationEnabled()).toBe(false);
     });
   });
 
