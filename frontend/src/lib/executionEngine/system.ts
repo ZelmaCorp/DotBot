@@ -15,11 +15,14 @@ import { ApiPromise } from '@polkadot/api';
 import { ExecutionPlan } from '../prompts/system/execution/types';
 import { ExecutionOrchestrator } from './orchestrator';
 import { Executioner } from './executioner';
-import { ExecutionOptions, SigningRequest, BatchSigningRequest } from './types';
+import { ExecutionOptions, SigningRequest, BatchSigningRequest, ExecutionItem } from './types';
+import { ExecutionArray } from './executionArray';
 import { WalletAccount } from '../types/wallet';
 import { Signer } from './signers/types';
-import type { RpcManager } from '../rpcManager';
+import type { RpcManager, ExecutionSession } from '../rpcManager';
 import { SimulationStatusCallback } from '../agents/types';
+import { isSimulationEnabled } from './simulation/simulationConfig';
+import { createSimulationContext, findMatchingApi } from './simulation/simulationHelpers';
 
 /**
  * Execution System
@@ -47,6 +50,15 @@ export class ExecutionSystem {
   private orchestrator: ExecutionOrchestrator;
   private executioner: Executioner;
   
+  // Execution sessions - locked API instances for transaction lifecycle
+  private relayChainSession: ExecutionSession | null = null;
+  private assetHubSession: ExecutionSession | null = null;
+  
+  // Store initialization state for re-initialization with sessions
+  private initializedAccount: WalletAccount | null = null;
+  private initializedSigner: Signer | null = null;
+  private initializedOnSimulationStatus: SimulationStatusCallback | undefined = undefined;
+  
   constructor() {
     this.orchestrator = new ExecutionOrchestrator();
     this.executioner = new Executioner();
@@ -72,6 +84,11 @@ export class ExecutionSystem {
     assetHubManager?: RpcManager | null,
     onSimulationStatus?: SimulationStatusCallback | null
   ): void {
+    // Store for later re-initialization with sessions
+    this.initializedAccount = account;
+    this.initializedSigner = signer || null;
+    this.initializedOnSimulationStatus = onSimulationStatus || undefined;
+    
     this.orchestrator.initialize(api, assetHubApi, onSimulationStatus, relayChainManager, assetHubManager);
     this.executioner.initialize(api, account, signer, assetHubApi, relayChainManager, assetHubManager, onSimulationStatus || undefined);
   }
@@ -102,6 +119,245 @@ export class ExecutionSystem {
    */
   getExecutioner(): Executioner {
     return this.executioner;
+  }
+  
+  /**
+   * Prepare execution array: orchestrate plan and run simulation if enabled
+   * 
+   * This is the two-phase execution pattern:
+   * 1. Prepare: Orchestrate + simulate (if enabled)
+   * 2. Execute: User approves → sign → broadcast (via startExecution)
+   * 
+   * @param plan ExecutionPlan from LLM
+   * @param relayChainManager RPC manager for Relay Chain
+   * @param assetHubManager RPC manager for Asset Hub
+   * @param accountAddress Account address for simulation
+   * @param onSimulationStatus Optional callback for simulation status
+   * @returns ExecutionArray ready for execution
+   */
+  async prepareExecutionArray(
+    plan: ExecutionPlan,
+    relayChainManager: RpcManager,
+    assetHubManager: RpcManager,
+    accountAddress: string,
+    onSimulationStatus?: SimulationStatusCallback
+  ): Promise<ExecutionArray> {
+    this.cleanupExecutionSessions();
+    
+    try {
+      await this.createExecutionSessions(relayChainManager, assetHubManager);
+      this.initializeWithSessions();
+      
+      const result = await this.orchestrator.orchestrate(plan);
+      if (!result.success && result.errors.length > 0) {
+        const errorMessages = result.errors.map(e => `• ${e.error}`).join('\n');
+        throw new Error(`Failed to prepare transaction:\n\n${errorMessages}`);
+      }
+      
+      if (isSimulationEnabled()) {
+        await this.runSimulationForExecutionArray(
+          result.executionArray,
+          accountAddress,
+          relayChainManager,
+          assetHubManager,
+          onSimulationStatus
+        );
+      }
+      
+      return result.executionArray;
+    } catch (error) {
+      this.cleanupExecutionSessions();
+      throw error;
+    }
+  }
+  
+  /**
+   * Create execution sessions for Relay Chain and Asset Hub
+   */
+  private async createExecutionSessions(
+    relayChainManager: RpcManager,
+    assetHubManager: RpcManager
+  ): Promise<void> {
+    this.relayChainSession = await relayChainManager.createExecutionSession();
+    console.info(`Created Relay Chain execution session: ${this.relayChainSession.endpoint}`);
+    
+    try {
+      this.assetHubSession = await assetHubManager.createExecutionSession();
+      console.info(`Created Asset Hub execution session: ${this.assetHubSession.endpoint}`);
+    } catch (error) {
+      console.warn('Asset Hub execution session creation failed, continuing without it:', error);
+      this.assetHubSession = null;
+    }
+  }
+  
+  /**
+   * Initialize orchestrator and executioner with session APIs
+   */
+  private initializeWithSessions(): void {
+    if (!this.relayChainSession || !this.initializedAccount) {
+      throw new Error('Execution sessions not created or system not initialized');
+    }
+    
+    // Re-initialize orchestrator with session APIs
+    this.orchestrator.initialize(
+      this.relayChainSession.api,
+      this.assetHubSession?.api || null,
+      this.initializedOnSimulationStatus || undefined,
+      null, // RPC managers not needed (using session APIs)
+      null
+    );
+    
+    // Re-initialize executioner with session APIs
+    this.executioner.initialize(
+      this.relayChainSession.api,
+      this.initializedAccount,
+      this.initializedSigner || undefined,
+      this.assetHubSession?.api || null,
+      null, // RPC managers not needed (using session APIs)
+      null,
+      this.initializedOnSimulationStatus
+    );
+  }
+  
+  /**
+   * Validate execution sessions are still active
+   */
+  async validateExecutionSessions(): Promise<boolean> {
+    if (!this.relayChainSession) {
+      return false;
+    }
+    return await this.relayChainSession.isConnected();
+  }
+  
+  /**
+   * Clean up execution sessions
+   */
+  cleanupExecutionSessions(): void {
+    if (this.relayChainSession) {
+      this.relayChainSession.markInactive();
+      this.relayChainSession = null;
+    }
+    if (this.assetHubSession) {
+      this.assetHubSession.markInactive();
+      this.assetHubSession = null;
+    }
+  }
+  
+  /**
+   * Get execution sessions (for DotBot to store)
+   */
+  getExecutionSessions(): { relayChain: ExecutionSession | null; assetHub: ExecutionSession | null } {
+    return {
+      relayChain: this.relayChainSession,
+      assetHub: this.assetHubSession,
+    };
+  }
+  
+  /**
+   * Run simulation for all items in execution array
+   */
+  private async runSimulationForExecutionArray(
+    executionArray: ExecutionArray,
+    accountAddress: string,
+    relayChainManager: RpcManager,
+    assetHubManager: RpcManager,
+    onSimulationStatus?: SimulationStatusCallback
+  ): Promise<void> {
+    const orchestratorApi = this.orchestrator.getApi();
+    const orchestratorAssetHubApi = this.orchestrator.getAssetHubApi();
+    
+    if (!orchestratorApi) {
+      console.error('Cannot run simulation: orchestrator API not initialized');
+      return;
+    }
+    
+    const items = executionArray.getState().items
+      .filter((item: ExecutionItem) => item.executionType === 'extrinsic' && item.agentResult.extrinsic);
+    
+    const simulationPromises = items.map(item =>
+      this.simulateItem(item, orchestratorApi, orchestratorAssetHubApi, executionArray, accountAddress, relayChainManager, assetHubManager, onSimulationStatus)
+    );
+    
+    await Promise.all(simulationPromises);
+  }
+  
+  /**
+   * Simulate a single execution item
+   */
+  private async simulateItem(
+    item: ExecutionItem,
+    relayApi: ApiPromise,
+    assetHubApi: ApiPromise | null,
+    executionArray: ExecutionArray,
+    accountAddress: string,
+    relayChainManager: RpcManager,
+    assetHubManager: RpcManager,
+    onSimulationStatus?: SimulationStatusCallback
+  ): Promise<void> {
+    const extrinsic = item.agentResult.extrinsic!;
+    const apiForExtrinsic = findMatchingApi(extrinsic, relayApi, assetHubApi);
+    
+    if (!apiForExtrinsic) {
+      console.error(`Cannot determine API for item ${item.id}, skipping simulation`);
+      return;
+    }
+    
+    this.logRegistryMismatchIfNeeded(item, extrinsic, apiForExtrinsic);
+    
+    const { runSimulation } = await import('./simulation/executionSimulator');
+    const simulationContext = createSimulationContext(
+      apiForExtrinsic,
+      accountAddress,
+      assetHubManager,
+      relayChainManager,
+      onSimulationStatus
+    );
+    
+    try {
+      await runSimulation(extrinsic, simulationContext, executionArray, item);
+    } catch (error) {
+      this.handleSimulationError(error, item, extrinsic, apiForExtrinsic);
+    }
+  }
+  
+  /**
+   * Log registry mismatch warning if needed
+   */
+  private logRegistryMismatchIfNeeded(
+    item: ExecutionItem,
+    extrinsic: any,
+    apiForExtrinsic: ApiPromise
+  ): void {
+    if (apiForExtrinsic.registry !== extrinsic.registry) {
+      const isAssetHubMethod = extrinsic.method.section === 'assets' || 
+                               extrinsic.method.section === 'foreignAssets';
+      console.warn(
+        `Registry mismatch for item ${item.id}: extrinsic registry does not match orchestrator API registries. ` +
+        `Using ${isAssetHubMethod ? 'Asset Hub' : 'Relay Chain'} API based on method section. ` +
+        `This may cause metadata mismatch errors.`
+      );
+    }
+  }
+  
+  /**
+   * Handle simulation errors with detailed logging
+   */
+  private handleSimulationError(
+    error: unknown,
+    item: ExecutionItem,
+    extrinsic: any,
+    apiForExtrinsic: ApiPromise
+  ): void {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`Simulation failed for item ${item.id}:`, errorMsg);
+    
+    if (errorMsg.includes('Unable to find Call') || errorMsg.includes('findMetaCall')) {
+      console.error(
+        `Metadata mismatch detected. Extrinsic registry: ${extrinsic.registry.constructor.name}, ` +
+        `API registry: ${apiForExtrinsic.registry.constructor.name}, ` +
+        `Call index: [${extrinsic.method.callIndex[0]}, ${extrinsic.method.callIndex[1]}]`
+      );
+    }
   }
   
   /**

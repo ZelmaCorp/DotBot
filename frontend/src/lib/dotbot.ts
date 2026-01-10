@@ -20,14 +20,13 @@ import { ApiPromise } from '@polkadot/api';
 import { ExecutionSystem } from './executionEngine/system';
 import { ExecutionArrayState, ExecutionItem } from './executionEngine/types';
 import { ExecutionArray } from './executionEngine/executionArray';
-import { SimulationContext } from './executionEngine/simulation/executionSimulator';
 import { BrowserWalletSigner } from './executionEngine/signers/browserSigner';
 import { buildSystemPrompt } from './prompts/system/loader';
 import { ExecutionPlan } from './prompts/system/execution/types';
 import { SigningRequest, BatchSigningRequest, ExecutionOptions } from './executionEngine/types';
 import { WalletAccount } from '../types/wallet';
 import { processSystemQueries, areSystemQueriesEnabled } from './prompts/system/systemQuery';
-import { RpcManager, createRpcManagersForNetwork, Network } from './rpcManager';
+import { RpcManager, createRpcManagersForNetwork, Network, ExecutionSession } from './rpcManager';
 import { SimulationStatusCallback } from './agents/types';
 import { detectNetworkFromChainName } from './prompts/system/knowledge';
 import { ChatInstanceManager } from './chatInstanceManager';
@@ -171,6 +170,11 @@ export class DotBot {
   
   private relayChainManager: RpcManager;
   private assetHubManager: RpcManager;
+  
+  // Execution sessions - locked API instances for transaction lifecycle
+  // These are created during prepareExecution() and kept alive until execution completes
+  private relayChainSession: ExecutionSession | null = null;
+  private assetHubSession: ExecutionSession | null = null;
   
   // Chat instance management (built-in) - execution lives here!
   private chatManager: ChatInstanceManager;
@@ -586,6 +590,11 @@ export class DotBot {
       throw new Error('No active chat. Cannot start execution.');
     }
     
+    // Validate execution sessions are still active
+    if (!(await this.executionSystem.validateExecutionSessions())) {
+      throw new Error('Execution session expired. Please prepare the execution again.');
+    }
+    
     let executionArray = this.currentChat.getExecutionArray(executionId);
     
     // If not found or interrupted, try to rebuild from ExecutionPlan
@@ -594,23 +603,11 @@ export class DotBot {
         .find(m => m.type === 'execution' && (m as any).executionId === executionId) as any;
       
       if (executionMessage?.executionPlan) {
-        // Rebuild ExecutionArray with fresh extrinsics
-        const orchestrator = this.executionSystem.getOrchestrator();
-        const result = await orchestrator.orchestrate(executionMessage.executionPlan, {
-          stopOnError: false,
-          validateFirst: false,
-        });
-        
-        if (result.success && result.executionArray) {
-          // Restore state from saved ExecutionArrayState (preserve progress)
-          const savedState = executionMessage.executionArray;
-          result.executionArray.restoreState(savedState);
-          
-          // Update the stored ExecutionArray
-          this.currentChat.setExecutionArray(executionId, result.executionArray);
-          executionArray = result.executionArray;
-        } else {
-          throw new Error(`Failed to rebuild execution: ${result.errors.map(e => e.error).join(', ')}`);
+        // Rebuild requires new sessions
+        await this.prepareExecution(executionMessage.executionPlan);
+        executionArray = this.currentChat.getExecutionArray(executionId);
+        if (!executionArray) {
+          throw new Error('Failed to rebuild execution array');
         }
       } else if (!executionArray) {
         throw new Error(`Execution ${executionId} not found. It may not have been prepared yet.`);
@@ -619,8 +616,15 @@ export class DotBot {
       // (will fail, but that's expected for old flows without ExecutionPlan)
     }
     
-    const executioner = this.executionSystem.getExecutioner();
-    await executioner.execute(executionArray, options);
+    try {
+      const executioner = this.executionSystem.getExecutioner();
+      await executioner.execute(executionArray, options);
+    } finally {
+      // Clean up execution sessions after execution completes
+      this.executionSystem.cleanupExecutionSessions();
+      this.relayChainSession = null;
+      this.assetHubSession = null;
+    }
   }
   
   /**
@@ -814,150 +818,64 @@ export class DotBot {
   /**
    * Prepare execution (orchestrate + add to chat)
    * Does NOT auto-execute - waits for user approval
+   * 
+   * CRITICAL: Creates execution sessions to lock API instances for the transaction lifecycle.
+   * This prevents metadata mismatches if RPC endpoints fail during execution.
+   */
+  /**
+   * Prepare execution (orchestrate + add to chat)
+   * Does NOT auto-execute - waits for user approval
+   * 
+   * CRITICAL: Creates execution sessions to lock API instances for the transaction lifecycle.
+   * This prevents metadata mismatches if RPC endpoints fail during execution.
    */
   private async prepareExecution(plan: ExecutionPlan): Promise<void> {
-    const orchestrator = this.executionSystem.getOrchestrator();
-    
-    let orchestrationResult;
     try {
-      orchestrationResult = await orchestrator.orchestrate(plan);
+      // ExecutionSystem handles: session creation, orchestration, simulation
+      const executionArray = await this.executionSystem.prepareExecutionArray(
+        plan,
+        this.relayChainManager,
+        this.assetHubManager,
+        this.wallet.address,
+        this.config?.onSimulationStatus
+      );
+      
+      // Store sessions for validation in startExecution
+      const sessions = this.executionSystem.getExecutionSessions();
+      this.relayChainSession = sessions.relayChain;
+      this.assetHubSession = sessions.assetHub;
+      
+      await this.addExecutionToChat(executionArray, plan);
     } catch (error) {
-      console.error('Orchestration failed:', error);
+      this.executionSystem.cleanupExecutionSessions();
       throw error;
     }
-    
-    const { executionArray } = orchestrationResult;
-    
-    if (!orchestrationResult.success && orchestrationResult.errors.length > 0) {
-      const errorMessages = orchestrationResult.errors.map((e: { error: string }) => `• ${e.error}`).join('\n');
-      throw new Error(`Failed to prepare transaction:\n\n${errorMessages}`);
-    }
-    
-    // Add ExecutionMessage to conversation timeline (so UI can render it!)
-    if (this.currentChat) {
-      const state = executionArray.getState();
-      const execMessage = await this.currentChat.addExecutionMessage(state, plan);
-      this.currentChat.setExecutionArray(state.id, executionArray);
-      
-      // Emit execution message added event
-      this.emit({ 
-        type: 'execution-message-added', 
-        executionId: state.id, 
-        plan, 
-        timestamp: Date.now() 
-      });
-      
-      // Subscribe to updates to keep ExecutionMessage in sync
-      executionArray.onStatusUpdate(() => {
-        if (this.currentChat) {
-          this.currentChat.updateExecutionMessage(execMessage.id, {
-            executionArray: executionArray.getState(),
-          }).catch(err => console.error('Failed to update execution message:', err));
-        }
-      });
-      
-      // Run simulation automatically if enabled (before user clicks Accept)
-      if (isSimulationEnabled()) {
-        await this.runSimulationForExecutionArray(executionArray);
-      }
-    }
-    
-    // DO NOT EXECUTE HERE - wait for user to click "Accept & Start" in UI!
   }
   
   /**
-   * Run simulation for all items in execution array
-   * Called automatically during prepareExecution() if simulation is enabled
-   * 
-   * CRITICAL: Must use the EXACT same API instance that created each extrinsic.
-   * The extrinsic's call indices are tied to the specific API instance's metadata.
+   * Add execution array to chat (chat-specific logic)
    */
-  private async runSimulationForExecutionArray(executionArray: ExecutionArray): Promise<void> {
-    const items = executionArray.getState().items;
-    const orchestrator = this.executionSystem.getOrchestrator();
+  private async addExecutionToChat(executionArray: ExecutionArray, plan: ExecutionPlan): Promise<void> {
+    if (!this.currentChat) return;
     
-    // Get the exact API instances that orchestrator uses (these created the extrinsics)
-    // Access orchestrator's private API instances via type assertion
-    const orchestratorApi = (orchestrator as any).api as ApiPromise | null;
-    const orchestratorAssetHubApi = (orchestrator as any).assetHubApi as ApiPromise | null;
+    const state = executionArray.getState();
+    const execMessage = await this.currentChat.addExecutionMessage(state, plan);
+    this.currentChat.setExecutionArray(state.id, executionArray);
     
-    if (!orchestratorApi) {
-      console.error('Cannot run simulation: orchestrator API not initialized');
-      return;
-    }
+    this.emit({ 
+      type: 'execution-message-added', 
+      executionId: state.id, 
+      plan, 
+      timestamp: Date.now() 
+    });
     
-    // Run simulation for each extrinsic item in parallel (they're independent)
-    const simulationPromises = items
-      .filter((item: ExecutionItem) => item.executionType === 'extrinsic' && item.agentResult.extrinsic)
-      .map(async (item: ExecutionItem) => {
-        const extrinsic = item.agentResult.extrinsic!;
-        
-        // CRITICAL: Determine which API created this extrinsic by checking the registry
-        // We MUST use the exact same API instance that created it, otherwise call indices won't match
-        let apiForExtrinsic: ApiPromise | null = null;
-        
-        // Check if extrinsic was created with orchestrator's relay chain API
-        if (orchestratorApi.registry === extrinsic.registry) {
-          apiForExtrinsic = orchestratorApi;
-        } 
-        // Check if extrinsic was created with orchestrator's asset hub API
-        else if (orchestratorAssetHubApi && orchestratorAssetHubApi.registry === extrinsic.registry) {
-          apiForExtrinsic = orchestratorAssetHubApi;
-        }
-        // If registries don't match, this is a problem - but try orchestrator's APIs anyway
-        // (they're the ones that created the extrinsic, so metadata should match)
-        else {
-          // Determine by method section (heuristic fallback)
-          const isAssetHubMethod = extrinsic.method.section === 'assets' || 
-                                   extrinsic.method.section === 'foreignAssets';
-          apiForExtrinsic = isAssetHubMethod && orchestratorAssetHubApi 
-            ? orchestratorAssetHubApi 
-            : orchestratorApi;
-          
-          console.warn(
-            `Registry mismatch for item ${item.id}: extrinsic registry does not match orchestrator API registries. ` +
-            `Using ${isAssetHubMethod ? 'Asset Hub' : 'Relay Chain'} API based on method section. ` +
-            `This may cause metadata mismatch errors.`
-          );
-        }
-        
-        if (!apiForExtrinsic) {
-          console.error(`Cannot determine API for item ${item.id}, skipping simulation`);
-          return;
-        }
-        
-        if (this.wallet) {
-          const { runSimulation } = await import('./executionEngine/simulation/executionSimulator');
-          
-          const simulationContext: SimulationContext = {
-            api: apiForExtrinsic,
-            accountAddress: this.wallet.address,
-            assetHubManager: this.assetHubManager,
-            relayChainManager: this.relayChainManager,
-            onStatusUpdate: this.config?.onSimulationStatus,
-          };
-          
-          try {
-            await runSimulation(extrinsic, simulationContext, executionArray, item);
-          } catch (error) {
-            // Simulation errors are handled in runSimulation - item status will be updated
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            console.error(`Simulation failed for item ${item.id}:`, errorMsg);
-            
-            // If it's a metadata mismatch, log additional context
-            if (errorMsg.includes('Unable to find Call') || errorMsg.includes('findMetaCall')) {
-              console.error(
-                `Metadata mismatch detected. Extrinsic registry: ${extrinsic.registry.constructor.name}, ` +
-                `API registry: ${apiForExtrinsic.registry.constructor.name}, ` +
-                `Call index: [${extrinsic.method.callIndex[0]}, ${extrinsic.method.callIndex[1]}]`
-              );
-            }
-          }
-        }
-      });
-    
-    // Wait for all simulations to complete
-    await Promise.all(simulationPromises);
+    executionArray.onStatusUpdate(() => {
+      if (this.currentChat) {
+        this.currentChat.updateExecutionMessage(execMessage.id, {
+          executionArray: executionArray.getState(),
+        }).catch(err => console.error('Failed to update execution message:', err));
+      }
+    });
   }
 
   /**

@@ -16,7 +16,7 @@ import {
   CompletionCallback,
   SimulationStatus,
 } from './types';
-import { isSimulationEnabled } from './simulation/simulationConfig';
+import { getInitialExecutionStatus } from './utils';
 
 /**
  * Execution Array class
@@ -45,9 +45,7 @@ export class ExecutionArray {
    */
   add(agentResult: AgentResult): string {
     const id = this.generateId();
-    // If simulation is disabled, items start as 'ready' (ready for signing)
-    // If simulation is enabled, items start as 'pending' (will be simulated first)
-    const initialStatus = isSimulationEnabled() ? 'pending' : 'ready';
+    const initialStatus = getInitialExecutionStatus();
     const item: ExecutionItem = {
       id,
       agentResult,

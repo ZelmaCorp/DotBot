@@ -14,6 +14,7 @@ import {
   ExecutionItem,
   ExecutionOptions,
   ExecutionResult,
+  ExecutionStatus,
   SigningRequest,
   BatchSigningRequest,
 } from './types';
@@ -21,8 +22,9 @@ import { WalletAccount } from '../types/wallet';
 import { Signer } from './signers/types';
 import { BrowserWalletSigner } from './signers/browserSigner';
 import { RpcManager } from '../rpcManager';
-import { runSimulation, SimulationContext } from './simulation/executionSimulator';
+import { runSimulation } from './simulation/executionSimulator';
 import { isSimulationEnabled } from './simulation/simulationConfig';
+import { createSimulationContext } from './simulation/simulationHelpers';
 import {
   createSigningRequest,
   createBatchSigningRequest,
@@ -342,23 +344,29 @@ export class Executioner {
     const extrinsic = agentResult.extrinsic;
     const apiForExtrinsic = this.getApiForExtrinsic(extrinsic);
 
-    // Only run simulation if:
-    // 1. Simulation is enabled, AND
-    // 2. Item is still 'pending' (simulation hasn't run yet during prepareExecution)
-    if (isSimulationEnabled() && item.status === 'pending') {
-      const simulationContext: SimulationContext = {
-        api: apiForExtrinsic,
-        accountAddress: this.account.address,
-        assetHubManager: this.assetHubManager,
-        relayChainManager: this.relayChainManager,
-        onStatusUpdate: this.onStatusUpdate,
-      };
-      await runSimulation(extrinsic, simulationContext, executionArray, item);
-    } else if (item.status === 'pending') {
-      // Simulation disabled, mark as ready
+    // CRITICAL: Validate registry match before signing
+    // This prevents metadata mismatches that cause runtime panics
+    // Question: would this be needed of other parts of the code are correct?
+    if (extrinsic.registry !== apiForExtrinsic.registry) {
+      const errorMessage = `Registry mismatch: extrinsic was created with a different API instance. ` +
+        `Extrinsic registry: ${extrinsic.registry.hash}, ` +
+        `API registry: ${apiForExtrinsic.registry.hash}. ` +
+        `This indicates the API instance changed between extrinsic creation and execution.`;
+      executionArray.updateStatus(item.id, 'failed', errorMessage);
+      executionArray.updateResult(item.id, {
+        success: false,
+        error: errorMessage,
+        errorCode: 'REGISTRY_MISMATCH',
+      });
+      throw new Error(errorMessage);
+    }
+
+    // Simulation should have already run during prepareExecution() if enabled.
+    // If item is still 'pending' at this point, it means simulation was disabled
+    // or skipped - mark as ready to proceed with signing.
+    if (item.status === 'pending') {
       executionArray.updateStatus(item.id, 'ready');
     }
-    // If item is already 'ready', simulation was already done during prepareExecution - skip it
 
     if (!autoApprove) {
       const signingContext: SigningContext = {
@@ -403,7 +411,16 @@ export class Executioner {
     }
   }
 
-  private getApiForExtrinsic(extrinsic: SubmittableExtrinsic<'promise'>): ApiPromise {
+  /**
+   * Get API instance for extrinsic (public method)
+   * 
+   * Matches extrinsic's registry to the correct API instance.
+   * Used by simulation code to ensure metadata compatibility.
+   * 
+   * @param extrinsic Extrinsic to match
+   * @returns Matching API instance (or relay chain API as fallback)
+   */
+  public getApiForExtrinsic(extrinsic: SubmittableExtrinsic<'promise'>): ApiPromise {
     if (this.api && this.api.registry === extrinsic.registry) {
       return this.api;
     }
@@ -423,88 +440,28 @@ export class Executioner {
       throw new Error('Executioner not initialized');
     }
 
-    const extrinsics: SubmittableExtrinsic<'promise'>[] = [];
-    for (const item of items) {
-      if (!item.agentResult.extrinsic) {
-        const errorMessage = `Item ${item.id} has no extrinsic. Agent must create extrinsic before batching.`;
-        executionArray.updateStatus(item.id, 'failed', errorMessage);
-        executionArray.updateResult(item.id, {
-          success: false,
-          error: errorMessage,
-          errorCode: 'NO_EXTRINSIC_IN_BATCH_ITEM',
-        });
-        throw new Error(errorMessage);
-      }
-      extrinsics.push(item.agentResult.extrinsic);
-    }
-
-    const firstExtrinsic = extrinsics[0];
-    const apiForBatch = this.getApiForExtrinsic(firstExtrinsic);
-
-    const uniqueRegistries = new Set(extrinsics.map(ext => ext.registry));
-    if (uniqueRegistries.size > 1) {
-      const errorMessage = `Batch contains extrinsics with different registries. All batch items must use the same chain.`;
-      items.forEach(item => {
-        executionArray.updateStatus(item.id, 'failed', 'Mixed registries in batch');
-        executionArray.updateResult(item.id, {
-          success: false,
-          error: errorMessage,
-          errorCode: 'MIXED_REGISTRIES_IN_BATCH',
-        });
-      });
-      throw new Error(errorMessage);
-    }
-
+    const extrinsics = this.validateBatchItems(items, executionArray);
+    const apiForBatch = this.getApiForExtrinsic(extrinsics[0]);
+    this.validateBatchRegistries(extrinsics, items, executionArray);
+    
     if (!apiForBatch.isReady) {
       await apiForBatch.isReady;
     }
 
     const batchExtrinsic = apiForBatch.tx.utility.batchAll(extrinsics);
-
-    if (isSimulationEnabled()) {
-      const simulationContext: SimulationContext = {
-        api: apiForBatch,
-        accountAddress: this.account.address,
-        assetHubManager: this.assetHubManager,
-        relayChainManager: this.relayChainManager,
-        onStatusUpdate: this.onStatusUpdate,
-      };
-      for (const item of items) {
-        await runSimulation(batchExtrinsic, simulationContext, executionArray, item);
-      }
-    } else {
-      items.forEach(item => {
-        executionArray.updateStatus(item.id, 'ready');
-      });
-    }
+    await this.simulateBatchIfEnabled(batchExtrinsic, items, apiForBatch, executionArray);
     
-    if (!autoApprove) {
-      const signingContext: SigningContext = {
-        accountAddress: this.account!.address,
-        signer: this.signer,
-        batchSigningRequestHandler: this.batchSigningRequestHandler,
-      };
-      const approved = await createBatchSigningRequest(items, batchExtrinsic, signingContext);
-      if (!approved) {
-        items.forEach(item => {
-          executionArray.updateStatus(item.id, 'cancelled', 'User rejected batch transaction');
-        });
-        return;
-      }
+    if (!autoApprove && !(await this.requestBatchApproval(items, batchExtrinsic, executionArray))) {
+      return;
     }
 
-    items.forEach(item => {
-      executionArray.updateStatus(item.id, 'signing');
-    });
+    this.updateBatchStatus(items, 'signing', executionArray);
 
     const ss58Format = apiForBatch.registry.chainSS58 || 0;
     const encodedSenderAddress = await encodeAddressForChain(this.account!.address, ss58Format);
     const signedBatchExtrinsic = await signExtrinsic(batchExtrinsic, encodedSenderAddress, this.signer);
 
-    items.forEach(item => {
-      executionArray.updateStatus(item.id, 'broadcasting');
-    });
-
+    this.updateBatchStatus(items, 'broadcasting', executionArray);
     const result = await broadcastTransaction(signedBatchExtrinsic, apiForBatch, timeout);
     
     if (result.success) {
@@ -519,6 +476,116 @@ export class Executioner {
       });
       throw new Error(result.error || 'Batch transaction failed');
     }
+  }
+  
+  /**
+   * Validate batch items and extract extrinsics
+   */
+  private validateBatchItems(
+    items: ExecutionItem[],
+    executionArray: ExecutionArray
+  ): SubmittableExtrinsic<'promise'>[] {
+    const extrinsics: SubmittableExtrinsic<'promise'>[] = [];
+    for (const item of items) {
+      if (!item.agentResult.extrinsic) {
+        const errorMessage = `Item ${item.id} has no extrinsic. Agent must create extrinsic before batching.`;
+        executionArray.updateStatus(item.id, 'failed', errorMessage);
+        executionArray.updateResult(item.id, {
+          success: false,
+          error: errorMessage,
+          errorCode: 'NO_EXTRINSIC_IN_BATCH_ITEM',
+        });
+        throw new Error(errorMessage);
+      }
+      extrinsics.push(item.agentResult.extrinsic);
+    }
+    return extrinsics;
+  }
+  
+  /**
+   * Validate all batch items use the same registry
+   */
+  private validateBatchRegistries(
+    extrinsics: SubmittableExtrinsic<'promise'>[],
+    items: ExecutionItem[],
+    executionArray: ExecutionArray
+  ): void {
+    const uniqueRegistries = new Set(extrinsics.map(ext => ext.registry));
+    if (uniqueRegistries.size > 1) {
+      const errorMessage = `Batch contains extrinsics with different registries. All batch items must use the same chain.`;
+      items.forEach(item => {
+        executionArray.updateStatus(item.id, 'failed', 'Mixed registries in batch');
+        executionArray.updateResult(item.id, {
+          success: false,
+          error: errorMessage,
+          errorCode: 'MIXED_REGISTRIES_IN_BATCH',
+        });
+      });
+      throw new Error(errorMessage);
+    }
+  }
+  
+  /**
+   * Simulate batch if simulation is enabled
+   */
+  private async simulateBatchIfEnabled(
+    batchExtrinsic: SubmittableExtrinsic<'promise'>,
+    items: ExecutionItem[],
+    apiForBatch: ApiPromise,
+    executionArray: ExecutionArray
+  ): Promise<void> {
+    if (isSimulationEnabled()) {
+      const simulationContext = createSimulationContext(
+        apiForBatch,
+        this.account!.address,
+        this.assetHubManager,
+        this.relayChainManager,
+        this.onStatusUpdate
+      );
+      for (const item of items) {
+        await runSimulation(batchExtrinsic, simulationContext, executionArray, item);
+      }
+    } else {
+      items.forEach(item => {
+        executionArray.updateStatus(item.id, 'ready');
+      });
+    }
+  }
+  
+  /**
+   * Request batch approval from user
+   */
+  private async requestBatchApproval(
+    items: ExecutionItem[],
+    batchExtrinsic: SubmittableExtrinsic<'promise'>,
+    executionArray: ExecutionArray
+  ): Promise<boolean> {
+    const signingContext: SigningContext = {
+      accountAddress: this.account!.address,
+      signer: this.signer,
+      batchSigningRequestHandler: this.batchSigningRequestHandler,
+    };
+    const approved = await createBatchSigningRequest(items, batchExtrinsic, signingContext);
+    if (!approved) {
+      items.forEach(item => {
+        executionArray.updateStatus(item.id, 'cancelled', 'User rejected batch transaction');
+      });
+      return false;
+    }
+    return true;
+  }
+  
+  /**
+   * Update status for all batch items
+   */
+  private updateBatchStatus(
+    items: ExecutionItem[],
+    status: ExecutionStatus,
+    executionArray: ExecutionArray
+  ): void {
+    items.forEach(item => {
+      executionArray.updateStatus(item.id, status);
+    });
   }
   
   /**
