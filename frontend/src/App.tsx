@@ -25,10 +25,8 @@ import { ASIOneService } from './lib/services/asiOneService';
 import { SigningRequest, BatchSigningRequest } from './lib';
 import { Settings } from 'lucide-react';
 import {
-  preloadNetworkConnections,
   createDotBotInstance,
-  setupScenarioEngineDependencies,
-  type RpcManagers
+  setupScenarioEngineDependencies
 } from './utils/appUtils';
 import './styles/globals.css';
 import './styles/execution-flow.css';
@@ -136,9 +134,9 @@ const AppContent: React.FC = () => {
       setDotbot(dotbotInstance);
       
       // Initialize ScenarioEngine
-      try {
-        setInitializingMessage('Initializing ScenarioEngine');
-        setInitializingSubMessage('Setting up scenario execution engine...');
+        try {
+          setInitializingMessage('Initializing ScenarioEngine');
+          setInitializingSubMessage('Setting up scenario execution engine...');
         
         await setupScenarioEngineDependencies(
           scenarioEngine,
@@ -351,50 +349,50 @@ const AppContent: React.FC = () => {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <div className={`app-container ${isSidebarExpanded ? '' : 'sidebar-collapsed'}`}>
-          <CollapsibleSidebar
+      <CollapsibleSidebar
             onNewChat={handleNewChat}
             onSearchChat={handleSearchChat}
-            onTransactions={() => {}}
+        onTransactions={() => {}}
             isExpanded={isSidebarExpanded}
             onToggle={setIsSidebarExpanded}
-          />
+      />
 
-          <div className="main-content">
-            {/* Header */}
-            <div className="main-header">
-              <ThemeToggle />
-              <div className="header-right">
-                <button
-                  className="settings-button"
+      <div className="main-content">
+        {/* Header */}
+        <div className="main-header">
+          <ThemeToggle />
+          <div className="header-right">
+            <button
+              className="settings-button"
                   onClick={() => setShowSettingsModal(true)}
-                  title="Settings"
-                >
-                  <Settings className="w-5 h-5" />
-                </button>
-                <WalletButton 
+              title="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+            <WalletButton 
                   environment={dotbot?.getEnvironment() || preferredEnvironment}
                   onEnvironmentSwitch={handleEnvironmentSwitch}
-                />
-              </div>
-            </div>
+            />
+          </div>
+        </div>
 
-            {/* Main Body */}
-            <div className="main-body">
+        {/* Main Body */}
+        <div className="main-body">
               {showChatHistory ? (
-                <div className="chat-container">
+            <div className="chat-container">
                   {dotbot && (
-                    <ChatHistory
+                <ChatHistory
                       dotbot={dotbot}
                       onSelectChat={handleSelectChat}
                       onChatRenamed={() => {}}
                       currentChatId={dotbot.currentChat?.id}
                       refreshTrigger={chatHistoryRefresh}
                       isLoadingChat={isInitializing}
-                    />
-                  )}
-                </div>
+                />
+              )}
+            </div>
               ) : showWelcomeScreen && dotbot && dotbot.currentChat ? (
-                <WelcomeScreen
+            <WelcomeScreen
                   onSendMessage={handleSendMessageWithScenario}
                   onCheckBalance={handleCheckBalance}
                   onTransfer={handleTransfer}
@@ -402,9 +400,9 @@ const AppContent: React.FC = () => {
                   disabled={!dotbot}
                   placeholder={placeholder}
                   isTyping={isTyping}
-                />
+            />
               ) : dotbot && dotbot.currentChat ? (
-                <Chat
+            <Chat
                   dotbot={dotbot}
                   onSendMessage={handleSendMessageWithScenario}
                   isTyping={isTyping}
@@ -413,46 +411,46 @@ const AppContent: React.FC = () => {
                   injectedPrompt={injectedPrompt?.prompt || null}
                   onPromptProcessed={notifyPromptProcessed}
                   autoSubmit={autoSubmitPrompts}
-                />
-              ) : (
-                <div style={{ textAlign: 'center', padding: '2rem' }}>
+            />
+          ) : (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
                   {placeholder}
-                </div>
-              )}
             </div>
-          </div>
+          )}
+        </div>
+      </div>
 
-          {/* Loading Overlay */}
-          <LoadingOverlay
+      {/* Loading Overlay */}
+      <LoadingOverlay
             isVisible={isInitializing}
             message={initializingMessage || 'Loading...'}
             subMessage={initializingSubMessage}
-          />
+      />
 
-          {/* Settings Modal */}
-          <SettingsModal
+      {/* Settings Modal */}
+      <SettingsModal
             isOpen={showSettingsModal}
             onClose={() => setShowSettingsModal(false)}
             scenarioEngineEnabled={scenarioEngineEnabled}
             onToggleScenarioEngine={setScenarioEngineEnabled}
             isMainnet={(dotbot?.getEnvironment() || preferredEnvironment) === 'mainnet'}
-          />
+      />
 
-          {/* ScenarioEngine Overlay - Only on testnet */}
+      {/* ScenarioEngine Overlay - Only on testnet */}
           {scenarioEngineEnabled && 
            dotbot && 
            isScenarioEngineReady && 
            dotbot.getEnvironment() === 'testnet' && (
-            <ScenarioEngineOverlay 
+        <ScenarioEngineOverlay 
               engine={scenarioEngine}
               dotbot={dotbot}
               onClose={() => setScenarioEngineEnabled(false)}
               onSendMessage={handleSendMessageWithScenario}
               autoSubmit={autoSubmitPrompts}
               onAutoSubmitChange={setAutoSubmitPrompts}
-            />
-          )}
-        </div>
+        />
+      )}
+    </div>
       </ThemeProvider>
     </QueryClientProvider>
   );

@@ -16,7 +16,6 @@ import SimulationContainer from './SimulationContainer';
 import ExecutionFlowItem from './ExecutionFlowItem';
 import ExecutionFlowFooter from './ExecutionFlowFooter';
 import {
-  isItemSimulating,
   areAllSimulationsComplete,
   getSimulationStats
 } from './simulationUtils';
@@ -70,20 +69,11 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
     );
 
     return cleanup;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executionMessage?.executionId, dotbot]);
 
   // Use live state if available, otherwise fall back to snapshot or legacy state
   const executionState = liveExecutionState || executionMessage?.executionArray || state;
-  
-  // Debug logging - must be after executionState is defined but before early returns
-  useEffect(() => {
-    if (executionState) {
-      const simulationEnabled = isSimulationEnabled();
-      const simulatingItems = executionState.items.filter(isItemSimulating);
-      const isSimulating = simulationEnabled && simulatingItems.length > 0;
-    }
-  }, [executionState]);
-  
   // Determine if we should show the component
   // For executionMessage: always show if message exists (even if state is empty/loading)
   // For legacy: use show prop

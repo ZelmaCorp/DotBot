@@ -5,7 +5,6 @@
  * KISS: Keeps component logic simple and focused.
  */
 
-import React from 'react';
 import { ExecutionArrayState } from '../../lib/executionEngine/types';
 import { ExecutionMessage, DotBot } from '../../lib';
 
@@ -38,24 +37,15 @@ export function setupExecutionSubscription(
   };
 
   // Try to get state immediately
-  const initialStateFound = updateState();
+  updateState();
 
   // Poll for ExecutionArray if it doesn't exist yet
-  // Use timeout and max attempts to prevent infinite polling
   let pollInterval: NodeJS.Timeout | null = null;
-  if (!initialStateFound) {
-    let attempts = 0;
-    const maxAttempts = 50; // 5 seconds max (50 * 100ms)
-    
+  if (!chatInstance.getExecutionArray(executionId) && !executionMessage.executionArray) {
     pollInterval = setInterval(() => {
-      attempts++;
-      const found = updateState();
-      
-      if (found || attempts >= maxAttempts) {
-        if (pollInterval) {
-          clearInterval(pollInterval);
-          pollInterval = null;
-        }
+      if (updateState() && pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
       }
     }, 100);
   }
@@ -176,4 +166,3 @@ export function getSimulationBannerProps(
   }
   return { type: 'disabled' };
 }
-

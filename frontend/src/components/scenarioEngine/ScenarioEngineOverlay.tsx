@@ -211,9 +211,9 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
               />
               <span className="scenario-toggle-slider"></span>
             </label>
-            <button onClick={onClose} className="scenario-close">
-              <X size={18} />
-            </button>
+          <button onClick={onClose} className="scenario-close">
+            <X size={18} />
+          </button>
           </div>
         </div>
 

@@ -227,8 +227,6 @@ export class ExecutionArray {
       return;
     }
     
-    console.log('[ExecutionArray] 🔄 Updating simulation status:', simulationStatus?.phase);
-    
     item.simulationStatus = simulationStatus;
     
     // Notify callbacks so UI updates
@@ -398,11 +396,11 @@ export class ExecutionArray {
    * Notify status callbacks
    */
   private notifyStatus(item: ExecutionItem): void {
-    this.statusCallbacks.forEach(callback => {
+    this.statusCallbacks.forEach((callback) => {
       try {
         callback(item);
       } catch (error) {
-        console.error('Error in status callback:', error);
+        console.error('[ExecutionArray] ❌ Error in status callback:', error);
       }
     });
   }
@@ -412,11 +410,11 @@ export class ExecutionArray {
    */
   private notifyProgress(): void {
     const state = this.getState();
-    this.progressCallbacks.forEach(callback => {
+    this.progressCallbacks.forEach((callback) => {
       try {
         callback(state);
       } catch (error) {
-        console.error('Error in progress callback:', error);
+        console.error('[ExecutionArray] ❌ Error in progress callback:', error);
       }
     });
   }

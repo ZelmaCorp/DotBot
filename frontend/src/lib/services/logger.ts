@@ -5,7 +5,8 @@ import { Subsystem, ErrorType } from './types/logging';
 let LIB_VERSION = "0.1.0-fallback";
 try {
   // Try to read from frontend package.json
-  const packageJson = require("../../package.json");
+  // Path: frontend/src/lib/services -> frontend/package.json (up 3 levels)
+  const packageJson = require("../../../package.json");
   LIB_VERSION = packageJson.version;
 } catch (error) {
   // Silently use fallback version

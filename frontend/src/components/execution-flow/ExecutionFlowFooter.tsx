@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Play, X, Loader2 } from 'lucide-react';
+import { Play, X } from 'lucide-react';
 import { ExecutionArrayState } from '../../lib/executionEngine/types';
 
 export interface ExecutionFlowFooterProps {

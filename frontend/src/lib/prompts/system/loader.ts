@@ -220,6 +220,7 @@ function formatContext(context?: SystemContext): string {
     prompt += `- Asset Hub transfers pay fees on Asset Hub using Asset Hub balance (Relay Chain balance not needed)\n`;
     prompt += `- Relay Chain transfers pay fees on Relay Chain using Relay Chain balance\n`;
     prompt += `- Only suggest XCM transfers when user explicitly wants to move funds between chains, not for fee payment\n`;
+    prompt += `- For transfers, default to Asset Hub (most common after Polkadot 2.0 migration). Use Relay Chain only if user explicitly requests it.\n`;
   }
   
   // Simulation settings

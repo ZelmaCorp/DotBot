@@ -10,9 +10,6 @@ import { Loader2, CheckCircle2, AlertTriangle, Play } from 'lucide-react';
 import { ExecutionArrayState } from '../../lib/executionEngine/types';
 import { isSimulationEnabled } from '../../lib/executionEngine/simulation/simulationConfig';
 import {
-  isItemSimulating,
-  isItemSimulationSuccess,
-  isItemSimulationFailure,
   areAllSimulationsComplete,
   getSimulationStats
 } from './simulationUtils';
@@ -54,14 +51,12 @@ const SimulationContainer: React.FC<SimulationContainerProps> = ({ executionStat
   const progressPercent = totalItems > 0 ? Math.round((completedCount / totalItems) * 100) : 0;
 
   // Get current simulation phase and message from the first simulating item
-  let currentPhase: string | null = null;
   let currentMessage: string | null = null;
   let currentProgress: number | undefined = undefined;
 
   if (simulatingItems.length > 0) {
     const firstSimulating = simulatingItems[0];
     if (firstSimulating.simulationStatus) {
-      currentPhase = firstSimulating.simulationStatus.phase;
       currentMessage = firstSimulating.simulationStatus.message;
       currentProgress = firstSimulating.simulationStatus.progress;
     }
@@ -155,7 +150,6 @@ const SimulationContainer: React.FC<SimulationContainerProps> = ({ executionStat
               const simStatus = item.simulationStatus;
               const isCurrent = index === currentItemIndex;
               const isDone = index < currentItemIndex;
-              const isPending = index > currentItemIndex;
               
               return (
                 <div 

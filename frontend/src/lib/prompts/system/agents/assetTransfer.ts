@@ -29,11 +29,16 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
       detailedDescription: `Creates a transfer extrinsic to send DOT or tokens from the sender's
         account to a recipient. The agent automatically validates addresses, checks balances on
         the target chain (where the transfer occurs), estimates fees, and can optionally use
-        transferKeepAlive to ensure the sender account remains alive after the transfer. For Asset
-        Hub transfers, balance validation and fee payment occur on Asset Hub. For Relay Chain
-        transfers, balance validation and fee payment occur on Relay Chain. Amounts MUST be
-        specified in human-readable format (e.g., "5", "1.5", "0.1") - the agent automatically
-        converts to Planck internally.`,
+        transferKeepAlive to ensure the sender account remains alive after the transfer.
+        
+        Chain selection: Default to 'assetHub' for all transfers (most common after Polkadot 2.0
+        migration). Use 'relay' only if user explicitly requests Relay Chain, staking, or governance
+        operations. For Asset Hub transfers, balance validation and fee payment occur on Asset Hub
+        (user doesn't need Relay Chain balance). For Relay Chain transfers, balance validation and
+        fee payment occur on Relay Chain.
+        
+        Amounts MUST be specified in human-readable format (e.g., "5", "1.5", "0.1") - the agent
+        automatically converts to Planck internally.`,
       parameters: [
         {
           name: 'address',
@@ -75,6 +80,15 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
           constraints: 'Optional, defaults to false',
         },
         {
+          name: 'chain',
+          type: "'assetHub' | 'relay'",
+          required: false,
+          description: `Target chain for the transfer. Defaults to 'assetHub' (recommended for most transfers after Polkadot 2.0 migration). Use 'relay' only if user explicitly requests Relay Chain, staking, or governance operations.`,
+          examples: ["'assetHub'", "'relay'"],
+          default: "'assetHub'",
+          constraints: "Optional, defaults to 'assetHub'",
+        },
+        {
           name: 'validateBalance',
           type: 'boolean',
           required: false,
@@ -111,7 +125,10 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
       detailedDescription: `Creates a batch transfer extrinsic that sends DOT or tokens to multiple
         recipients atomically in a single transaction. All transfers succeed or fail together.
         Useful for airdrops, payroll, or sending to multiple recipients efficiently. The agent
-        validates all addresses, calculates total amount, checks balance, and estimates fees.`,
+        validates all addresses, calculates total amount, checks balance, and estimates fees.
+        
+        Chain selection: Default to 'assetHub' for all batch transfers. Use 'relay' only if user
+        explicitly requests Relay Chain, staking, or governance operations.`,
       parameters: [
         {
           name: 'address',
@@ -130,6 +147,15 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
           required: true,
           description: 'Array of transfers, each with recipient and amount in human-readable format. Example: [{ recipient: "15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5", amount: "1.0" }, { recipient: "1FRMM8PEiWXYax7rpS6X4XZX1aAAxSWx1CrKTyrVYhV24fg", amount: "2.5" }]. Amounts should be human-readable (e.g., "5", "1.5") - agents convert to Planck internally.',
           constraints: 'Must have at least 1 transfer, maximum 100 transfers',
+        },
+        {
+          name: 'chain',
+          type: "'assetHub' | 'relay'",
+          required: false,
+          description: `Target chain for the batch transfer. Defaults to 'assetHub' (recommended for most transfers after Polkadot 2.0 migration). Use 'relay' only if user explicitly requests Relay Chain, staking, or governance operations.`,
+          examples: ["'assetHub'", "'relay'"],
+          default: "'assetHub'",
+          constraints: "Optional, defaults to 'assetHub'",
         },
         {
           name: 'validateBalance',

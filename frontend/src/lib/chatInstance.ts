@@ -393,23 +393,29 @@ export class ChatInstance {
       callbacks.forEach(cb => cb(state));
     }
     
-    // Set up subscriptions to notify callbacks on future updates
-    // Subscribe to BOTH onStatusUpdate AND onProgress to catch all state changes
-    // (simulation status updates trigger onProgress)
+    // Set up subscription to notify callbacks on future updates
+    // Only subscribe to onProgress - it fires on ALL state changes (status updates, progress, etc.)
+    // Subscribing to both onStatusUpdate AND onProgress causes duplicate callbacks since
+    // updateStatus() calls both notifyStatus() and notifyProgress()
     const notifyCallbacks = () => {
       const updatedState = executionArray.getState();
       const callbacks = this.executionCallbacks.get(executionId);
       if (callbacks) {
-        callbacks.forEach(cb => cb(updatedState));
+        callbacks.forEach((cb) => {
+          try {
+            cb(updatedState);
+          } catch (error) {
+            console.error('[ChatInstance] ❌ Error in callback:', error);
+          }
+        });
       }
     };
     
-    const unsubscribeStatus = executionArray.onStatusUpdate(notifyCallbacks);
+    // Only subscribe to onProgress - it covers all state changes
     const unsubscribeProgress = executionArray.onProgress(notifyCallbacks);
     
-    // Store combined unsubscribe function
+    // Store unsubscribe function
     const unsubscribe = () => {
-      unsubscribeStatus();
       unsubscribeProgress();
     };
     

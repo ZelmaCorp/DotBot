@@ -5,7 +5,7 @@
  * DRY: Centralizes repeated simulation phase checks across components.
  */
 
-import { ExecutionItem, SimulationStatus } from '../../lib/executionEngine/types';
+import { ExecutionItem } from '../../lib/executionEngine/types';
 import { ExecutionArrayState } from '../../lib/executionEngine/types';
 
 /**

@@ -132,11 +132,17 @@ const Chat: React.FC<ChatProps> = ({
   
   // Force re-render when executionArray is added to execution messages
   // This ensures ExecutionFlow updates when executionArray state changes
+  // Use ref to track if we've already set up polling to prevent duplicate intervals
+  const pollingRef = useRef<boolean>(false);
+  
   useEffect(() => {
     if (!dotbot.currentChat) return;
     
     const hasExecutionMessages = conversationItems.some(item => item.type === 'execution');
-    if (!hasExecutionMessages) return;
+    if (!hasExecutionMessages) {
+      pollingRef.current = false;
+      return;
+    }
     
     // Check if executionArrays already exist - no need to poll
     const currentItems = dotbot.currentChat.getDisplayMessages();
@@ -145,14 +151,21 @@ const Chat: React.FC<ChatProps> = ({
     );
     
     if (hasExecutionArrays) {
-      // Already have executionArrays, just trigger a refresh
-      setRefreshKey(prev => prev + 1);
+      pollingRef.current = false;
+      // Only trigger refresh if we haven't already (avoid unnecessary re-renders)
       return;
     }
     
+    // Prevent multiple polling intervals from being created
+    if (pollingRef.current) {
+      return;
+    }
+    
+    pollingRef.current = true;
+    
     // Poll for executionArray updates with timeout and max attempts
     let attempts = 0;
-    const maxAttempts = 40; // 6 seconds max (40 * 150ms)
+    const maxAttempts = 20; // 3 seconds max (20 * 150ms) - reduced from 40
     const pollInterval = 150; // Check every 150ms
     
     const interval = setInterval(() => {
@@ -163,14 +176,19 @@ const Chat: React.FC<ChatProps> = ({
       );
       
       if (foundExecutionArrays || attempts >= maxAttempts) {
+        pollingRef.current = false;
         if (foundExecutionArrays) {
-          setRefreshKey(prev => prev + 1);
+        setRefreshKey(prev => prev + 1);
         }
         clearInterval(interval);
       }
     }, pollInterval);
     
-    return () => clearInterval(interval);
+    return () => {
+      pollingRef.current = false;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dotbot.currentChat, conversationItems.length]);
 
   return (
@@ -189,14 +207,14 @@ const Chat: React.FC<ChatProps> = ({
 
       {/* Input area */}
       <ChatInput
-        value={inputValue}
+              value={inputValue}
         onChange={setInputValue}
         onSubmit={handleSubmit}
-        placeholder={placeholder}
-        disabled={disabled}
+              placeholder={placeholder}
+              disabled={disabled}
         isTyping={isTyping}
         showInjectionEffect={showInjectionEffect}
-      />
+                />
     </div>
   );
 };
