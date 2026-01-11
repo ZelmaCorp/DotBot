@@ -56,6 +56,10 @@ import type {
   ScenarioEngineEventListener,
   ScenarioEngineEvent,
 } from '../types';
+import {
+  CALCULATION_FUNCTIONS,
+  type CalculationContext,
+} from './expressionCalculations';
 
 // =============================================================================
 // TYPES
@@ -81,6 +85,9 @@ export interface ExecutionContext {
   
   /** Variables extracted from responses */
   variables: Map<string, unknown>;
+  
+  /** Current prompt being processed (for context-aware API selection) */
+  currentPrompt?: string;
   
   /** Whether execution is paused */
   isPaused: boolean;
@@ -115,6 +122,9 @@ export interface ExecutorDependencies {
   /** Polkadot API for on-chain operations (queries, submissions) */
   api: ApiPromise;
   
+  /** Optional: Asset Hub API for Asset Hub-specific operations (queries, submissions) */
+  assetHubApi?: ApiPromise;
+  
   /** Optional: Custom balance query function (for synthetic/mocked tests) */
   queryBalance?: (address: string) => Promise<string>;
   
@@ -123,6 +133,9 @@ export interface ExecutorDependencies {
   
   /** Optional: Entity address resolver (for getting entity addresses) */
   getEntityAddress?: (entityName: string) => string | undefined;
+  
+  /** Optional: Wallet address resolver (for getting the actual wallet address used in tests) */
+  getWalletAddress?: () => string | undefined;
 }
 
 // =============================================================================
@@ -363,6 +376,14 @@ export class ScenarioExecutor {
     if (!input) {
       throw new Error('Prompt step requires input');
     }
+
+    // Store current prompt in context for API selection in calculations
+    if (this.context) {
+      this.context.currentPrompt = input;
+    }
+    
+    // Replace variables and expressions in the prompt
+    input = await this.processPromptVariables(input);
 
     // Replace entity names with addresses in the prompt
     // Example: "Send 5 WND to Alice" -> "Send 5 WND to 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
@@ -1196,6 +1217,216 @@ export class ScenarioExecutor {
     } catch (error) {
       throw new Error(`Query failed: ${error}`);
     }
+  }
+
+  // ===========================================================================
+  // VARIABLE AND EXPRESSION PROCESSING
+  // ===========================================================================
+
+  /**
+   * Process variables and expressions in prompt input
+   * 
+   * Handles:
+   * 1. Simple variables: {{variableName}} → replaced with value from context.variables
+   * 2. Dynamic expressions: {{calc:functionName(arg1, arg2, ...)}} → evaluated at runtime
+   * 
+   * @param input Original prompt input string
+   * @returns Processed input with variables and expressions replaced
+   */
+  private async processPromptVariables(input: string): Promise<string> {
+    // Step 1: Replace simple variables ({{variableName}})
+    if (this.context?.variables) {
+      input = input.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
+        const value = this.context!.variables.get(varName);
+        if (value !== undefined) {
+          this.emit({ type: 'log', level: 'debug', message: `Replaced variable "${varName}" with ${value}` });
+          return String(value);
+        }
+        this.emit({ type: 'log', level: 'warn', message: `Variable "${varName}" not found in context, keeping placeholder` });
+        return match;
+      });
+    }
+    
+    // Step 2: Evaluate dynamic expressions ({{calc:functionName(args)}})
+    input = await this.evaluateExpressions(input);
+    
+    return input;
+  }
+
+  // ===========================================================================
+  // EXPRESSION EVALUATION (Dynamic Runtime Calculations)
+  // ===========================================================================
+
+  /**
+   * Evaluate dynamic expressions in input strings
+   * 
+   * Syntax: {{calc:functionName(arg1, arg2, ...)}}
+   * 
+   * Examples:
+   * - {{calc:insufficientBalance(0.1, 0.01)}} → calculates amount that would cause insufficient balance
+   * - {{calc:currentBalance()}} → queries current balance
+   * - {{calc:balanceMinusAmount(0.5)}} → current balance - 0.5
+   */
+  private async evaluateExpressions(input: string): Promise<string> {
+    // Match {{calc:functionName(arg1, arg2, ...)}}
+    const exprPattern = /\{\{calc:(\w+)\(([^)]*)\)\}\}/g;
+    
+    const matches = [...input.matchAll(exprPattern)];
+    if (matches.length === 0) {
+      return input;
+    }
+    
+    this.emit({ 
+      type: 'log', 
+      level: 'debug', 
+      message: `Found ${matches.length} expression(s) to evaluate` 
+    });
+    
+    // Process all matches and build replacement map
+    const replacements = new Map<string, string>();
+    
+    for (const match of matches) {
+      const [fullMatch, funcName, argsStr] = match;
+      
+      // Skip if we've already processed this exact match
+      if (replacements.has(fullMatch)) {
+        continue;
+      }
+      
+      const args = argsStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      
+      try {
+        this.emit({ 
+          type: 'log', 
+          level: 'debug', 
+          message: `Evaluating expression: ${funcName}(${argsStr || ''})` 
+        });
+        
+        const value = await this.executeCalculation(funcName, args);
+        replacements.set(fullMatch, String(value));
+        
+        this.emit({ 
+          type: 'log', 
+          level: 'info', 
+          message: `✓ Calculated ${funcName}(${argsStr || ''}) = ${value}` 
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.emit({ 
+          type: 'log', 
+          level: 'error', 
+          message: `✗ Failed to calculate ${funcName}(${argsStr}): ${errorMessage}` 
+        });
+        // Keep original expression in input if calculation fails
+      }
+    }
+    
+    // Apply all replacements
+    let result = input;
+    for (const [expression, value] of replacements.entries()) {
+      // Escape special regex characters for safe replacement
+      const escapedExpression = expression.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(escapedExpression, 'g'), value);
+    }
+    
+    if (replacements.size > 0) {
+      this.emit({ 
+        type: 'log', 
+        level: 'info', 
+        message: `Applied ${replacements.size} expression replacement(s)` 
+      });
+    }
+    
+    return result;
+  }
+
+  /**
+   * Execute a calculation function
+   * 
+   * Automatically selects the correct API based on the prompt context:
+   * - If prompt mentions Asset Hub or WND/DOT transfers, uses Asset Hub API if available
+   * - Otherwise uses Relay Chain API
+   */
+  private async executeCalculation(funcName: string, args: string[]): Promise<string> {
+    const calculationFn = CALCULATION_FUNCTIONS[funcName];
+    
+    if (!calculationFn) {
+      throw new Error(`Unknown calculation function: ${funcName}`);
+    }
+    
+    if (!this.deps?.api) {
+      throw new Error('API required for calculations');
+    }
+    
+    // Determine which API to use based on context
+    // For balance calculations, prefer Asset Hub API if available and if we're dealing with Asset Hub transfers
+    // Check the current prompt context to see if it's an Asset Hub transfer
+    let apiToUse = this.deps.api;
+    
+    // Select API based on prompt context
+    // For WND transfers, use Asset Hub API since WND is native on Asset Hub
+    if (this.deps.assetHubApi) {
+      const prompt = this.context?.currentPrompt?.toLowerCase() || '';
+      const isAssetHubTransfer = prompt.includes('wnd') || prompt.includes('asset hub');
+      
+      if (isAssetHubTransfer) {
+        apiToUse = this.deps.assetHubApi;
+        this.emit({ 
+          type: 'log', 
+          level: 'debug', 
+          message: 'Using Asset Hub API for balance calculation (WND/Asset Hub transfer detected)' 
+        });
+      }
+    }
+    
+    const context: CalculationContext = {
+      api: apiToUse,
+      getUserAddress: () => this.getUserAddress(),
+      emit: (event) => this.emit(event),
+    };
+    
+    return await calculationFn(args, context);
+  }
+
+  /**
+   * Get user address from scenario context or deps
+   * 
+   * Priority:
+   * 1. Wallet address from deps.getWalletAddress() (actual wallet used in tests)
+   * 2. Entity address from scenario.walletState (if entity exists)
+   * 3. Address from context variables
+   */
+  private async getUserAddress(): Promise<string> {
+    // Priority 1: Get actual wallet address (most reliable for live tests)
+    if (this.deps?.getWalletAddress) {
+      const walletAddress = this.deps.getWalletAddress();
+      if (walletAddress) {
+        return walletAddress;
+      }
+    }
+    
+    // Priority 2: Try to get from scenario wallet state entity
+    const userEntityName = this.context?.scenario.walletState?.accounts?.[0]?.entityName;
+    
+    if (userEntityName && this.deps?.getEntityAddress) {
+      const address = this.deps.getEntityAddress(userEntityName);
+      if (address) {
+        return address;
+      }
+    }
+    
+    // Priority 3: Try to get from context variables
+    const addressFromVar = this.context?.variables.get('userAddress') as string;
+    if (addressFromVar) {
+      return addressFromVar;
+    }
+    
+    throw new Error(
+      'User address not found. ' +
+      'Provide getWalletAddress() in ExecutorDependencies, ' +
+      'or define entity in scenario.entities, ' +
+      'or store "userAddress" in context variables.'
+    );
   }
 
   // ===========================================================================

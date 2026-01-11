@@ -1177,6 +1177,10 @@ export class DotBot {
                         : this.network === 'kusama' ? 'KSM' 
                         : 'DOT';
       
+      // Get decimals from API registry (environment) - more accurate than hardcoded values
+      const relayChainDecimals = this.api.registry.chainDecimals?.[0];
+      const assetHubDecimals = this.assetHubApi?.registry.chainDecimals?.[0];
+      
       const systemPrompt = buildSystemPrompt({
         wallet: {
           isConnected: true,
@@ -1187,6 +1191,8 @@ export class DotBot {
           network: this.network,
           rpcEndpoint: this.relayChainManager.getCurrentEndpoint() || '',
           isTestnet: this.network === 'westend',
+          relayChainDecimals,
+          assetHubDecimals,
         },
         balance: {
           relayChain: {
