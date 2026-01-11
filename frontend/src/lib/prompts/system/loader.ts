@@ -12,6 +12,7 @@ import { SystemContext } from './context/types';
 import { createVersionedPrompt } from './version';
 import { formatPolkadotKnowledgeBase } from './knowledge/dotKnowledge';
 import { formatKnowledgeBaseForNetwork } from './knowledge';
+import { isSimulationEnabled } from '../../executionEngine/simulation/simulationConfig';
 
 /**
  * Format agent definitions for inclusion in system prompt
@@ -148,9 +149,6 @@ function formatContext(context?: SystemContext): string {
     return '\n## Current Context\n\nNo context information available.';
   }
   
-  // Import simulation config at runtime to get current state
-  const { isSimulationEnabled } = require('../../executionEngine/simulation/simulationConfig');
-  
   let prompt = '\n## Current Context\n\n';
   
   // Wallet context
@@ -205,7 +203,7 @@ function formatContext(context?: SystemContext): string {
   if (simulationEnabled) {
     prompt += `  - Transactions will be simulated using Chopsticks before execution\n`;
     prompt += `  - Simulation provides safety by catching errors before spending fees\n`;
-    prompt += `  - Adds 1-3 seconds latency but greatly improves user confidence\n`;
+    prompt += `  - Adds some latency but greatly improves user confidence\n`;
   } else {
     prompt += `  - Transactions will be sent directly to wallet for signing\n`;
     prompt += `  - No pre-execution validation (faster but less safe)\n`;

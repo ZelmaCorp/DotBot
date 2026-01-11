@@ -84,6 +84,7 @@ export class ChatInstance {
       try {
         // Skip if executionArray is not yet available (still being prepared)
         if (!execMessage.executionArray) {
+          // Probably this is the reason it is not rendering
           continue;
         }
         const executionArray = ExecutionArray.fromState(execMessage.executionArray);

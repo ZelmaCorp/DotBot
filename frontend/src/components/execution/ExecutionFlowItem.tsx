@@ -10,6 +10,11 @@ import { ExecutionItem } from '../../lib/executionEngine/types';
 import { getStatusIcon, getStatusLabel, getStatusColor } from './executionStatusUtils';
 import SimulationStatus from '../simulation/SimulationStatus';
 import { isSimulationEnabled } from '../../lib/executionEngine/simulation/simulationConfig';
+import {
+  isActiveSimulationPhase,
+  isTerminalSimulationPhase,
+  hasSimulationStarted
+} from './simulationUtils';
 
 export interface ExecutionFlowItemProps {
   item: ExecutionItem;
@@ -32,17 +37,7 @@ const ExecutionFlowItem: React.FC<ExecutionFlowItemProps> = ({
   const hasSimulationStatus = !!item.simulationStatus;
   
   // Determine if simulation has started (any phase) or completed
-  const simulationStarted = hasSimulationStatus && item.simulationStatus && (
-    item.simulationStatus.phase === 'initializing' ||
-    item.simulationStatus.phase === 'simulating' ||
-    item.simulationStatus.phase === 'validating' ||
-    item.simulationStatus.phase === 'analyzing' ||
-    item.simulationStatus.phase === 'retrying' ||
-    item.simulationStatus.phase === 'forking' ||
-    item.simulationStatus.phase === 'executing' ||
-    item.simulationStatus.phase === 'complete' ||
-    item.simulationStatus.phase === 'error'
-  );
+  const simulationStarted = hasSimulationStarted(item);
   
   // Only show "waiting" if:
   // - Item is pending
@@ -105,15 +100,8 @@ const ExecutionFlowItem: React.FC<ExecutionFlowItemProps> = ({
       {item.simulationStatus && (
         item.status === 'pending' || 
         item.status === 'ready' ||
-        item.simulationStatus.phase === 'initializing' ||
-        item.simulationStatus.phase === 'simulating' ||
-        item.simulationStatus.phase === 'validating' ||
-        item.simulationStatus.phase === 'analyzing' ||
-        item.simulationStatus.phase === 'retrying' ||
-        item.simulationStatus.phase === 'forking' ||
-        item.simulationStatus.phase === 'executing' ||
-        item.simulationStatus.phase === 'error' ||
-        item.simulationStatus.phase === 'complete'
+        isActiveSimulationPhase(item.simulationStatus.phase) ||
+        isTerminalSimulationPhase(item.simulationStatus.phase)
       ) && (
         <div className="execution-item-simulation">
           <SimulationStatus

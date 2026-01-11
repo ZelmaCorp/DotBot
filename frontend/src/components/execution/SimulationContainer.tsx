@@ -9,6 +9,13 @@ import React from 'react';
 import { Loader2, CheckCircle2, AlertTriangle, Play } from 'lucide-react';
 import { ExecutionArrayState } from '../../lib/executionEngine/types';
 import { isSimulationEnabled } from '../../lib/executionEngine/simulation/simulationConfig';
+import {
+  isItemSimulating,
+  isItemSimulationSuccess,
+  isItemSimulationFailure,
+  areAllSimulationsComplete,
+  getSimulationStats
+} from './simulationUtils';
 
 export interface SimulationContainerProps {
   executionState: ExecutionArrayState;
@@ -31,40 +38,15 @@ const SimulationContainer: React.FC<SimulationContainerProps> = ({ executionStat
   }
 
   // Calculate simulation statistics
-  const itemsWithSimulation = itemsToSimulate.filter(item => item.simulationStatus);
-  const simulatingItems = itemsWithSimulation.filter(item => {
-    if (!item.simulationStatus) return false;
-    const phase = item.simulationStatus.phase;
-    return (
-      item.status === 'pending' ||
-      phase === 'initializing' ||
-      phase === 'simulating' ||
-      phase === 'validating' ||
-      phase === 'analyzing' ||
-      phase === 'retrying' ||
-      phase === 'forking' ||
-      phase === 'executing'
-    );
-  });
-
-  const completedItems = itemsWithSimulation.filter(item => 
-    item.simulationStatus?.phase === 'complete' || 
-    (item.simulationStatus?.result?.success === true && item.status === 'ready')
-  );
-
-  const failedItems = itemsWithSimulation.filter(item => 
-    item.simulationStatus?.phase === 'error' || 
-    (item.simulationStatus?.result?.success === false && item.status === 'failed')
-  );
+  const simulationStats = getSimulationStats(executionState);
+  const simulatingItems = simulationStats.simulatingItems;
+  const completedItems = simulationStats.completedItems;
+  const failedItems = simulationStats.failedItems;
+  const itemsWithSimulation = simulationStats.simulatedItems;
 
   const isSimulating = simulatingItems.length > 0;
-  const allComplete = !isSimulating && itemsWithSimulation.length === itemsToSimulate.length && 
-    itemsWithSimulation.every(item => 
-      item.simulationStatus?.phase === 'complete' || 
-      item.simulationStatus?.phase === 'error' ||
-      item.status === 'ready' || 
-      item.status === 'failed'
-    );
+  const allComplete = areAllSimulationsComplete(itemsToSimulate, isSimulating) &&
+    itemsWithSimulation.length === itemsToSimulate.length;
 
   // Calculate overall progress
   const totalItems = itemsToSimulate.length;

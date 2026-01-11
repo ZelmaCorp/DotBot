@@ -15,6 +15,21 @@ import SimulationBanner from './SimulationBanner';
 import SimulationContainer from './SimulationContainer';
 import ExecutionFlowItem from './ExecutionFlowItem';
 import ExecutionFlowFooter from './ExecutionFlowFooter';
+import {
+  isItemSimulating,
+  areAllSimulationsComplete,
+  getSimulationStats
+} from './simulationUtils';
+import {
+  setupExecutionSubscription,
+  isWaitingForApproval,
+  isFlowComplete,
+  isFlowExecuting,
+  isFlowSuccessful,
+  isFlowFailed,
+  getSimulationBannerType,
+  getSimulationBannerProps
+} from './executionFlowUtils';
 import '../../styles/execution-flow.css';
 
 export interface ExecutionFlowProps {
@@ -43,86 +58,17 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
 
   // Subscribe to execution updates when using new API (executionMessage + dotbot)
   useEffect(() => {
-    if (!executionMessage || !dotbot || !dotbot.currentChat) {
-      console.log('[ExecutionFlow] Not subscribing - missing:', {
-        hasExecutionMessage: !!executionMessage,
-        hasDotbot: !!dotbot,
-        hasCurrentChat: !!dotbot?.currentChat
-      });
+    if (!executionMessage || !dotbot) {
       return;
     }
 
-    const chatInstance = dotbot.currentChat;
-    const executionId = executionMessage.executionId;
+    const cleanup = setupExecutionSubscription(
+      executionMessage,
+      dotbot,
+      setLiveExecutionState
+    );
 
-    console.log('[ExecutionFlow] Setting up subscription for:', executionId);
-
-    // Function to update state from ExecutionArray or executionMessage
-    const updateState = () => {
-      // Get current state immediately from ExecutionArray if it exists
-      // This ensures we see simulation progress even if component mounts after simulation starts
-      const executionArray = chatInstance.getExecutionArray(executionId);
-      if (executionArray) {
-        const currentState = executionArray.getState();
-        setLiveExecutionState(currentState);
-        return true;
-      } else if (executionMessage.executionArray) {
-        // Fallback to executionMessage state if ExecutionArray not set yet
-        console.log('[ExecutionFlow] Using state from executionMessage:', {
-          itemsCount: executionMessage.executionArray.items.length
-        });
-        setLiveExecutionState(executionMessage.executionArray);
-        return true;
-      }
-      return false;
-    };
-
-    // Try to get state immediately
-    updateState();
-
-    // If ExecutionArray doesn't exist yet, poll for it (in case it's being set asynchronously)
-    let pollInterval: NodeJS.Timeout | null = null;
-    if (!chatInstance.getExecutionArray(executionId) && !executionMessage.executionArray) {
-      pollInterval = setInterval(() => {
-        if (updateState()) {
-          // Found ExecutionArray, stop polling
-          if (pollInterval) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-          }
-        }
-      }, 100); // Check every 100ms
-    }
-
-    // Subscribe to execution updates
-    const unsubscribe = chatInstance.onExecutionUpdate(executionId, (updatedState) => {
-      console.log('[ExecutionFlow] ✅ Received state update:', {
-        executionId,
-        itemsCount: updatedState.items.length,
-        itemsWithSimulation: updatedState.items.filter(item => item.simulationStatus).length,
-        itemsStatuses: updatedState.items.map(item => ({ 
-          id: item.id, 
-          status: item.status, 
-          hasSim: !!item.simulationStatus,
-          simPhase: item.simulationStatus?.phase 
-        }))
-      });
-      setLiveExecutionState(updatedState);
-      // Stop polling once we receive updates
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-      }
-    });
-
-    // Cleanup subscription and polling on unmount
-    return () => {
-      console.log('[ExecutionFlow] Cleaning up subscription for:', executionId);
-      if (pollInterval) {
-        clearInterval(pollInterval);
-      }
-      unsubscribe();
-    };
+    return cleanup;
   }, [executionMessage?.executionId, executionMessage?.executionArray, dotbot]);
 
   // Use live state if available, otherwise fall back to snapshot or legacy state
@@ -132,20 +78,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   useEffect(() => {
     if (executionState) {
       const simulationEnabled = isSimulationEnabled();
-      const simulatingItems = executionState.items.filter(item => {
-        if (!item.simulationStatus) return false;
-        const isActivePhase = (
-          item.status === 'pending' ||
-          item.simulationStatus.phase === 'initializing' ||
-          item.simulationStatus.phase === 'simulating' ||
-          item.simulationStatus.phase === 'validating' ||
-          item.simulationStatus.phase === 'analyzing' ||
-          item.simulationStatus.phase === 'retrying' ||
-          item.simulationStatus.phase === 'forking' ||
-          item.simulationStatus.phase === 'executing'
-        );
-        return isActivePhase;
-      });
+      const simulatingItems = executionState.items.filter(isItemSimulating);
       const isSimulating = simulationEnabled && simulatingItems.length > 0;
     }
   }, [executionState]);
@@ -226,74 +159,25 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
 
   // Check if simulation is enabled and if any items are being simulated
   const simulationEnabled = isSimulationEnabled();
-  const simulatingItems = executionState.items.filter(item => 
-    item.simulationStatus && (
-      item.status === 'pending' ||
-      item.simulationStatus.phase === 'initializing' ||
-      item.simulationStatus.phase === 'simulating' ||
-      item.simulationStatus.phase === 'validating' ||
-      item.simulationStatus.phase === 'analyzing' ||
-      item.simulationStatus.phase === 'retrying' ||
-      item.simulationStatus.phase === 'forking' ||
-      item.simulationStatus.phase === 'executing'
-    )
-  );
-  const isSimulating = simulationEnabled && simulatingItems.length > 0;
+  const simulationStats = getSimulationStats(executionState);
+  const isSimulating = simulationEnabled && simulationStats.totalSimulating > 0;
   
-  // Check simulation results - only count items that actually went through simulation
-  const simulatedItems = executionState.items.filter(item => item.simulationStatus);
-  const hasSimulationSuccess = simulatedItems.some(item => 
-    item.simulationStatus?.phase === 'complete' || 
-    (item.simulationStatus?.result?.success === true && item.status === 'ready')
+  // Check simulation results
+  const hasSimulationSuccess = simulationStats.totalCompleted > 0;
+  const hasSimulationFailure = simulationStats.totalFailed > 0;
+  const allSimulationsComplete = areAllSimulationsComplete(
+    executionState.items,
+    isSimulating
   );
-  const hasSimulationFailure = simulatedItems.some(item => 
-    item.simulationStatus?.phase === 'error' || 
-    (item.simulationStatus?.result?.success === false && item.status === 'failed')
-  );
-  const allSimulationsComplete = !isSimulating && simulatedItems.length > 0 && 
-    simulatedItems.every(item => 
-      item.simulationStatus?.phase === 'complete' || 
-      item.simulationStatus?.phase === 'error' ||
-      item.status === 'ready' || 
-      item.status === 'failed'
-    );
-  const successCount = simulatedItems.filter(item => 
-    item.simulationStatus?.phase === 'complete' || 
-    (item.simulationStatus?.result?.success === true && item.status === 'ready')
-  ).length;
-  const failureCount = simulatedItems.filter(item => 
-    item.simulationStatus?.phase === 'error' || 
-    (item.simulationStatus?.result?.success === false && item.status === 'failed')
-  ).length;
+  const successCount = simulationStats.totalCompleted;
+  const failureCount = simulationStats.totalFailed;
   
-  // Check if flow is waiting for user approval (all items are pending/ready)
-  const isWaitingForApproval = executionState.items.every(item => 
-    item.status === 'pending' || item.status === 'ready'
-  );
-  
-  // Check if flow is complete (all items in terminal states)
-  const isComplete = executionState.items.every(item => 
-    item.status === 'completed' || item.status === 'finalized' || item.status === 'failed' || item.status === 'cancelled'
-  );
-  
-  // Determine if the whole flow is successful
-  // Success = all items completed (no failures, no cancellations)
-  const isFlowSuccessful = isComplete && executionState.items.every(item =>
-    item.status === 'completed' || item.status === 'finalized'
-  );
-  
-  // Determine if the whole flow failed
-  // Failed = at least one item failed and flow is complete
-  const isFlowFailed = isComplete && executionState.items.some(item =>
-    item.status === 'failed'
-  );
-  
-  // Check if flow is executing
-  const isExecuting = !isComplete && (
-    executionState.isExecuting || executionState.items.some(item => 
-      item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting'
-    )
-  );
+  // Calculate flow state
+  const waitingForApproval = isWaitingForApproval(executionState);
+  const isComplete = isFlowComplete(executionState);
+  const isExecuting = isFlowExecuting(executionState);
+  const flowSuccessful = isFlowSuccessful(executionState);
+  const flowFailed = isFlowFailed(executionState);
 
   const toggleExpand = (itemId: string) => {
     const newExpanded = new Set(expandedItems);
@@ -306,31 +190,27 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   };
 
   // Determine which simulation banner to show
-  const getSimulationBanner = () => {
-    if (simulationEnabled && allSimulationsComplete && hasSimulationSuccess && !hasSimulationFailure && !isExecuting) {
-      return <SimulationBanner type="success" successCount={successCount} />;
-    }
-    if (simulationEnabled && allSimulationsComplete && hasSimulationFailure) {
-      return <SimulationBanner type="failure" failureCount={failureCount} />;
-    }
-    if (!simulationEnabled && isWaitingForApproval) {
-      return <SimulationBanner type="disabled" />;
-    }
-    return null;
-  };
-
-  const simulationBanner = getSimulationBanner();
-  const hasSimulationBanner = simulationBanner !== null;
+  const bannerType = getSimulationBannerType(
+    simulationEnabled,
+    allSimulationsComplete,
+    hasSimulationSuccess,
+    hasSimulationFailure,
+    isExecuting,
+    waitingForApproval
+  );
+  const bannerProps = getSimulationBannerProps(bannerType, successCount, failureCount);
+  const simulationBanner = bannerProps ? <SimulationBanner {...bannerProps} /> : null;
+  const hasSimulationBanner = bannerType !== null;
   const hasActiveSimulation = simulationEnabled && isSimulating;
 
   return (
-    <div className="execution-flow-container" data-flow-status={isFlowSuccessful ? 'success' : isFlowFailed ? 'failed' : isExecuting ? 'executing' : 'pending'}>
+    <div className="execution-flow-container" data-flow-status={flowSuccessful ? 'success' : flowFailed ? 'failed' : isExecuting ? 'executing' : 'pending'}>
       <ExecutionFlowHeader
         executionState={executionState}
-        isWaitingForApproval={isWaitingForApproval}
+        isWaitingForApproval={waitingForApproval}
         isExecuting={isExecuting}
-        isFlowSuccessful={isFlowSuccessful}
-        isFlowFailed={isFlowFailed}
+        isFlowSuccessful={flowSuccessful}
+        isFlowFailed={flowFailed}
       />
 
       {/* Master Simulation Container - Shows overall simulation progress */}
@@ -342,7 +222,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
       )}
 
       {/* Approval message (only show when no banner/container is active and simulation is not running) */}
-      {!hasSimulationBanner && !hasActiveSimulation && !allSimulationsComplete && isWaitingForApproval && (
+      {!hasSimulationBanner && !hasActiveSimulation && !allSimulationsComplete && waitingForApproval && (
         <div className="execution-flow-intro">
           <p>Review the steps below. Once you accept, your wallet will ask you to sign each transaction.</p>
         </div>
@@ -363,10 +243,10 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
 
       <ExecutionFlowFooter
         executionState={executionState}
-        isWaitingForApproval={isWaitingForApproval}
+        isWaitingForApproval={waitingForApproval}
         isComplete={isComplete}
-        isFlowSuccessful={isFlowSuccessful}
-        isFlowFailed={isFlowFailed}
+        isFlowSuccessful={flowSuccessful}
+        isFlowFailed={flowFailed}
         isSimulating={isSimulating}
         showCancel={!!(onCancel || executionMessage)}
         showAccept={!!(onAcceptAndStart || executionMessage)}

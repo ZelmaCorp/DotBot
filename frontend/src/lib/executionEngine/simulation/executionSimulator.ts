@@ -31,7 +31,7 @@ export async function runSimulation(
   executionArray: ExecutionArray,
   item: ExecutionItem
 ): Promise<void> {
-  console.log('[Simulation] 🚀 Starting simulation for item:', {
+  console.log('[Simulation] Starting simulation for item:', {
     itemId: item.id,
     description: item.description,
     status: item.status,
@@ -40,7 +40,7 @@ export async function runSimulation(
 
   try {
     // Set initial simulation status IMMEDIATELY so UI can show progress
-    console.log('[Simulation] 📝 Setting initial simulation status for item:', item.id);
+    console.log('[Simulation] Setting initial simulation status for item:', item.id);
     executionArray.updateSimulationStatus(item.id, {
       phase: 'initializing',
       message: 'Initializing simulation...',
@@ -49,7 +49,7 @@ export async function runSimulation(
 
     // Create a callback that updates this specific item's simulation status
     const itemSimulationCallback = (status: any) => {
-      console.log('[Simulation] 📡 Simulation status update for item:', {
+      console.log('[Simulation] Simulation status update for item:', {
         itemId: item.id,
         phase: status.phase,
         message: status.message,
@@ -69,7 +69,7 @@ export async function runSimulation(
     };
 
     const chopsticksAvailable = await isChopsticksAvailable();
-    console.log('[Simulation] 🔧 Simulation method:', chopsticksAvailable ? 'Chopsticks (full runtime validation)' : 'paymentInfo fallback (structure only)');
+    console.log('[Simulation] Simulation method:', chopsticksAvailable ? 'Chopsticks (full runtime validation)' : 'paymentInfo fallback (structure only)');
 
     if (chopsticksAvailable) {
       // Use Chopsticks for full runtime execution simulation
@@ -77,14 +77,14 @@ export async function runSimulation(
     } else {
       // Fallback: Only use paymentInfo if Chopsticks is completely unavailable
       // This should be rare - only in environments where @acala-network/chopsticks-core can't be imported
-      console.warn('[Simulation] ⚠️ Chopsticks unavailable - using paymentInfo fallback (limited validation)');
+      console.warn('[Simulation] Chopsticks unavailable - using paymentInfo fallback (limited validation)');
       await runPaymentInfoValidation(extrinsic, itemContext);
     }
 
     // Mark simulation as complete
     const currentSimStatus = executionArray.getItem(item.id)?.simulationStatus;
     if (currentSimStatus) {
-      console.log('[Simulation] ✅ Simulation completed successfully for item:', item.id);
+      console.log('[Simulation] Simulation completed successfully for item:', item.id);
       executionArray.updateSimulationStatus(item.id, {
         ...currentSimStatus,
         phase: 'complete',
@@ -92,7 +92,7 @@ export async function runSimulation(
       });
     }
 
-    console.log('[Simulation] 📊 Updating item status to ready:', item.id);
+    console.log('[Simulation] Updating item status to ready:', item.id);
     executionArray.updateStatus(item.id, 'ready');
   } catch (error) {
     console.error('[Simulation] ❌ Simulation failed for item:', {
