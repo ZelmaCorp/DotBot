@@ -135,10 +135,13 @@ export class EntityCreator {
     
     // Store the URI for signing in synthetic/emulated modes
     // In live mode, we don't expose the URI for security
+    // For synthetic/emulated modes, also include mnemonic for backward compatibility
+    // Note: This is a deterministic "fake" mnemonic derived from the URI for testing
     const entity: TestEntity = {
       name,
       address,
       uri: this.config.mode !== 'live' ? uri : undefined,
+      mnemonic: this.config.mode !== 'live' ? this.generateDeterministicMnemonic(uri) : undefined,
       type: 'keypair',
     };
     
@@ -301,6 +304,33 @@ export class EntityCreator {
     if (!this.initialized) {
       throw new Error('EntityCreator not initialized. Call initialize() first.');
     }
+  }
+
+  /**
+   * Generate a deterministic "fake" mnemonic from URI for testing
+   * This is not a real mnemonic but provides a consistent string for tests
+   */
+  private generateDeterministicMnemonic(uri: string): string {
+    // Generate a deterministic 12-word mnemonic-like string from URI
+    // This is for testing purposes only - not a real BIP39 mnemonic
+    const words = [
+      'abandon', 'ability', 'able', 'about', 'above', 'absent', 'absorb', 'abstract',
+      'absurd', 'abuse', 'access', 'accident', 'account', 'accuse', 'achieve', 'acid',
+      'acoustic', 'acquire', 'across', 'act', 'action', 'actor', 'actual', 'adapt',
+      'add', 'addict', 'address', 'adjust', 'admit', 'adult', 'advance', 'advice'
+    ];
+    
+    // Create hash from URI
+    const hash = uri.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    
+    // Generate 12 words deterministically
+    const mnemonicWords: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const index = (hash + i * 17) % words.length;
+      mnemonicWords.push(words[index]);
+    }
+    
+    return mnemonicWords.join(' ');
   }
 
 

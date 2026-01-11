@@ -15,6 +15,9 @@ describe('ExecutionArray', () => {
   let executionArray: ExecutionArray;
 
   beforeEach(() => {
+    // Disable simulation by default for tests
+    const { disableSimulation } = require('../../../executionEngine/simulation/simulationConfig');
+    disableSimulation();
     executionArray = new ExecutionArray();
   });
 

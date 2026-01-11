@@ -176,7 +176,7 @@ describe('StateAllocator', () => {
   });
 
   describe('Balance Allocation', () => {
-    it('should allocate balance in synthetic mode', async () => {
+    it('should throw error for synthetic mode (not implemented)', async () => {
       const allocator = new StateAllocator({
         mode: 'synthetic',
         chain: 'westend',
@@ -185,19 +185,17 @@ describe('StateAllocator', () => {
 
       await allocator.initialize();
 
-      const result = await allocator.allocateWalletState({
-        accounts: [
-          { entityName: 'Alice', balance: '100 WND' },
-        ],
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.balances.has('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY')).toBe(true);
-      const balance = result.balances.get('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
-      expect(balance?.free).toBe('100000000000000'); // 100 WND in planck (12 decimals)
+      // Synthetic mode is not implemented yet - should throw error
+      await expect(
+        allocator.allocateWalletState({
+          accounts: [
+            { entityName: 'Alice', balance: '100 WND' },
+          ],
+        })
+      ).rejects.toThrow('Synthetic mode is not implemented yet');
     });
 
-    it('should allocate balance in emulated mode', async () => {
+    it('should throw error for emulated mode (not implemented)', async () => {
       const mockChain = {
         setStorage: jest.fn().mockResolvedValue(undefined),
         head: Promise.resolve('0x123'),
@@ -215,18 +213,14 @@ describe('StateAllocator', () => {
 
       await allocator.initialize();
 
-      const result = await allocator.allocateWalletState({
-        accounts: [
-          { entityName: 'Alice', balance: '50 WND' },
-        ],
-      });
-
-      expect(result.success).toBe(true);
-      expect(mockChain.setStorage).toHaveBeenCalled();
-      // Verify setStorage was called with correct format
-      const setStorageCall = (mockChain.setStorage as jest.Mock).mock.calls[0][0];
-      expect(setStorageCall).toHaveProperty('System');
-      expect(setStorageCall.System).toHaveProperty('Account');
+      // Emulated mode is not implemented yet - should throw error
+      await expect(
+        allocator.allocateWalletState({
+          accounts: [
+            { entityName: 'Alice', balance: '50 WND' },
+          ],
+        })
+      ).rejects.toThrow('Emulated mode is not implemented yet');
     });
 
     it('should handle missing entity', async () => {
@@ -249,7 +243,7 @@ describe('StateAllocator', () => {
       expect(result.errors[0]).toContain('NonExistent');
     });
 
-    it('should parse different balance formats', async () => {
+    it('should throw error for synthetic mode when parsing different balance formats', async () => {
       const allocator = new StateAllocator({
         mode: 'synthetic',
         chain: 'polkadot',
@@ -258,20 +252,15 @@ describe('StateAllocator', () => {
 
       await allocator.initialize();
 
-      const result = await allocator.allocateWalletState({
-        accounts: [
-          { entityName: 'Alice', balance: '5 DOT' },
-          { entityName: 'Bob', balance: '0.1 DOT' },
-        ],
-      });
-
-      expect(result.success).toBe(true);
-      // 5 DOT = 50000000000 planck (10 decimals)
-      const aliceBalance = result.balances.get('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
-      expect(aliceBalance?.free).toBe('50000000000');
-      // 0.1 DOT = 1000000000 planck
-      const bobBalance = result.balances.get('5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty');
-      expect(bobBalance?.free).toBe('1000000000');
+      // Synthetic mode is not implemented yet - should throw error
+      await expect(
+        allocator.allocateWalletState({
+          accounts: [
+            { entityName: 'Alice', balance: '5 DOT' },
+            { entityName: 'Bob', balance: '0.1 DOT' },
+          ],
+        })
+      ).rejects.toThrow('Synthetic mode is not implemented yet');
     });
   });
 

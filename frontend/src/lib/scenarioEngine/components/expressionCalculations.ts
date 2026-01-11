@@ -67,7 +67,6 @@ export async function calculateInsufficientBalance(
   // Calculate remaining balance after first transfer
   const remainingAfterFirstTx = freeBalance - firstTransferAmount - estimatedFee;
   
-  // Calculate insufficient amount: remaining + buffer
   // If remaining <= 0, first transfer would already fail, so use 0.01
   const insufficientAmount = remainingAfterFirstTx > 0 
     ? remainingAfterFirstTx + 0.01  // Normal case: add buffer to remaining

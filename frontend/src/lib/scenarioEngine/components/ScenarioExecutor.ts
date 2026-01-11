@@ -383,7 +383,18 @@ export class ScenarioExecutor {
     }
     
     // Replace variables and expressions in the prompt
-    input = await this.processPromptVariables(input);
+    // If expression evaluation fails, continue with original input (graceful degradation)
+    try {
+      input = await this.processPromptVariables(input);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.emit({ 
+        type: 'log', 
+        level: 'warn', 
+        message: `Failed to process prompt variables/expressions: ${errorMessage}. Continuing with original input.` 
+      });
+      // Continue with original input if processing fails
+    }
 
     // Replace entity names with addresses in the prompt
     // Example: "Send 5 WND to Alice" -> "Send 5 WND to 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
@@ -1234,7 +1245,7 @@ export class ScenarioExecutor {
    * @returns Processed input with variables and expressions replaced
    */
   private async processPromptVariables(input: string): Promise<string> {
-    // Step 1: Replace simple variables ({{variableName}})
+    // Replace simple variables ({{variableName}})
     if (this.context?.variables) {
       input = input.replace(/\{\{(\w+)\}\}/g, (match, varName) => {
         const value = this.context!.variables.get(varName);
@@ -1247,7 +1258,7 @@ export class ScenarioExecutor {
       });
     }
     
-    // Step 2: Evaluate dynamic expressions ({{calc:functionName(args)}})
+    // Evaluate dynamic expressions ({{calc:functionName(args)}})
     input = await this.evaluateExpressions(input);
     
     return input;

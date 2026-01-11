@@ -47,15 +47,10 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
       {
         id: 'step-1',
         type: 'prompt',
-        input: 'Send 0.1 WND to Alice',
-      },
-      {
-        id: 'step-2',
-        type: 'prompt',
-        input: 'Send 0.1 WND to Bob',
-      },
+        input: 'Send 0.1 WND to Alice then send 0.1 WND to Bob',
+      }
     ],
-    expectations: [
+    expectations: [ // not sure about this
       {
         responseType: 'execution',
         expectedAgent: 'AssetTransferAgent',

@@ -505,6 +505,10 @@ export class StateAllocator {
         if (error instanceof FundingRequiredError) {
           throw error;
         }
+        // For synthetic/emulated modes, throw immediately (not implemented)
+        if (this.config.mode === 'synthetic' || this.config.mode === 'emulated') {
+          throw error;
+        }
         result.errors.push(
           `Failed to allocate state for "${accountConfig.entityName}": ${error}`
         );
@@ -648,6 +652,7 @@ export class StateAllocator {
         // TODO: Synthetic mode disabled
         // Future implementation: Don't create state at all
         // Instead: Mock DotBot's LLM responses entirely
+        // Throw error immediately - don't catch and return in result
         throw new Error('Synthetic mode is not implemented yet. Use live mode.');
         
       case 'emulated':
@@ -657,6 +662,7 @@ export class StateAllocator {
         // 2. Set balances on fork using setStorage
         // 3. Reconfigure DotBot to use Chopsticks API (not real chain)
         // This ensures DotBot sees the same state we set up
+        // Throw error immediately - don't catch and return in result
         throw new Error('Emulated mode is not implemented yet. Use live mode.');
         
       case 'live':

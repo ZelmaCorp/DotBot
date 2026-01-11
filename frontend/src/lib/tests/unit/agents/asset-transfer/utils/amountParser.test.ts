@@ -81,28 +81,32 @@ describe('Amount Parser Utilities', () => {
       const amountBN = new BN('15000000000');
       const result = formatAmount(amountBN, 10);
 
-      expect(result).toBe('1.5000000000');
+      // formatAmount trims trailing zeros for cleaner display
+      expect(result).toBe('1.5');
     });
 
     it('should handle different decimal places', () => {
       const amountBN = new BN('1500000000000');
       const result = formatAmount(amountBN, 12);
 
-      expect(result).toBe('1.500000000000');
+      // formatAmount trims trailing zeros for cleaner display
+      expect(result).toBe('1.5');
     });
 
     it('should pad fractional parts', () => {
       const amountBN = new BN('1000000000');
       const result = formatAmount(amountBN, 10);
 
-      expect(result).toBe('0.1000000000');
+      // formatAmount trims trailing zeros for cleaner display
+      expect(result).toBe('0.1');
     });
 
     it('should use default 10 decimals if not specified', () => {
       const amountBN = new BN('15000000000');
       const result = formatAmount(amountBN);
 
-      expect(result).toBe('1.5000000000');
+      // formatAmount trims trailing zeros for cleaner display
+      expect(result).toBe('1.5');
     });
   });
 

@@ -168,7 +168,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   const allSimulationsComplete = areAllSimulationsComplete(
     executionState.items,
     isSimulating
-  );
+    );
   const successCount = simulationStats.totalCompleted;
   const failureCount = simulationStats.totalFailed;
   

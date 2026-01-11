@@ -794,8 +794,15 @@ export class DotBot {
       // Emit error event
       this.emit({ type: 'chat-error', error: error instanceof Error ? error : new Error(errorMsg) });
       
-      // Handle as conversation response (text, not execution)
-      return await this.handleConversationResponse(errorResponse);
+      // Return error response but keep the plan for reference
+      return {
+        response: errorResponse,
+        plan, // Keep plan even on error so caller knows what was attempted
+        executed: false,
+        success: false,
+        completed: 0,
+        failed: 1,
+      };
     }
     
     // Generate friendly message (pre-execution)

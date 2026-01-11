@@ -38,7 +38,10 @@ describe('Sequential Transaction Simulation', () => {
     statusCallback = jest.fn();
 
     mockChain = {
-      head: Promise.resolve('0x1234'),
+      _currentHead: '0x1234',
+      get head() {
+        return Promise.resolve(this._currentHead);
+      },
       close: jest.fn().mockResolvedValue(undefined),
       dryRunExtrinsic: jest.fn().mockResolvedValue({
         outcome: {
@@ -49,6 +52,11 @@ describe('Sequential Transaction Simulation', () => {
         },
         storageDiff: [],
       }),
+      newBlock: jest.fn().mockImplementation(async function(this: any) {
+        // Simulate block building by updating head
+        this._currentHead = `0x${Math.random().toString(16).slice(2, 10)}`;
+      }),
+      query: jest.fn().mockResolvedValue(null),
     };
 
     (setup as jest.Mock).mockResolvedValue(mockChain);
@@ -58,6 +66,7 @@ describe('Sequential Transaction Simulation', () => {
         method: {
           toHex: jest.fn().mockReturnValue('0xabcd1'),
         },
+        toHex: jest.fn().mockReturnValue('0xfull1'),
         registry: {} as any,
         paymentInfo: jest.fn().mockResolvedValue({
           partialFee: { toString: () => '1000000000' },
@@ -67,6 +76,7 @@ describe('Sequential Transaction Simulation', () => {
         method: {
           toHex: jest.fn().mockReturnValue('0xabcd2'),
         },
+        toHex: jest.fn().mockReturnValue('0xfull2'),
         registry: {} as any,
         paymentInfo: jest.fn().mockResolvedValue({
           partialFee: { toString: () => '2000000000' },
@@ -82,6 +92,13 @@ describe('Sequential Transaction Simulation', () => {
       registry: {
         chainSS58: 0,
         findMetaError: jest.fn(),
+      },
+      rpc: {
+        chain: {
+          getFinalizedHead: jest.fn().mockResolvedValue({
+            toHex: jest.fn().mockReturnValue('0xfinalized'),
+          }),
+        },
       },
       query: {
         system: {
