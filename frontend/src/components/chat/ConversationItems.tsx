@@ -10,7 +10,7 @@
 import React from 'react';
 import type { DotBot, ConversationItem } from '../../lib';
 import Message from './Message';
-import ExecutionFlow from '../execution/ExecutionFlow';
+import ExecutionFlow from '../execution-flow/ExecutionFlow';
 
 interface ConversationItemsProps {
   items: ConversationItem[];

@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import type { DotBot, ConversationItem } from '../../lib';
+import type { DotBot, ConversationItem, DotBotEvent } from '../../lib';
 import { useChatInput } from '../../contexts/ChatInputContext';
 import MessageList from './MessageList';
 import ConversationItems from './ConversationItems';
@@ -42,8 +42,25 @@ const Chat: React.FC<ChatProps> = ({
   // Get conversation items from ChatInstance
   const conversationItems: ConversationItem[] = dotbot.currentChat?.getDisplayMessages() || [];
   
+  // Subscribe to DotBot events to detect when new execution messages are added
+  // This ensures ExecutionFlow appears immediately when executionMessage is added (before executionArray exists)
+  useEffect(() => {
+    const handleDotBotEvent = (event: DotBotEvent) => {
+      // When a new execution message is added, force re-render
+      if (event.type === 'execution-message-added') {
+        setRefreshKey(prev => prev + 1);
+      }
+    };
+    
+    dotbot.addEventListener(handleDotBotEvent);
+    
+    return () => {
+      dotbot.removeEventListener(handleDotBotEvent);
+    };
+  }, [dotbot]);
+  
   // Force re-render when executionArray is added to execution messages
-  // This ensures ExecutionFlow appears immediately when executionMessage is updated
+  // This ensures ExecutionFlow updates when executionArray state changes
   useEffect(() => {
     if (!dotbot.currentChat) return;
     
