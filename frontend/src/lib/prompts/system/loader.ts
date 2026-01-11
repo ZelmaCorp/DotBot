@@ -182,35 +182,32 @@ function formatContext(context?: SystemContext): string {
   
   // Balance context
   if (context.balance) {
-    // Get correct decimals for the network
-    // CRITICAL: Different networks have different decimals:
-    // - Polkadot: 10 decimals (DOT)
-    // - Kusama: 12 decimals (KSM)
-    // - Westend: 12 decimals (WND)
-    // Asset Hub uses the same decimals as the relay chain for native token
-    const networkDecimals = getNetworkDecimals(context.network.network);
+    // Get decimals from context (from API registry) or fallback to network defaults
+    // Prefer API registry values as they're always correct for the actual chain
+    const relayChainDecimals = context.network.relayChainDecimals ?? getNetworkDecimals(context.network.network);
+    const assetHubDecimals = context.network.assetHubDecimals ?? relayChainDecimals;
     
-    // Convert total balance from Planck to native token units
-    const totalDot = formatPlanckToDot(context.balance.total, networkDecimals);
+    // Convert total balance from Planck to native token units (use relay chain decimals for total)
+    const totalDot = formatPlanckToDot(context.balance.total, relayChainDecimals);
     prompt += `**Total Balance**: ${totalDot} ${context.balance.symbol}\n\n`;
     
     // Relay Chain balance (convert from Planck to native token units)
     prompt += `**Relay Chain** (${context.network.rpcEndpoint || 'Connected'}):\n`;
-    const relayFreeDot = formatPlanckToDot(context.balance.relayChain.free, networkDecimals);
+    const relayFreeDot = formatPlanckToDot(context.balance.relayChain.free, relayChainDecimals);
     prompt += `  - Free: ${relayFreeDot} ${context.balance.symbol}\n`;
     if (context.balance.relayChain.reserved !== '0') {
-      const relayReservedDot = formatPlanckToDot(context.balance.relayChain.reserved, networkDecimals);
+      const relayReservedDot = formatPlanckToDot(context.balance.relayChain.reserved, relayChainDecimals);
       prompt += `  - Reserved: ${relayReservedDot} ${context.balance.symbol}\n`;
     }
     
     // Asset Hub balance (convert from Planck to native token units)
-    // Asset Hub uses the same decimals as relay chain for native token
+    // Use Asset Hub decimals if available (may differ from relay chain)
     if (context.balance.assetHub) {
       prompt += `\n**Asset Hub** (Connected):\n`;
-      const assetHubFreeDot = formatPlanckToDot(context.balance.assetHub.free, networkDecimals);
+      const assetHubFreeDot = formatPlanckToDot(context.balance.assetHub.free, assetHubDecimals);
       prompt += `  - Free: ${assetHubFreeDot} ${context.balance.symbol}\n`;
       if (context.balance.assetHub.reserved !== '0') {
-        const assetHubReservedDot = formatPlanckToDot(context.balance.assetHub.reserved, networkDecimals);
+        const assetHubReservedDot = formatPlanckToDot(context.balance.assetHub.reserved, assetHubDecimals);
         prompt += `  - Reserved: ${assetHubReservedDot} ${context.balance.symbol}\n`;
       }
     } else {
@@ -219,7 +216,10 @@ function formatContext(context?: SystemContext): string {
     
     prompt += `\n**CRITICAL**: All balance values above are in ${context.balance.symbol} denomination. NEVER show Planck values to users.\n`;
     prompt += `**CRITICAL**: When displaying balances to users, ALWAYS use ${context.balance.symbol} (not Planck). Example: "12.5 ${context.balance.symbol}" not raw Planck values.\n`;
-    prompt += `Note: Users can have ${context.balance.symbol} on both Relay Chain and Asset Hub.\n`;
+    prompt += `\nNote: Users can have ${context.balance.symbol} on both Relay Chain and Asset Hub. Fee payment rules:\n`;
+    prompt += `- Asset Hub transfers pay fees on Asset Hub using Asset Hub balance (Relay Chain balance not needed)\n`;
+    prompt += `- Relay Chain transfers pay fees on Relay Chain using Relay Chain balance\n`;
+    prompt += `- Only suggest XCM transfers when user explicitly wants to move funds between chains, not for fee payment\n`;
   }
   
   // Simulation settings

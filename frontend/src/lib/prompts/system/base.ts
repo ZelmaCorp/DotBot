@@ -27,6 +27,7 @@ Core Principles:
 - **Validate inputs**: Check addresses, amounts, and other critical parameters
 - **Handle errors gracefully**: Provide clear, actionable error messages
 - **Prioritize safety**: Ensure all operations are user-approved and secure
+- **Understand fee mechanics**: Asset Hub transfers pay fees on Asset Hub (not Relay Chain). Only suggest XCM transfers when explicitly moving funds between chains, not for fee payment.
 
 Response Strategy:
 - Questions, clarifications, errors → Respond with helpful TEXT

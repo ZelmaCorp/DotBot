@@ -15,17 +15,25 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
     between accounts on the Polkadot or Kusama networks. It supports standard transfers,
     keep-alive transfers (to prevent account reaping), and batch transfers to multiple
     recipients in a single transaction. The agent validates addresses, checks balances,
-    estimates fees, and provides detailed warnings and metadata.`,
+    estimates fees, and provides detailed warnings and metadata.
+    
+    Fee handling: The agent automatically validates balance on the target chain where the
+    transfer occurs. For Asset Hub transfers, fees are paid on Asset Hub using the Asset Hub
+    balance. For Relay Chain transfers, fees are paid on Relay Chain using the Relay Chain
+    balance. Users do not need Relay Chain balance to send transfers from Asset Hub.`,
   
   functions: [
     {
       name: 'transfer',
       description: 'Transfer DOT or tokens from one account to another',
       detailedDescription: `Creates a transfer extrinsic to send DOT or tokens from the sender's
-        account to a recipient. The agent automatically validates addresses, checks balances,
-        estimates fees, and can optionally use transferKeepAlive to ensure the sender account
-        remains alive after the transfer. Amounts MUST be specified in human-readable format
-        (e.g., "5", "1.5", "0.1") - the agent automatically converts to Planck internally.`,
+        account to a recipient. The agent automatically validates addresses, checks balances on
+        the target chain (where the transfer occurs), estimates fees, and can optionally use
+        transferKeepAlive to ensure the sender account remains alive after the transfer. For Asset
+        Hub transfers, balance validation and fee payment occur on Asset Hub. For Relay Chain
+        transfers, balance validation and fee payment occur on Relay Chain. Amounts MUST be
+        specified in human-readable format (e.g., "5", "1.5", "0.1") - the agent automatically
+        converts to Planck internally.`,
       parameters: [
         {
           name: 'address',
@@ -165,7 +173,9 @@ export const ASSET_TRANSFER_AGENT: AgentDefinition = {
   
   prerequisites: [
     'Polkadot API instance must be initialized',
-    'Sender account must have sufficient balance (including fees)',
+    'Sender account must have sufficient balance on the target chain (where the transfer occurs)',
+    'For Asset Hub transfers: sufficient Asset Hub balance (fees paid on Asset Hub)',
+    'For Relay Chain transfers: sufficient Relay Chain balance (fees paid on Relay Chain)',
     'Valid Polkadot addresses for sender and recipient(s)',
   ],
   
