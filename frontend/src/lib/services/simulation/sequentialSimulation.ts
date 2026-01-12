@@ -462,7 +462,7 @@ export async function simulateSequentialTransactions(
         if (!result.success) {
           results.push({ index: i, description: item.description, result });
           updateStatus('error', `Transaction ${i + 1} failed: ${result.error}`, 100);
-          return createFailureResponse(i + 1, item.description, result.error || 'Unknown error', results, totalFee);
+          return createFailureResponse(i, item.description, result.error || 'Unknown error', results, totalFee);
         }
         
         currentBlockHash = newBlockHash;
@@ -477,7 +477,7 @@ export async function simulateSequentialTransactions(
         results.push({ index: i, description: item.description, result });
         updateStatus('error', `Transaction ${i + 1} failed: ${errorMsg}`, 100);
         
-        return createFailureResponse(i + 1, item.description, errorMsg, results, totalFee);
+        return createFailureResponse(i, item.description, errorMsg, results, totalFee);
       }
     }
     
