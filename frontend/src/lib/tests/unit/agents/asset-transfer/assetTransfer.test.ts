@@ -153,8 +153,8 @@ describe('AssetTransferAgent', () => {
 
         // 1.0 DOT = 10000000000 Planck
         expect(result.metadata?.amount).toBe(TEST_AMOUNTS.ONE_DOT);
-        // formatAmount returns 10 decimal places: "1.0000000000"
-        expect(result.metadata?.formattedAmount).toBe('1.0000000000');
+        // formatAmount trims trailing zeros for cleaner display
+        expect(result.metadata?.formattedAmount).toBe('1');
       });
 
       it('should include estimated fee in result', async () => {

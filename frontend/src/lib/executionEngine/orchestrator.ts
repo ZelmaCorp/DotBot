@@ -97,6 +97,26 @@ export class ExecutionOrchestrator {
   }
   
   /**
+   * Get the API instance used by orchestrator (Relay Chain)
+   * 
+   * Public getter to avoid type assertions when accessing orchestrator's API.
+   * Used by simulation code to match extrinsics with their creating API.
+   */
+  getApi(): ApiPromise | null {
+    return this.api;
+  }
+  
+  /**
+   * Get the Asset Hub API instance used by orchestrator
+   * 
+   * Public getter to avoid type assertions when accessing orchestrator's API.
+   * Used by simulation code to match extrinsics with their creating API.
+   */
+  getAssetHubApi(): ApiPromise | null {
+    return this.assetHubApi;
+  }
+  
+  /**
    * Orchestrate execution plan from LLM
    * 
    * Takes LLM output (ExecutionPlan) and automatically:
@@ -107,91 +127,130 @@ export class ExecutionOrchestrator {
    * 
    * @param plan ExecutionPlan from LLM
    * @param options Orchestration options
+   * @param executionId Optional execution ID to preserve when rebuilding (prevents duplicate ExecutionMessages)
    * @returns OrchestrationResult with populated ExecutionArray
    */
   async orchestrate(
     plan: ExecutionPlan,
-    options: OrchestrationOptions = {}
+    options: OrchestrationOptions = {},
+    executionId?: string
   ): Promise<OrchestrationResult> {
     this.ensureInitialized();
     
-    const {
-      stopOnError = false,
-      validateFirst = true,
-      onProgress,
-      onStepCompleted,
-      onError,
-    } = options;
-    
     const startTime = Date.now();
-    const executionArray = new ExecutionArray();
-    const errors: Array<{ stepId: string; error: string; step: ExecutionStep }> = [];
+    const executionArray = new ExecutionArray(executionId);
+    const errors = this.validatePlanIfNeeded(plan, options);
     
-    if (validateFirst) {
-      const validationErrors = this.validateSteps(plan.steps);
-      
-      if (validationErrors.length > 0) {
-        errors.push(...validationErrors);
-        if (stopOnError) {
-          return {
-            executionArray,
-            success: false,
-            errors,
-            metadata: {
-              totalSteps: plan.steps.length,
-              successfulSteps: 0,
-              failedSteps: errors.length,
-              duration: Date.now() - startTime,
-            },
-          };
-        }
-      }
+    if (errors.length > 0 && options.stopOnError) {
+      return this.createOrchestrationResult(executionArray, errors, plan.steps.length, startTime);
     }
     
+    const { successfulSteps, finalErrors } = await this.executeSteps(
+      plan.steps,
+      executionArray,
+      options,
+      errors
+    );
+    
+    return this.createOrchestrationResult(
+      executionArray,
+      finalErrors,
+      plan.steps.length,
+      startTime,
+      successfulSteps
+    );
+  }
+  
+  /**
+   * Validate plan steps if validation is enabled
+   */
+  private validatePlanIfNeeded(
+    plan: ExecutionPlan,
+    options: OrchestrationOptions
+  ): Array<{ stepId: string; error: string; step: ExecutionStep }> {
+    if (!options.validateFirst) {
+      return [];
+    }
+    return this.validateSteps(plan.steps);
+  }
+  
+  /**
+   * Execute all steps in the plan
+   */
+  private async executeSteps(
+    steps: ExecutionStep[],
+    executionArray: ExecutionArray,
+    options: OrchestrationOptions,
+    initialErrors: Array<{ stepId: string; error: string; step: ExecutionStep }>
+  ): Promise<{ successfulSteps: number; finalErrors: Array<{ stepId: string; error: string; step: ExecutionStep }> }> {
     let successfulSteps = 0;
-    for (let i = 0; i < plan.steps.length; i++) {
-      const step = plan.steps[i];
-      
-      if (onProgress) {
-        onProgress(step, i, plan.steps.length);
+    const errors = [...initialErrors];
+    
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (options.onProgress) {
+        options.onProgress(step, i, steps.length);
       }
       
-      try {
-        const agentResult = await this.executeStep(step);
-        executionArray.add(agentResult);
+      const result = await this.executeStepWithErrorHandling(step, executionArray, options);
+      if (result.success) {
         successfulSteps++;
-        
-        // Notify success
-        if (onStepCompleted) {
-          onStepCompleted(step, agentResult);
-        }
-        
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        errors.push({
-          stepId: step.id,
-          error: errorMessage,
-          step,
-        });
-        
-        // Notify error
-        if (onError && error instanceof Error) {
-          onError(step, error);
-        }
-        
-        // Stop if requested
-        if (stopOnError) {
+      } else if (result.error) {
+        errors.push(result.error);
+        if (options.stopOnError) {
           break;
         }
       }
     }
     
+    return { successfulSteps, finalErrors: errors };
+  }
+  
+  /**
+   * Execute a single step with error handling
+   */
+  private async executeStepWithErrorHandling(
+    step: ExecutionStep,
+    executionArray: ExecutionArray,
+    options: OrchestrationOptions
+  ): Promise<{ success: boolean; error?: { stepId: string; error: string; step: ExecutionStep } }> {
+    try {
+      const agentResult = await this.executeStep(step);
+      executionArray.add(agentResult);
+      if (options.onStepCompleted) {
+        options.onStepCompleted(step, agentResult);
+      }
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorObj = {
+        stepId: step.id,
+        error: errorMessage,
+        step,
+      };
+      if (options.onError && error instanceof Error) {
+        options.onError(step, error);
+      }
+      return { success: false, error: errorObj };
+    }
+  }
+  
+  /**
+   * Create orchestration result
+   */
+  private createOrchestrationResult(
+    executionArray: ExecutionArray,
+    errors: Array<{ stepId: string; error: string; step: ExecutionStep }>,
+    totalSteps: number,
+    startTime: number,
+    successfulSteps: number = 0
+  ): OrchestrationResult {
     return {
       executionArray,
       success: errors.length === 0,
       errors,
       metadata: {
-        totalSteps: plan.steps.length,
+        totalSteps,
         successfulSteps,
         failedSteps: errors.length,
         duration: Date.now() - startTime,
@@ -215,7 +274,23 @@ export class ExecutionOrchestrator {
     this.ensureInitialized();
     
     const agent = this.getAgentInstance(step.agentClassName);
+    this.validateAgentFunction(agent, step);
     
+    const paramsWithCallback = this.prepareAgentParameters(step);
+    
+    try {
+      const result = await this.callAgentFunction(agent, step, paramsWithCallback);
+      this.validateAgentResult(result, step);
+      return result;
+    } catch (error) {
+      throw this.wrapAgentError(error, step);
+    }
+  }
+  
+  /**
+   * Validate agent function exists
+   */
+  private validateAgentFunction(agent: BaseAgent, step: ExecutionStep): void {
     if (typeof (agent as any)[step.functionName] !== 'function') {
       throw new AgentError(
         `Function '${step.functionName}' not found on agent '${step.agentClassName}'`,
@@ -223,47 +298,79 @@ export class ExecutionOrchestrator {
         { agentClassName: step.agentClassName, functionName: step.functionName }
       );
     }
-    
+  }
+  
+  /**
+   * Prepare agent parameters with callback
+   */
+  private prepareAgentParameters(step: ExecutionStep): any {
     // Add status callback to parameters if not present
     // NOTE: Simulation is now handled by Executioner only, not by agents
-    const paramsWithCallback = {
+    return {
       ...step.parameters,
       onSimulationStatus: step.parameters.onSimulationStatus || this.onStatusUpdate || undefined,
     };
+  }
+  
+  /**
+   * Call agent function
+   * Type-safe wrapper for calling agent methods dynamically
+   */
+  private async callAgentFunction(
+    agent: BaseAgent,
+    step: ExecutionStep,
+    params: any
+  ): Promise<AgentResult> {
+    // Type-safe agent method call
+    // All agent methods follow the pattern: async methodName(params: SomeParams): Promise<AgentResult>
+    // Cast through 'unknown' first to allow index signature access
+    const agentMethods = agent as unknown as Record<string, (params: any) => Promise<AgentResult>>;
+    const method = agentMethods[step.functionName];
     
-    // Call the agent function
-    // Agent will create the extrinsic and return AgentResult
-    try {
-      const result = await (agent as any)[step.functionName](paramsWithCallback);
-      
-      if (!this.isValidAgentResult(result)) {
-        throw new AgentError(
-          `Agent function '${step.agentClassName}.${step.functionName}' did not return a valid AgentResult`,
-          'INVALID_AGENT_RESULT',
-          { result }
-        );
-      }
-      
-      return result;
-      
-    } catch (error) {
-      // Re-throw AgentErrors
-      if (error instanceof AgentError) {
-        throw error;
-      }
-      
-      // Wrap other errors
+    if (typeof method !== 'function') {
       throw new AgentError(
-        `Error calling ${step.agentClassName}.${step.functionName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'AGENT_CALL_ERROR',
-        {
-          agentClassName: step.agentClassName,
-          functionName: step.functionName,
-          parameters: step.parameters,
-          originalError: error instanceof Error ? error.message : String(error),
-        }
+        `Function '${step.functionName}' is not callable on agent '${step.agentClassName}'`,
+        'FUNCTION_NOT_CALLABLE',
+        { agentClassName: step.agentClassName, functionName: step.functionName }
       );
     }
+    
+    return await method.call(agent, params);
+  }
+  
+  /**
+   * Validate agent result
+   */
+  private validateAgentResult(result: any, step: ExecutionStep): void {
+    if (!this.isValidAgentResult(result)) {
+      throw new AgentError(
+        `Agent function '${step.agentClassName}.${step.functionName}' did not return a valid AgentResult`,
+        'INVALID_AGENT_RESULT',
+        { result }
+      );
+    }
+  }
+  
+  /**
+   * Wrap error in AgentError if needed
+   */
+  private wrapAgentError(error: unknown, step: ExecutionStep): AgentError {
+    // Re-throw AgentErrors
+    if (error instanceof AgentError) {
+      return error;
+    }
+    
+    // Wrap other errors
+    return new AgentError(
+      `Error calling ${step.agentClassName}.${step.functionName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      'AGENT_CALL_ERROR',
+      {
+        agentClassName: step.agentClassName,
+        functionName: step.functionName,
+        parameters: step.parameters,
+        originalError: error instanceof Error ? error.message : String(error),
+      }
+    );
   }
   
   /**

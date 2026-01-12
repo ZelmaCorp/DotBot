@@ -1978,6 +1978,113 @@ const unsubscribe = executionArray.subscribe((state) => {
 
 ---
 
+## Settings Management API
+
+### Simulation Configuration
+
+Control transaction simulation behavior via `SettingsManager`. Settings persist to localStorage.
+
+**Import:**
+```typescript
+import { 
+  getSimulationConfig,
+  updateSimulationConfig,
+  isSimulationEnabled,
+  enableSimulation,
+  disableSimulation,
+  resetSimulationConfig
+} from './lib/services/settingsManager';
+// Or convenience re-export:
+import { ... } from './lib/executionEngine/simulation/simulationConfig';
+```
+
+#### `getSimulationConfig()`
+
+Get current simulation configuration.
+
+```typescript
+function getSimulationConfig(): SimulationConfig
+```
+
+**Returns:**
+```typescript
+interface SimulationConfig {
+  enabled: boolean;      // Whether simulation is enabled
+  timeout: number;        // Simulation timeout (ms)
+  skipOnFailure?: boolean;      // Skip simulation if it fails (future)
+  allowIgnoreResults?: boolean; // Allow ignoring results (future)
+  useChopsticks?: boolean;      // Use Chopsticks vs dry-run (future)
+}
+```
+
+**Example:**
+```typescript
+const config = getSimulationConfig();
+console.log(config.enabled); // true
+```
+
+#### `isSimulationEnabled()`
+
+Check if simulation is currently enabled.
+
+```typescript
+function isSimulationEnabled(): boolean
+```
+
+**Example:**
+```typescript
+if (isSimulationEnabled()) {
+  // Simulation will run
+} else {
+  // Skip simulation, proceed to signing
+}
+```
+
+#### `updateSimulationConfig()`
+
+Update simulation configuration.
+
+```typescript
+function updateSimulationConfig(updates: Partial<SimulationConfig>): void
+```
+
+**Example:**
+```typescript
+// Enable simulation
+updateSimulationConfig({ enabled: true });
+
+// Disable simulation
+updateSimulationConfig({ enabled: false });
+
+// Change timeout
+updateSimulationConfig({ timeout: 60000 });
+```
+
+#### `enableSimulation()` / `disableSimulation()`
+
+Convenience methods for enabling/disabling simulation.
+
+```typescript
+function enableSimulation(): void
+function disableSimulation(): void
+```
+
+**Example:**
+```typescript
+enableSimulation();  // Same as updateSimulationConfig({ enabled: true })
+disableSimulation(); // Same as updateSimulationConfig({ enabled: false })
+```
+
+**Default:** `enabled: true` (simulation enabled by default)
+
+**Persistence:** Settings are automatically saved to localStorage and persist across sessions.
+
+**UI Control:** SettingsModal provides a toggle for simulation enable/disable.
+
+**Version Added:** v0.2.1 (January 2026)
+
+---
+
 ## Utilities API
 
 ### RpcManager
@@ -2960,9 +3067,48 @@ export class CustomAgent extends BaseAgent {
 
 ---
 
+### Simulation Configuration
+
+Simulation can be enabled/disabled via `SettingsManager`. Configuration persists to localStorage.
+
+**API:**
+```typescript
+import { 
+  getSimulationConfig, 
+  updateSimulationConfig, 
+  isSimulationEnabled,
+  enableSimulation,
+  disableSimulation
+} from './lib/services/settingsManager';
+// Or convenience re-export:
+// import { ... } from './lib/executionEngine/simulation/simulationConfig';
+
+// Check if simulation is enabled
+const enabled = isSimulationEnabled(); // boolean
+
+// Get full config
+const config = getSimulationConfig();
+// { enabled: true, timeout: 120000 }
+
+// Update config
+updateSimulationConfig({ enabled: false });
+
+// Convenience methods
+enableSimulation();
+disableSimulation();
+```
+
+**Default:** `enabled: true` (simulation enabled by default)
+
+**UI Control:** SettingsModal provides toggle for simulation enable/disable.
+
+**Version Added:** v0.2.1 (January 2026)
+
+---
+
 ### Simulation Status Tracking
 
-**Note:** Simulation is optional. Status callbacks are only invoked when simulation is enabled.
+**Note:** Simulation is optional. Status callbacks are only invoked when simulation is enabled. Use `isSimulationEnabled()` to check current state.
 
 ```typescript
 agent.initialize(
@@ -3349,6 +3495,21 @@ const array = dotbot.currentChat.getExecutionArray(execMessage.executionId);
 - Fixed registry mismatches
 - Fixed SS58 address encoding
 - Fixed existential deposit validation
+
+---
+
+### v0.2.1 (January 2026)
+
+**New Features:**
+- SettingsManager for centralized configuration management
+- Simulation configuration with UI toggle (SettingsModal)
+- Sequential multi-transaction simulation (transactions see state from previous transactions)
+- ExecutionFlow appears immediately when ExecutionMessage is added (before simulation)
+
+**Improvements:**
+- All components use `isSimulationEnabled()` for consistent simulation state checking
+- Settings persist across sessions via localStorage
+- Better multi-transaction flow support with state tracking
 
 ---
 

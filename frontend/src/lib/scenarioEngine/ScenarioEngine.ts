@@ -676,6 +676,39 @@ export class ScenarioEngine {
       this.validateScenario(scenario);
       this.ensureDependencies();
 
+      // Ensure executor has wallet address resolver and Asset Hub API
+      // Priority: walletAccount > dotbot wallet > undefined (will throw helpful error)
+      if (this.executor && this.executorDeps) {
+        // Try to get Asset Hub API from DotBot if not already in deps
+        let assetHubApi = this.executorDeps.assetHubApi;
+        if (!assetHubApi && this.dotbot) {
+          const dotbotAny = this.dotbot as any;
+          assetHubApi = dotbotAny.assetHubApi || null;
+        }
+        
+        const enhancedDeps = {
+          ...this.executorDeps,
+          assetHubApi: assetHubApi || this.executorDeps.assetHubApi, // Preserve or add Asset Hub API
+          getWalletAddress: () => {
+            // Priority 1: Use wallet account set for live mode
+            if (this.walletAccount?.address) {
+              return this.walletAccount.address;
+            }
+            // Priority 2: Try to get from DotBot's wallet
+            if (this.dotbot) {
+              const dotbotAny = this.dotbot as any;
+              const wallet = dotbotAny.wallet;
+              if (wallet?.address) {
+                return wallet.address;
+              }
+            }
+            // Return undefined - will trigger helpful error message
+            return undefined;
+          },
+        };
+        this.executor.setDependencies(enhancedDeps);
+      }
+
       this.updateState({
         status: 'preparing',
         currentScenario: scenario,
@@ -925,8 +958,13 @@ export class ScenarioEngine {
       // Clean up between scenarios
       await this.destroy();
       await this.initialize();
-      if (this.executorDeps) {
-        this.setDependencies(this.executorDeps);
+      if (this.executorDeps && this.executor) {
+        // Enhance dependencies with wallet address resolver
+        const enhancedDeps = {
+          ...this.executorDeps,
+          getWalletAddress: () => this.walletAccount?.address,
+        };
+        this.executor.setDependencies(enhancedDeps);
       }
     }
 

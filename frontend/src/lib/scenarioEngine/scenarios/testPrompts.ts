@@ -35,6 +35,43 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     recipient: "Alice",
   }),
   
+  // Multi-transaction: Two sequential transfers that both succeed
+  // NOTE: No walletState needed - uses actual wallet address via getWalletAddress()
+  {
+    id: 'happy-path-003',
+    name: 'Multi-Transaction: Both Transfers Succeed',
+    description: 'Two sequential transfers that both succeed with sufficient balance. Uses actual wallet balance.',
+    category: 'happy-path',
+    tags: ['multi-transaction', 'sequential', 'success', 'state-dependent', 'dynamic'],
+    steps: [
+      {
+        id: 'step-1',
+        type: 'prompt',
+        input: 'Send 0.1 WND to Alice then send 0.1 WND to Bob',
+      }
+    ],
+    expectations: [ // not sure about this
+      {
+        responseType: 'execution',
+        expectedAgent: 'AssetTransferAgent',
+        expectedFunction: 'transfer',
+        expectedParams: {
+          amount: '0.1',
+          recipient: 'Alice',
+        },
+      },
+      {
+        responseType: 'execution',
+        expectedAgent: 'AssetTransferAgent',
+        expectedFunction: 'transfer',
+        expectedParams: {
+          amount: '0.1',
+          recipient: 'Bob',
+        },
+      },
+    ],
+  },
+  
   // TODO: Convert remaining scenarios to proper Scenario format
   // { 
   //   input: "Transfer 0.1 DOT to 5FHneW46NsNkdoJEFX69Kmr9SEirTvfGEf73dtGj3vJ73Zc", 
@@ -185,7 +222,43 @@ export const AMBIGUITY_TESTS: Scenario[] = [
 // =============================================================================
 
 // TODO: Convert to proper Scenario format
+
 export const EDGE_CASE_TESTS: Scenario[] = [
+  // Multi-transaction: Two sequential transfers where second would fail (insufficient balance)
+  // DYNAMIC TEST: Uses runtime balance calculation!
+  // IMPORTANT: Single prompt generates ONE ExecutionFlow with 2 transactions, allowing simulation to detect failure
+  // Both transfers would succeed individually, but second fails after first executes
+  {
+    id: 'edge-case-001',
+    name: 'Multi-Transaction: Second Transfer Insufficient Balance (Dynamic)',
+    description: 'Two sequential transfers where each would succeed individually, but the second fails after the first executes. Uses dynamic balance calculation to ensure first transfer is safe (less than balance) and second transfer exceeds remaining balance. Works regardless of account balance (3 WND, 7 WND, 20 WND, etc.).',
+    category: 'edge-case',
+    tags: ['multi-transaction', 'sequential', 'insufficient-balance', 'dynamic', 'runtime-calculation'],
+    steps: [
+      {
+        id: 'step-1',
+        type: 'prompt',
+        // Single prompt generates ONE ExecutionFlow with 2 transactions
+        // First transfer: Safe amount (would succeed individually - less than balance)
+        // Second transfer: Insufficient amount (calculated to fail after first transfer)
+        // First transfer would succeed individually, second would fail after first
+        // Simulation will detect that after first transfer, second will fail
+        input: 'Send {{calc:safeTransferAmount(0.5, 0.01)}} WND to Alice, then send {{calc:insufficientBalance(0.5, 0.01)}} WND to Bob',
+      },
+    ],
+    expectations: [
+      {
+        responseType: 'execution',
+        expectedAgent: 'AssetTransferAgent',
+        expectedFunction: 'transfer',
+        // Should generate ExecutionPlan with 2 steps in same flow
+        // First step succeeds, second step fails simulation
+        expectedParams: {
+          recipient: 'Alice',
+        },
+      },
+    ],
+  },
 /*
   // Existential deposit edge cases
   { input: "Send 0.00001 DOT", shouldWarn: "below ED (0.01 DOT)" },

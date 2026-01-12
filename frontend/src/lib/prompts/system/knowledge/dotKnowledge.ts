@@ -63,7 +63,7 @@ export const STATIC_KNOWLEDGE_BASE: PolkadotKnowledge = {
       xcmSupported: true,
       xcmVersion: null, // XCM version negotiated dynamically via runtime
       xcmChannels: ['HydraDX', 'Acala', 'Moonbeam', 'Astar', 'Parallel'], // Note: Channels change frequently, query from chain metadata
-      notes: 'Main network for everyday activity after runtime 2.0.0 migration. Existential deposit: 0.01 DOT. Token lists are representative; live token registry should be queried.',
+      notes: 'Main network for everyday activity after runtime 2.0.0 migration. Existential deposit: 0.01 DOT. Token lists are representative; live token registry should be queried. Fees for Asset Hub transfers are paid on Asset Hub itself (not on Relay Chain), so users only need sufficient Asset Hub balance to send transfers.',
     },
     {
       id: 2034,
@@ -192,7 +192,7 @@ export const STATIC_KNOWLEDGE_BASE: PolkadotKnowledge = {
       feeUnit: 'DOT',
       transferFee: '~0.001 DOT',
       existentialDeposit: '0.01',
-      notes: 'Fees are weight-based and dynamic. Actual cost depends on on-chain weight formula and congestion. Lower existential deposit than Relay Chain. Main network for balances and regular usage after runtime 2.0.0 migration.',
+      notes: 'Fees are weight-based and dynamic. Actual cost depends on on-chain weight formula and congestion. Lower existential deposit than Relay Chain. Main network for balances and regular usage after runtime 2.0.0 migration. Transfers on Asset Hub pay fees on Asset Hub using Asset Hub balance - users do not need Relay Chain balance for Asset Hub transfers.',
     },
     {
       chain: 'HydraDX',

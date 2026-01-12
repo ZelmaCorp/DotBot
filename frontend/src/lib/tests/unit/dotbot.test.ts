@@ -556,9 +556,56 @@ describe('DotBot', () => {
         execute: jest.fn().mockResolvedValue(undefined),
       };
 
+      // Mock currentChat methods needed by prepareExecution
+      const mockSessions = {
+        relayChain: { endpoint: 'wss://test', api: mockRelayChainApi } as any,
+        assetHub: null as any,
+      };
+      // Create a mock execution message that will be returned by getDisplayMessages
+      // after addExecutionMessage is called
+      let executionMessageAdded = false;
+      const mockExecutionMessage = {
+        type: 'execution',
+        executionId: expect.any(String),
+        executionPlan: executionPlan,
+      };
+      
+      (dotbot.currentChat as any) = {
+        initializeExecutionSessions: jest.fn().mockResolvedValue(undefined),
+        getExecutionSessions: jest.fn().mockReturnValue(mockSessions),
+        addExecutionMessageEarly: jest.fn().mockResolvedValue(undefined),
+        addExecutionMessage: jest.fn().mockImplementation(async () => {
+          executionMessageAdded = true;
+        }),
+        updateExecutionInChat: jest.fn().mockResolvedValue(undefined),
+        getDisplayMessages: jest.fn().mockImplementation(() => {
+          // Return the execution message if it was added, otherwise empty array
+          return executionMessageAdded ? [mockExecutionMessage] : [];
+        }),
+        getHistory: jest.fn().mockReturnValue([]),
+        addUserMessage: jest.fn().mockResolvedValue(undefined),
+        addBotMessage: jest.fn().mockResolvedValue(undefined),
+        autoGenerateTitle: jest.fn().mockResolvedValue(undefined),
+        getExecutionArray: jest.fn().mockReturnValue(null),
+        setExecution: jest.fn(),
+        updateExecutionMessage: jest.fn().mockResolvedValue(undefined),
+        setExecutionArray: jest.fn(),
+      };
+
+      const mockOrchestrateExecutionArray = jest.fn().mockImplementation(async (plan, relayChainSession, assetHubSession, executionId) => {
+        // Call orchestrate with the plan (matching actual implementation)
+        const result = await mockOrchestrator.orchestrate(plan, {}, executionId);
+        if (!result.success) {
+          throw new Error('Orchestration failed');
+        }
+        return mockExecutionArray;
+      });
+      
       (dotbot as any).executionSystem = {
         getOrchestrator: jest.fn().mockReturnValue(mockOrchestrator),
         getExecutioner: jest.fn().mockReturnValue(mockExecutioner),
+        orchestrateExecutionArray: mockOrchestrateExecutionArray,
+        runSimulation: jest.fn().mockResolvedValue(undefined),
       };
 
       const result = await dotbot.chat('Send 2 DOT to Bob', {
@@ -568,7 +615,24 @@ describe('DotBot', () => {
       // chat() now only PREPARES execution (does not auto-execute)
       expect(result.plan).toBeDefined();
       expect(result.plan?.id).toBe('test-plan-1');
-      expect(mockOrchestrator.orchestrate).toHaveBeenCalledWith(executionPlan);
+      // orchestrateExecutionArray should be called (via prepareExecution)
+      // Note: If prepareExecution throws before reaching orchestrateExecutionArray,
+      // this will fail. Check that prepareExecution completed successfully.
+      expect(result.success).toBe(true);
+      expect(mockOrchestrateExecutionArray).toHaveBeenCalled();
+      // orchestrate is called via orchestrateExecutionArray, check that it was called with a plan matching our structure
+      expect(mockOrchestrator.orchestrate).toHaveBeenCalled();
+      const orchestrateCall = (mockOrchestrator.orchestrate as jest.Mock).mock.calls[0];
+      expect(orchestrateCall[0]).toMatchObject({
+        id: 'test-plan-1',
+        originalRequest: 'Send 2 DOT to Bob',
+        steps: expect.arrayContaining([
+          expect.objectContaining({
+            agentClassName: 'AssetTransferAgent',
+            functionName: 'transfer',
+          }),
+        ]),
+      });
       
       // Verify ExecutionMessage was added to chat
       const messages = dotbot.currentChat?.getDisplayMessages() || [];
@@ -722,8 +786,17 @@ describe('DotBot', () => {
         orchestrate: jest.fn().mockRejectedValue(new Error('Orchestration failed')),
       };
 
+      // Mock LLM to return helpful error message when asked about the error
+      mockCustomLLM.mockImplementation((message: string) => {
+        if (message.includes('I tried to prepare the transaction')) {
+          return Promise.resolve('I was unable to prepare your transaction due to an orchestration error. Please try again.');
+        }
+        return Promise.resolve(llmResponse);
+      });
+
       (dotbot as any).executionSystem = {
         getOrchestrator: jest.fn().mockReturnValue(mockOrchestrator),
+        orchestrateExecutionArray: jest.fn().mockRejectedValue(new Error('Orchestration failed')),
       };
 
       const result = await dotbot.chat('Test', {
@@ -733,7 +806,7 @@ describe('DotBot', () => {
       expect(result.executed).toBe(false);
       expect(result.success).toBe(false);
       expect(result.plan).toBeDefined();
-      expect(result.response).toContain('Unable to prepare your transaction');
+      expect(result.response).toContain('unable to prepare');
       expect(result.completed).toBe(0);
       expect(result.failed).toBe(1);
     });

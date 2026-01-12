@@ -33,6 +33,12 @@ export interface NetworkContext {
   
   /** Whether current network is a testnet */
   isTestnet?: boolean;
+  
+  /** Relay chain decimals from API registry (e.g., 10 for DOT, 12 for WND/KSM) */
+  relayChainDecimals?: number;
+  
+  /** Asset Hub decimals from API registry (usually same as relay chain, but can differ) */
+  assetHubDecimals?: number;
 }
 
 export interface BalanceContext {

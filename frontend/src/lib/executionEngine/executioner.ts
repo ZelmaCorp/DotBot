@@ -14,6 +14,7 @@ import {
   ExecutionItem,
   ExecutionOptions,
   ExecutionResult,
+  ExecutionStatus,
   SigningRequest,
   BatchSigningRequest,
 } from './types';
@@ -21,7 +22,9 @@ import { WalletAccount } from '../types/wallet';
 import { Signer } from './signers/types';
 import { BrowserWalletSigner } from './signers/browserSigner';
 import { RpcManager } from '../rpcManager';
-import { shouldSimulate, runSimulation, SimulationContext } from './simulation/executionSimulator';
+import { runSimulation } from './simulation/executionSimulator';
+import { isSimulationEnabled } from './simulation/simulationConfig';
+import { createSimulationContext } from './simulation/simulationHelpers';
 import {
   createSigningRequest,
   createBatchSigningRequest,
@@ -30,6 +33,7 @@ import {
   SigningContext,
 } from './signing/executionSigner';
 import { broadcastTransaction } from './broadcasting/executionBroadcaster';
+import { markItemAsFailed, markItemAsFailedAndThrow, extractErrorMessage } from './errorHandlers';
 
 /**
  * Executioner class
@@ -127,53 +131,74 @@ export class Executioner {
     options: ExecutionOptions = {}
   ): Promise<void> {
     this.ensureInitialized();
-
-    const {
-      continueOnError = false,
-      allowBatching = true,
-      timeout = 300000, // 5 minutes default
-      sequential = true,
-      autoApprove = false,
-    } = options;
     
+    const normalizedOptions = this.normalizeExecutionOptions(options);
     executionArray.setExecuting(true);
     
     try {
       const readyItems = executionArray.getReadyItems();
-      
       if (readyItems.length === 0) {
         executionArray.setExecuting(false);
         return;
       }
       
-      if (sequential) {
-        // Execute sequentially
-        await this.executeSequentially(
-          executionArray,
-          readyItems,
-          continueOnError,
-          timeout,
-          autoApprove
-        );
-      } else {
-        // Execute in parallel (only for non-extrinsic operations)
-        await this.executeParallel(
-          executionArray,
-          readyItems,
-          continueOnError,
-          timeout,
-          autoApprove
-        );
-      }
-      
-      // Check if we can batch any remaining extrinsics
-      if (allowBatching) {
-        await this.executeBatches(executionArray, timeout, autoApprove);
-      }
-      
+      await this.executeItems(executionArray, readyItems, normalizedOptions);
+      await this.executeBatchesIfEnabled(executionArray, normalizedOptions);
     } finally {
       executionArray.setExecuting(false);
       executionArray.notifyCompletion();
+    }
+  }
+  
+  /**
+   * Normalize execution options with defaults
+   */
+  private normalizeExecutionOptions(options: ExecutionOptions): Required<Pick<ExecutionOptions, 'continueOnError' | 'allowBatching' | 'timeout' | 'sequential' | 'autoApprove'>> {
+    return {
+      continueOnError: options.continueOnError ?? false,
+      allowBatching: options.allowBatching ?? true,
+      timeout: options.timeout ?? 300000, // 5 minutes default
+      sequential: options.sequential ?? true,
+      autoApprove: options.autoApprove ?? false,
+    };
+  }
+  
+  /**
+   * Execute items (sequentially or in parallel)
+   */
+  private async executeItems(
+    executionArray: ExecutionArray,
+    readyItems: ExecutionItem[],
+    options: Required<Pick<ExecutionOptions, 'continueOnError' | 'timeout' | 'sequential' | 'autoApprove'>>
+  ): Promise<void> {
+    if (options.sequential) {
+      await this.executeSequentially(
+        executionArray,
+        readyItems,
+        options.continueOnError,
+        options.timeout,
+        options.autoApprove
+      );
+    } else {
+      await this.executeParallel(
+        executionArray,
+        readyItems,
+        options.continueOnError,
+        options.timeout,
+        options.autoApprove
+      );
+    }
+  }
+  
+  /**
+   * Execute batches if enabled
+   */
+  private async executeBatchesIfEnabled(
+    executionArray: ExecutionArray,
+    options: Required<Pick<ExecutionOptions, 'allowBatching' | 'timeout' | 'autoApprove'>>
+  ): Promise<void> {
+    if (options.allowBatching) {
+      await this.executeBatches(executionArray, options.timeout, options.autoApprove);
     }
   }
   
@@ -203,9 +228,7 @@ export class Executioner {
       try {
         await this.executeItem(executionArray, item, timeout, autoApprove);
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        executionArray.updateStatus(item.id, 'failed', errorMessage);
-        
+        markItemAsFailed(executionArray, item.id, extractErrorMessage(error), 'EXECUTION_FAILED');
         if (!continueOnError) {
           throw error;
         }
@@ -230,8 +253,7 @@ export class Executioner {
     // Execute non-extrinsic items in parallel
     const promises = nonExtrinsicItems.map(item =>
       this.executeItem(executionArray, item, timeout, autoApprove).catch(error => {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        executionArray.updateStatus(item.id, 'failed', errorMessage);
+        markItemAsFailed(executionArray, item.id, extractErrorMessage(error), 'EXECUTION_FAILED');
         if (!continueOnError) {
           throw error;
         }
@@ -322,82 +344,136 @@ export class Executioner {
     timeout: number,
     autoApprove: boolean
   ): Promise<void> {
-    if (!this.api || !this.account) {
-      throw new Error('Executioner not initialized');
+    this.ensureInitialized();
+    
+    const { extrinsic, apiForExtrinsic } = this.validateExtrinsic(executionArray, item);
+    this.prepareItemForSigning(executionArray, item);
+    
+    if (!(await this.requestApprovalIfNeeded(executionArray, item, extrinsic, autoApprove))) {
+      return;
     }
 
+    executionArray.updateStatus(item.id, 'signing');
+    
+    try {
+      const signedExtrinsic = await this.signExtrinsicForItem(extrinsic, apiForExtrinsic);
+      await this.broadcastAndFinalize(executionArray, item, signedExtrinsic, apiForExtrinsic, timeout);
+    } catch (error) {
+      markItemAsFailed(executionArray, item.id, extractErrorMessage(error), 'EXECUTION_FAILED');
+      throw error;
+    }
+  }
+  
+  /**
+   * Validate extrinsic and get API instance
+   */
+  private validateExtrinsic(
+    executionArray: ExecutionArray,
+    item: ExecutionItem
+  ): { extrinsic: SubmittableExtrinsic<'promise'>; apiForExtrinsic: ApiPromise } {
     const { agentResult } = item;
     if (!agentResult.extrinsic) {
-      const errorMessage = 'No extrinsic found in agent result. Agent must create and return an extrinsic.';
-      executionArray.updateStatus(item.id, 'failed', errorMessage);
-      executionArray.updateResult(item.id, {
-        success: false,
-        error: errorMessage,
-        errorCode: 'NO_EXTRINSIC',
-      });
-      throw new Error(errorMessage);
+      markItemAsFailedAndThrow(
+        executionArray,
+        item.id,
+        'No extrinsic found in agent result. Agent must create and return an extrinsic.',
+        'NO_EXTRINSIC'
+      );
     }
 
     const extrinsic = agentResult.extrinsic;
     const apiForExtrinsic = this.getApiForExtrinsic(extrinsic);
 
-    if (shouldSimulate()) {
-      const simulationContext: SimulationContext = {
-        api: apiForExtrinsic,
-        accountAddress: this.account.address,
-        assetHubManager: this.assetHubManager,
-        relayChainManager: this.relayChainManager,
-        onStatusUpdate: this.onStatusUpdate,
-      };
-      await runSimulation(extrinsic, simulationContext, executionArray, item);
-    } else {
+    // Note: getApiForExtrinsic() already matches the extrinsic's registry to the correct API.
+    // With execution sessions, we use new API instances, but getApiForExtrinsic() ensures
+    // we use the API whose registry matches the extrinsic's registry.
+
+    return { extrinsic, apiForExtrinsic };
+  }
+  
+  /**
+   * Prepare item for signing (mark as ready if pending)
+   */
+  private prepareItemForSigning(executionArray: ExecutionArray, item: ExecutionItem): void {
+    // Simulation should have already run during prepareExecution() if enabled.
+    // If item is still 'pending' at this point, it means simulation was disabled
+    // or skipped - mark as ready to proceed with signing.
+    if (item.status === 'pending') {
       executionArray.updateStatus(item.id, 'ready');
     }
-
-    if (!autoApprove) {
-      const signingContext: SigningContext = {
-        accountAddress: this.account.address,
-        signer: this.signer,
-        signingRequestHandler: this.signingRequestHandler,
-      };
-      const approved = await createSigningRequest(item, extrinsic, signingContext);
-      if (!approved) {
-        executionArray.updateStatus(item.id, 'cancelled', 'User rejected transaction');
-        return;
-      }
+  }
+  
+  /**
+   * Request user approval if needed
+   */
+  private async requestApprovalIfNeeded(
+    executionArray: ExecutionArray,
+    item: ExecutionItem,
+    extrinsic: SubmittableExtrinsic<'promise'>,
+    autoApprove: boolean
+  ): Promise<boolean> {
+    if (autoApprove) {
+      return true;
     }
 
-    executionArray.updateStatus(item.id, 'signing');
+    const signingContext: SigningContext = {
+      accountAddress: this.account!.address,
+      signer: this.signer,
+      signingRequestHandler: this.signingRequestHandler,
+    };
+    const approved = await createSigningRequest(item, extrinsic, signingContext);
+    if (!approved) {
+      executionArray.updateStatus(item.id, 'cancelled', 'User rejected transaction');
+      return false;
+    }
+    return true;
+  }
+  
+  /**
+   * Sign extrinsic for item
+   */
+  private async signExtrinsicForItem(
+    extrinsic: SubmittableExtrinsic<'promise'>,
+    apiForExtrinsic: ApiPromise
+  ): Promise<SubmittableExtrinsic<'promise'>> {
+    const ss58Format = apiForExtrinsic.registry.chainSS58 || 0;
+    const encodedSenderAddress = await encodeAddressForChain(this.account!.address, ss58Format);
+    return await signExtrinsic(extrinsic, encodedSenderAddress, this.signer);
+  }
+  
+  /**
+   * Broadcast and finalize transaction
+   */
+  private async broadcastAndFinalize(
+    executionArray: ExecutionArray,
+    item: ExecutionItem,
+    signedExtrinsic: SubmittableExtrinsic<'promise'>,
+    apiForExtrinsic: ApiPromise,
+    timeout: number
+  ): Promise<void> {
+    executionArray.updateStatus(item.id, 'broadcasting');
+    const result = await broadcastTransaction(signedExtrinsic, apiForExtrinsic, timeout);
 
-    try {
-      const ss58Format = apiForExtrinsic.registry.chainSS58 || 0;
-      const encodedSenderAddress = await encodeAddressForChain(this.account.address, ss58Format);
-      const signedExtrinsic = await signExtrinsic(extrinsic, encodedSenderAddress, this.signer);
-
-      executionArray.updateStatus(item.id, 'broadcasting');
-      const result = await broadcastTransaction(signedExtrinsic, apiForExtrinsic, timeout);
-
-      if (result.success) {
-        executionArray.updateStatus(item.id, 'finalized');
-        executionArray.updateResult(item.id, result);
-      } else {
-        executionArray.updateStatus(item.id, 'failed', result.error);
-        executionArray.updateResult(item.id, result);
-        throw new Error(result.error || 'Transaction failed');
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      executionArray.updateStatus(item.id, 'failed', errorMessage);
-      executionArray.updateResult(item.id, {
-        success: false,
-        error: errorMessage,
-        errorCode: 'EXECUTION_FAILED',
-      });
-      throw error;
+    if (result.success) {
+      executionArray.updateStatus(item.id, 'finalized');
+      executionArray.updateResult(item.id, result);
+    } else {
+      executionArray.updateStatus(item.id, 'failed', result.error);
+      executionArray.updateResult(item.id, result);
+      throw new Error(result.error || 'Transaction failed');
     }
   }
 
-  private getApiForExtrinsic(extrinsic: SubmittableExtrinsic<'promise'>): ApiPromise {
+  /**
+   * Get API instance for extrinsic (public method)
+   * 
+   * Matches extrinsic's registry to the correct API instance.
+   * Used by simulation code to ensure metadata compatibility.
+   * 
+   * @param extrinsic Extrinsic to match
+   * @returns Matching API instance (or relay chain API as fallback)
+   */
+  public getApiForExtrinsic(extrinsic: SubmittableExtrinsic<'promise'>): ApiPromise {
     if (this.api && this.api.registry === extrinsic.registry) {
       return this.api;
     }
@@ -417,88 +493,28 @@ export class Executioner {
       throw new Error('Executioner not initialized');
     }
 
-    const extrinsics: SubmittableExtrinsic<'promise'>[] = [];
-    for (const item of items) {
-      if (!item.agentResult.extrinsic) {
-        const errorMessage = `Item ${item.id} has no extrinsic. Agent must create extrinsic before batching.`;
-        executionArray.updateStatus(item.id, 'failed', errorMessage);
-        executionArray.updateResult(item.id, {
-          success: false,
-          error: errorMessage,
-          errorCode: 'NO_EXTRINSIC_IN_BATCH_ITEM',
-        });
-        throw new Error(errorMessage);
-      }
-      extrinsics.push(item.agentResult.extrinsic);
-    }
-
-    const firstExtrinsic = extrinsics[0];
-    const apiForBatch = this.getApiForExtrinsic(firstExtrinsic);
-
-    const uniqueRegistries = new Set(extrinsics.map(ext => ext.registry));
-    if (uniqueRegistries.size > 1) {
-      const errorMessage = `Batch contains extrinsics with different registries. All batch items must use the same chain.`;
-      items.forEach(item => {
-        executionArray.updateStatus(item.id, 'failed', 'Mixed registries in batch');
-        executionArray.updateResult(item.id, {
-          success: false,
-          error: errorMessage,
-          errorCode: 'MIXED_REGISTRIES_IN_BATCH',
-        });
-      });
-      throw new Error(errorMessage);
-    }
-
+    const extrinsics = this.validateBatchItems(items, executionArray);
+    const apiForBatch = this.getApiForExtrinsic(extrinsics[0]);
+    this.validateBatchRegistries(extrinsics, items, executionArray);
+    
     if (!apiForBatch.isReady) {
       await apiForBatch.isReady;
     }
 
     const batchExtrinsic = apiForBatch.tx.utility.batchAll(extrinsics);
-
-    if (shouldSimulate()) {
-      const simulationContext: SimulationContext = {
-        api: apiForBatch,
-        accountAddress: this.account.address,
-        assetHubManager: this.assetHubManager,
-        relayChainManager: this.relayChainManager,
-        onStatusUpdate: this.onStatusUpdate,
-      };
-      for (const item of items) {
-        await runSimulation(batchExtrinsic, simulationContext, executionArray, item);
-      }
-    } else {
-      items.forEach(item => {
-        executionArray.updateStatus(item.id, 'ready');
-      });
-    }
+    await this.simulateBatchIfEnabled(batchExtrinsic, items, apiForBatch, executionArray);
     
-    if (!autoApprove) {
-      const signingContext: SigningContext = {
-        accountAddress: this.account!.address,
-        signer: this.signer,
-        batchSigningRequestHandler: this.batchSigningRequestHandler,
-      };
-      const approved = await createBatchSigningRequest(items, batchExtrinsic, signingContext);
-      if (!approved) {
-        items.forEach(item => {
-          executionArray.updateStatus(item.id, 'cancelled', 'User rejected batch transaction');
-        });
-        return;
-      }
+    if (!autoApprove && !(await this.requestBatchApproval(items, batchExtrinsic, executionArray))) {
+      return;
     }
 
-    items.forEach(item => {
-      executionArray.updateStatus(item.id, 'signing');
-    });
+    this.updateBatchStatus(items, 'signing', executionArray);
 
     const ss58Format = apiForBatch.registry.chainSS58 || 0;
     const encodedSenderAddress = await encodeAddressForChain(this.account!.address, ss58Format);
     const signedBatchExtrinsic = await signExtrinsic(batchExtrinsic, encodedSenderAddress, this.signer);
 
-    items.forEach(item => {
-      executionArray.updateStatus(item.id, 'broadcasting');
-    });
-
+    this.updateBatchStatus(items, 'broadcasting', executionArray);
     const result = await broadcastTransaction(signedBatchExtrinsic, apiForBatch, timeout);
     
     if (result.success) {
@@ -513,6 +529,112 @@ export class Executioner {
       });
       throw new Error(result.error || 'Batch transaction failed');
     }
+  }
+  
+  /**
+   * Validate batch items and extract extrinsics
+   */
+  private validateBatchItems(
+    items: ExecutionItem[],
+    executionArray: ExecutionArray
+  ): SubmittableExtrinsic<'promise'>[] {
+    const extrinsics: SubmittableExtrinsic<'promise'>[] = [];
+    for (const item of items) {
+      if (!item.agentResult.extrinsic) {
+        markItemAsFailedAndThrow(
+          executionArray,
+          item.id,
+          `Item ${item.id} has no extrinsic. Agent must create extrinsic before batching.`,
+          'NO_EXTRINSIC_IN_BATCH_ITEM'
+        );
+      }
+      extrinsics.push(item.agentResult.extrinsic);
+    }
+    return extrinsics;
+  }
+  
+  /**
+   * Validate all batch items use the same registry
+   */
+  private validateBatchRegistries(
+    extrinsics: SubmittableExtrinsic<'promise'>[],
+    items: ExecutionItem[],
+    executionArray: ExecutionArray
+  ): void {
+    const uniqueRegistries = new Set(extrinsics.map(ext => ext.registry));
+    if (uniqueRegistries.size > 1) {
+      const errorMessage = `Batch contains extrinsics with different registries. All batch items must use the same chain.`;
+      items.forEach(item => {
+        markItemAsFailed(executionArray, item.id, errorMessage, 'MIXED_REGISTRIES_IN_BATCH');
+      });
+      throw new Error(errorMessage);
+    }
+  }
+  
+  /**
+   * Simulate batch if simulation is enabled
+   */
+  private async simulateBatchIfEnabled(
+    batchExtrinsic: SubmittableExtrinsic<'promise'>,
+    items: ExecutionItem[],
+    apiForBatch: ApiPromise,
+    executionArray: ExecutionArray
+  ): Promise<void> {
+    if (isSimulationEnabled()) {
+      // Note: Executioner doesn't have access to ExecutionSession, so we pass undefined for sessionEndpoint
+      // This will fall back to using manager endpoints (legacy behavior)
+      const simulationContext = createSimulationContext(
+        apiForBatch,
+        this.account!.address,
+        this.assetHubManager,
+        this.relayChainManager,
+        undefined, // sessionEndpoint - not available in Executioner context
+        this.onStatusUpdate
+      );
+      for (const item of items) {
+        await runSimulation(batchExtrinsic, simulationContext, executionArray, item);
+      }
+    } else {
+      items.forEach(item => {
+        executionArray.updateStatus(item.id, 'ready');
+      });
+    }
+  }
+  
+  /**
+   * Request batch approval from user
+   */
+  private async requestBatchApproval(
+    items: ExecutionItem[],
+    batchExtrinsic: SubmittableExtrinsic<'promise'>,
+    executionArray: ExecutionArray
+  ): Promise<boolean> {
+    const signingContext: SigningContext = {
+      accountAddress: this.account!.address,
+      signer: this.signer,
+      batchSigningRequestHandler: this.batchSigningRequestHandler,
+    };
+    const approved = await createBatchSigningRequest(items, batchExtrinsic, signingContext);
+    if (!approved) {
+      items.forEach(item => {
+        executionArray.updateStatus(item.id, 'cancelled', 'User rejected batch transaction');
+      });
+      return false;
+    }
+    return true;
+  }
+  
+  /**
+   * Update status for all batch items
+   */
+  private updateBatchStatus(
+    items: ExecutionItem[],
+    status: ExecutionStatus,
+    executionArray: ExecutionArray
+  ): void {
+    items.forEach(item => {
+      executionArray.updateStatus(item.id, status);
+    });
   }
   
   /**

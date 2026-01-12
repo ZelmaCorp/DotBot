@@ -241,6 +241,46 @@ export function insufficientBalanceScenario(config: {
 }
 
 /**
+ * Calculate insufficient balance amount for multi-transaction scenario
+ * 
+ * Given:
+ * - initialBalance: Starting balance (e.g., "1.0 WND")
+ * - firstTransferAmount: Amount of first transfer (e.g., "0.1 WND")
+ * - estimatedFeePerTx: Estimated fee per transaction (default: 0.01 WND)
+ * 
+ * Returns: Amount that would cause insufficient balance error
+ * 
+ * Formula:
+ * remainingBalance = initialBalance - firstTransferAmount - estimatedFeePerTx
+ * insufficientAmount = remainingBalance + smallAmount (to ensure it fails)
+ */
+export function calculateInsufficientBalanceAmount(
+  initialBalance: string,
+  firstTransferAmount: string,
+  estimatedFeePerTx: string = '0.01'
+): string {
+  // Parse amounts (assumes format like "1.0 WND" or "0.1 WND")
+  const parseAmount = (amountStr: string): number => {
+    const match = amountStr.match(/^([\d.]+)/);
+    return match ? parseFloat(match[1]) : 0;
+  };
+
+  const initial = parseAmount(initialBalance);
+  const firstTransfer = parseAmount(firstTransferAmount);
+  const fee = parseAmount(estimatedFeePerTx);
+
+  // Calculate remaining balance after first transfer
+  const remainingBalance = initial - firstTransfer - fee;
+
+  // Calculate insufficient amount: remaining + small buffer to ensure failure
+  // Add 0.01 more than remaining to guarantee insufficient balance error
+  const insufficientAmount = remainingBalance + 0.01;
+
+  // Round to 2 decimal places and return as string
+  return insufficientAmount.toFixed(2);
+}
+
+/**
  * Adversarial/security scenario
  */
 export function adversarialScenario(config: {

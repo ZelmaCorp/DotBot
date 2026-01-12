@@ -46,6 +46,9 @@ describe('Executioner', () => {
   let mockExtrinsic: Partial<SubmittableExtrinsic<'promise'>>;
 
   beforeEach(() => {
+    // Disable simulation by default for tests
+    const { disableSimulation } = require('../../../executionEngine/simulation/simulationConfig');
+    disableSimulation();
     executioner = new Executioner();
     executionArray = new ExecutionArray();
 

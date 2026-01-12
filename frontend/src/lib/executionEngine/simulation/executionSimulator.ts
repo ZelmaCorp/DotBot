@@ -6,23 +6,20 @@
 
 import { ApiPromise } from '@polkadot/api';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
+import { encodeAddress, decodeAddress } from '@polkadot/util-crypto';
 import { ExecutionItem, ExecutionResult } from '../types';
 import { ExecutionArray } from '../executionArray';
 import { RpcManager, RpcEndpoints } from '../../rpcManager';
+import { markItemAsFailed } from '../errorHandlers';
+import { simulateTransaction, isChopsticksAvailable } from '../../services/simulation';
 
 export interface SimulationContext {
   api: ApiPromise;
   accountAddress: string;
   assetHubManager: RpcManager | null;
   relayChainManager: RpcManager | null;
+  sessionEndpoint?: string; // CRITICAL: Endpoint the session API is connected to (for metadata consistency)
   onStatusUpdate?: (status: any) => void;
-}
-
-/**
- * Check if simulation should be enabled
- */
-export function shouldSimulate(): boolean {
-  return false;
 }
 
 /**
@@ -34,17 +31,75 @@ export async function runSimulation(
   executionArray: ExecutionArray,
   item: ExecutionItem
 ): Promise<void> {
-  try {
-    const { simulateTransaction, isChopsticksAvailable } = await import('../../services/simulation');
+  console.log('[Simulation] Starting simulation for item:', {
+    itemId: item.id,
+    description: item.description,
+    status: item.status,
+    method: `${extrinsic.method.section}.${extrinsic.method.method}`
+  });
 
-    if (await isChopsticksAvailable()) {
-      await runChopsticksSimulation(extrinsic, context, executionArray, item, simulateTransaction);
+  try {
+    // Set initial simulation status IMMEDIATELY so UI can show progress
+    console.log('[Simulation] Setting initial simulation status for item:', item.id);
+    executionArray.updateSimulationStatus(item.id, {
+      phase: 'initializing',
+      message: 'Initializing simulation...',
+      progress: 0,
+    });
+
+    // Create a callback that updates this specific item's simulation status
+    const itemSimulationCallback = (status: any) => {
+      console.log('[Simulation] Simulation status update for item:', {
+        itemId: item.id,
+        phase: status.phase,
+        message: status.message,
+        progress: status.progress
+      });
+      executionArray.updateSimulationStatus(item.id, status);
+      // Also call the original callback if provided (for backward compatibility)
+      if (context.onStatusUpdate) {
+        context.onStatusUpdate(status);
+      }
+    };
+
+    // Create new context with item-specific callback
+    const itemContext: SimulationContext = {
+      ...context,
+      onStatusUpdate: itemSimulationCallback,
+    };
+
+    const chopsticksAvailable = await isChopsticksAvailable();
+    console.log('[Simulation] Simulation method:', chopsticksAvailable ? 'Chopsticks (full runtime validation)' : 'paymentInfo fallback (structure only)');
+
+    if (chopsticksAvailable) {
+      // Use Chopsticks for full runtime execution simulation
+      await runChopsticksSimulation(extrinsic, itemContext, executionArray, item, simulateTransaction);
     } else {
-      await runPaymentInfoValidation(extrinsic, context);
+      // Fallback: Only use paymentInfo if Chopsticks is completely unavailable
+      // This should be rare - only in environments where @acala-network/chopsticks-core can't be imported
+      console.warn('[Simulation] Chopsticks unavailable - using paymentInfo fallback (limited validation)');
+      await runPaymentInfoValidation(extrinsic, itemContext);
     }
 
+    // Mark simulation as complete
+    const currentSimStatus = executionArray.getItem(item.id)?.simulationStatus;
+    if (currentSimStatus) {
+      console.log('[Simulation] Simulation completed successfully for item:', item.id);
+      executionArray.updateSimulationStatus(item.id, {
+        ...currentSimStatus,
+        phase: 'complete',
+        message: 'Simulation completed successfully',
+      });
+    }
+
+    console.log('[Simulation] Updating item status to ready:', item.id);
     executionArray.updateStatus(item.id, 'ready');
   } catch (error) {
+    console.error('[Simulation] ❌ Simulation failed for item:', {
+      itemId: item.id,
+      description: item.description,
+      error: error instanceof Error ? error.message : String(error)
+    });
     handleSimulationError(error, executionArray, item);
   }
 }
@@ -59,9 +114,19 @@ async function runChopsticksSimulation(
   const isAssetHub = context.api.registry.chainSS58 === 0;
   const manager = isAssetHub ? context.assetHubManager : context.relayChainManager;
 
-  const rpcEndpoints = getRpcEndpoints(manager, isAssetHub);
+  // CRITICAL FIX: Use session endpoint first (for metadata consistency), fallback to manager endpoints
+  let rpcEndpoints: string[];
+  if (context.sessionEndpoint) {
+    // Use session endpoint first, then manager endpoints as fallback
+    const managerEndpoints = getRpcEndpoints(manager, isAssetHub);
+    rpcEndpoints = [context.sessionEndpoint, ...managerEndpoints.filter(e => e !== context.sessionEndpoint)];
+    console.log(`[Simulation] Using session endpoint for metadata consistency: ${context.sessionEndpoint}`);
+  } else {
+    // Fallback to manager endpoints (legacy behavior)
+    rpcEndpoints = getRpcEndpoints(manager, isAssetHub);
+    console.warn('[Simulation] ⚠️ No session endpoint provided, using manager endpoints (may cause metadata mismatch)');
+  }
 
-  const { encodeAddress, decodeAddress } = await import('@polkadot/util-crypto');
   const senderPublicKey = decodeAddress(context.accountAddress);
   const senderSS58Format = context.api.registry.chainSS58 || 0;
   const encodedSender = encodeAddress(senderPublicKey, senderSS58Format);
@@ -81,31 +146,55 @@ async function runChopsticksSimulation(
       .replace(/^Simulation failed: /, '')
       .replace(/^Transaction validation failed: /, '');
 
-    executionArray.updateStatus(item.id, 'failed', 'Transaction simulation failed');
-    executionArray.updateResult(item.id, {
-      success: false,
-      error: cleanError,
-      errorCode: 'SIMULATION_FAILED',
-      rawError: errorMessage,
-    });
+    // Update simulation status to show error
+    const currentSimStatus = executionArray.getItem(item.id)?.simulationStatus;
+    if (currentSimStatus) {
+      executionArray.updateSimulationStatus(item.id, {
+        ...currentSimStatus,
+        phase: 'error',
+        message: `Simulation failed: ${cleanError}`,
+        result: {
+          success: false,
+          error: cleanError,
+          wouldSucceed: false,
+        },
+      });
+    }
+
+    markItemAsFailed(executionArray, item.id, cleanError, 'SIMULATION_FAILED', errorMessage);
 
     throw new Error(cleanError);
   }
 }
 
+/**
+ * Fallback validation using paymentInfo (ONLY when Chopsticks is not available)
+ * 
+ * WARNING: This is a minimal validation that only checks if the extrinsic structure is valid.
+ * It does NOT execute the transaction or validate runtime behavior.
+ * 
+ * This should ONLY be used when:
+ * - @acala-network/chopsticks-core cannot be imported (e.g., in some environments)
+ * - Chopsticks simulation is explicitly disabled
+ * 
+ * For proper transaction validation, use Chopsticks simulation instead.
+ */
 async function runPaymentInfoValidation(
   extrinsic: SubmittableExtrinsic<'promise'>,
   context: SimulationContext
 ): Promise<void> {
+  console.warn('[Simulation] ⚠️ Using paymentInfo fallback - this only validates structure, not runtime behavior');
   try {
-    const { encodeAddress, decodeAddress } = await import('@polkadot/util-crypto');
     const senderPublicKey = decodeAddress(context.accountAddress);
     const senderSS58Format = context.api.registry.chainSS58 || 0;
     const encodedSenderAddress = encodeAddress(senderPublicKey, senderSS58Format);
 
+    // This only checks if the extrinsic can be decoded and fee can be estimated
+    // It does NOT validate that the transaction will succeed on-chain
     await extrinsic.paymentInfo(encodedSenderAddress);
   } catch {
     // paymentInfo can fail with wasm trap - continue without validation
+    // This is expected in some cases and doesn't mean the transaction is invalid
   }
 }
 
@@ -160,6 +249,27 @@ function handleSimulationError(
 
   const isSimulationFailure = errorLower.includes('simulation failed') || errorLower.includes('chopsticks');
 
+  const finalError = isRuntimePanic
+    ? 'Runtime validation panic: Transaction shape is invalid for this chain'
+    : isSimulationFailure
+      ? `Simulation failed: ${errorMessage}`
+      : `Validation failed: ${errorMessage}`;
+
+  // Update simulation status to show error
+  const currentSimStatus = executionArray.getItem(item.id)?.simulationStatus;
+  if (currentSimStatus) {
+    executionArray.updateSimulationStatus(item.id, {
+      ...currentSimStatus,
+      phase: 'error',
+      message: finalError,
+      result: {
+        success: false,
+        error: finalError,
+        wouldSucceed: false,
+      },
+    });
+  }
+
   executionArray.updateStatus(
     item.id,
     'failed',
@@ -167,11 +277,7 @@ function handleSimulationError(
   );
   executionArray.updateResult(item.id, {
     success: false,
-    error: isRuntimePanic
-      ? 'Runtime validation panic: Transaction shape is invalid for this chain'
-      : isSimulationFailure
-        ? `Simulation failed: ${errorMessage}`
-        : `Validation failed: ${errorMessage}`,
+    error: finalError,
     errorCode: isRuntimePanic ? 'RUNTIME_VALIDATION_PANIC' : isSimulationFailure ? 'SIMULATION_FAILED' : 'VALIDATION_FAILED',
     rawError: errorMessage,
   });

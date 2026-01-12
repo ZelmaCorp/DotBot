@@ -197,6 +197,10 @@ executionEngine/
 **Key Services:**
 - **RpcManager**: Multi-endpoint management with health monitoring, failover, and **network-awareness**
 - **Chopsticks**: Runtime simulation for pre-execution validation (network-configurable)
+- **SettingsManager**: Centralized settings management with persistence (simulation config, extensible for future settings)
+- **SequentialSimulation**: Multi-transaction simulation service (sequential execution on single fork for state tracking)
+- **SettingsManager**: Centralized settings management with persistence (simulation config, future: UI preferences, etc.)
+- **SequentialSimulation**: Multi-transaction simulation with state tracking (uses single fork for sequential state)
 
 **RpcManager Network Features:**
 - Network-scoped storage keys (health tracking isolated per network)
@@ -646,24 +650,47 @@ Simulation is **optional** and can be enabled/disabled. When enabled, all extrin
 
 **Implementation:**
 ```typescript
-// Simulation control (executionSimulator.ts)
-export function shouldSimulate(): boolean {
-  return false;  // Toggle to enable/disable
-}
+// Simulation control via SettingsManager (settingsManager.ts)
+import { isSimulationEnabled } from './executionEngine/simulation/simulationConfig';
 
 // Status-aware initialization (executionArray.ts, utils.ts)
-const initialStatus = shouldSimulate() ? 'pending' : 'ready';
+const initialStatus = isSimulationEnabled() ? 'pending' : 'ready';
 
-// Execution flow (executioner.ts)
-if (shouldSimulate()) {
+// Execution flow (executionSystem.ts, executioner.ts)
+if (isSimulationEnabled()) {
   await runSimulation(extrinsic, context, executionArray, item);
 } else {
   executionArray.updateStatus(item.id, 'ready');
 }
+
+// UI control (SettingsModal.tsx)
+import { getSimulationConfig, updateSimulationConfig } from './services/settingsManager';
+const config = getSimulationConfig();
+updateSimulationConfig({ enabled: true }); // Enable/disable via UI
+```
+
+**Settings Management:**
+- Settings persist to localStorage via `SettingsManager` singleton
+- Default: `enabled: true` (simulation enabled by default)
+- UI toggle available in SettingsModal
+- All components use `isSimulationEnabled()` to check current state
+
+**Multi-Transaction Simulation:**
+For flows with multiple transactions, simulation uses sequential execution on a single fork:
+```typescript
+// ExecutionSystem automatically detects multi-transaction flows
+if (items.length > 1) {
+  // Sequential simulation on single fork - each transaction sees state from previous ones
+  await this.simulateMultipleItemsSequentially(...);
+} else {
+  // Single transaction - standard simulation
+  await this.simulateItem(...);
+}
 ```
 
 **History:**
-- v0.2.0 (PR #49, January 2026): Made simulation optional with status-aware initialization
+- v0.2.0 (January 2026): Made simulation optional with status-aware initialization
+- v0.2.1 (January 2026): Added SettingsManager for persistent configuration, UI toggle, sequential multi-transaction simulation
 - v0.1.0 (January 2026): Initial implementation (simulation always attempted)
 
 ---

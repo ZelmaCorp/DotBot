@@ -12,6 +12,8 @@ import { SystemContext } from './context/types';
 import { createVersionedPrompt } from './version';
 import { formatPolkadotKnowledgeBase } from './knowledge/dotKnowledge';
 import { formatKnowledgeBaseForNetwork } from './knowledge';
+import { getNetworkDecimals } from './knowledge/networkUtils';
+import { isSimulationEnabled } from '../../executionEngine/simulation/simulationConfig';
 
 /**
  * Format agent definitions for inclusion in system prompt
@@ -117,27 +119,42 @@ function formatAgentDefinitions(): string {
 }
 
 /**
- * Convert Planck to DOT (1 DOT = 10^10 Planck)
+ * Convert Planck to human-readable format with correct decimals
+ * 
+ * CRITICAL: Different networks have different decimals:
+ * - Polkadot: 10 decimals (DOT)
+ * - Kusama: 12 decimals (KSM)
+ * - Westend: 12 decimals (WND)
+ * - Asset Hub (all networks): Uses the network's native token decimals
  * 
  * @param planck Balance in Planck (as string or number)
- * @returns Balance in DOT as a formatted string
+ * @param decimals Number of decimals for the token (default: 10 for DOT)
+ * @param tokenSymbol Optional token symbol for display
+ * @returns Balance as a formatted string
  */
-function formatPlanckToDot(planck: string | number): string {
-  const PLANCK_PER_DOT = 10_000_000_000; // 10^10
-  const planckBigInt = typeof planck === 'string' ? BigInt(planck) : BigInt(planck);
+function formatPlanckToDot(planck: string | number, decimals: number = 10, tokenSymbol?: string): string {
+  // Convert planck to BigInt (works for both string and number)
+  const planckBigInt = BigInt(planck);
   
-  // Convert to DOT (with precision)
-  const dotInteger = planckBigInt / BigInt(PLANCK_PER_DOT);
-  const dotRemainder = planckBigInt % BigInt(PLANCK_PER_DOT);
+  // Calculate divisor: 10^decimals
+  // Use a more compatible approach for BigInt exponentiation
+  let divisor = BigInt(1);
+  for (let i = 0; i < decimals; i++) {
+    divisor = divisor * BigInt(10);
+  }
   
-  // Format with up to 4 decimal places (remove trailing zeros)
-  const decimalPart = dotRemainder.toString().padStart(10, '0');
-  const significantDecimals = decimalPart.slice(0, 4).replace(/0+$/, '');
+  // Convert to human-readable format
+  const whole = planckBigInt / divisor;
+  const remainder = planckBigInt % divisor;
+  
+  // Format with appropriate decimal places (remove trailing zeros)
+  const decimalPart = remainder.toString().padStart(decimals, '0');
+  const significantDecimals = decimalPart.replace(/0+$/, '');
   
   if (significantDecimals) {
-    return `${dotInteger}.${significantDecimals}`;
+    return `${whole}.${significantDecimals}`;
   }
-  return dotInteger.toString();
+  return whole.toString();
 }
 
 /**
@@ -165,26 +182,32 @@ function formatContext(context?: SystemContext): string {
   
   // Balance context
   if (context.balance) {
-    // Convert total balance from Planck to DOT
-    const totalDot = formatPlanckToDot(context.balance.total);
+    // Get decimals from context (from API registry) or fallback to network defaults
+    // Prefer API registry values as they're always correct for the actual chain
+    const relayChainDecimals = context.network.relayChainDecimals ?? getNetworkDecimals(context.network.network);
+    const assetHubDecimals = context.network.assetHubDecimals ?? relayChainDecimals;
+    
+    // Convert total balance from Planck to native token units (use relay chain decimals for total)
+    const totalDot = formatPlanckToDot(context.balance.total, relayChainDecimals);
     prompt += `**Total Balance**: ${totalDot} ${context.balance.symbol}\n\n`;
     
     // Relay Chain balance (convert from Planck to native token units)
     prompt += `**Relay Chain** (${context.network.rpcEndpoint || 'Connected'}):\n`;
-    const relayFreeDot = formatPlanckToDot(context.balance.relayChain.free);
+    const relayFreeDot = formatPlanckToDot(context.balance.relayChain.free, relayChainDecimals);
     prompt += `  - Free: ${relayFreeDot} ${context.balance.symbol}\n`;
     if (context.balance.relayChain.reserved !== '0') {
-      const relayReservedDot = formatPlanckToDot(context.balance.relayChain.reserved);
+      const relayReservedDot = formatPlanckToDot(context.balance.relayChain.reserved, relayChainDecimals);
       prompt += `  - Reserved: ${relayReservedDot} ${context.balance.symbol}\n`;
     }
     
     // Asset Hub balance (convert from Planck to native token units)
+    // Use Asset Hub decimals if available (may differ from relay chain)
     if (context.balance.assetHub) {
       prompt += `\n**Asset Hub** (Connected):\n`;
-      const assetHubFreeDot = formatPlanckToDot(context.balance.assetHub.free);
+      const assetHubFreeDot = formatPlanckToDot(context.balance.assetHub.free, assetHubDecimals);
       prompt += `  - Free: ${assetHubFreeDot} ${context.balance.symbol}\n`;
       if (context.balance.assetHub.reserved !== '0') {
-        const assetHubReservedDot = formatPlanckToDot(context.balance.assetHub.reserved);
+        const assetHubReservedDot = formatPlanckToDot(context.balance.assetHub.reserved, assetHubDecimals);
         prompt += `  - Reserved: ${assetHubReservedDot} ${context.balance.symbol}\n`;
       }
     } else {
@@ -193,7 +216,24 @@ function formatContext(context?: SystemContext): string {
     
     prompt += `\n**CRITICAL**: All balance values above are in ${context.balance.symbol} denomination. NEVER show Planck values to users.\n`;
     prompt += `**CRITICAL**: When displaying balances to users, ALWAYS use ${context.balance.symbol} (not Planck). Example: "12.5 ${context.balance.symbol}" not raw Planck values.\n`;
-    prompt += `Note: Users can have ${context.balance.symbol} on both Relay Chain and Asset Hub.\n`;
+    prompt += `\nNote: Users can have ${context.balance.symbol} on both Relay Chain and Asset Hub. Fee payment rules:\n`;
+    prompt += `- Asset Hub transfers pay fees on Asset Hub using Asset Hub balance (Relay Chain balance not needed)\n`;
+    prompt += `- Relay Chain transfers pay fees on Relay Chain using Relay Chain balance\n`;
+    prompt += `- Only suggest XCM transfers when user explicitly wants to move funds between chains, not for fee payment\n`;
+    prompt += `- For transfers, default to Asset Hub (most common after Polkadot 2.0 migration). Use Relay Chain only if user explicitly requests it.\n`;
+  }
+  
+  // Simulation settings
+  const simulationEnabled = isSimulationEnabled();
+  prompt += `**Transaction Simulation**: ${simulationEnabled ? 'Enabled' : 'Disabled'}\n`;
+  if (simulationEnabled) {
+    prompt += `  - Transactions will be simulated using Chopsticks before execution\n`;
+    prompt += `  - Simulation provides safety by catching errors before spending fees\n`;
+    prompt += `  - Adds some latency but greatly improves user confidence\n`;
+  } else {
+    prompt += `  - Transactions will be sent directly to wallet for signing\n`;
+    prompt += `  - No pre-execution validation (faster but less safe)\n`;
+    prompt += `  - User requested to skip simulation for speed\n`;
   }
   
   prompt += '\n';

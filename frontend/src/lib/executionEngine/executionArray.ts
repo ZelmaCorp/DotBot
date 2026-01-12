@@ -14,8 +14,9 @@ import {
   ProgressCallback,
   ErrorCallback,
   CompletionCallback,
+  SimulationStatus,
 } from './types';
-import { shouldSimulate } from './simulation/executionSimulator';
+import { getInitialExecutionStatus } from './utils';
 
 /**
  * Execution Array class
@@ -44,9 +45,7 @@ export class ExecutionArray {
    */
   add(agentResult: AgentResult): string {
     const id = this.generateId();
-    // If simulation is disabled, items start as 'ready' (ready for signing)
-    // If simulation is enabled, items start as 'pending' (will be simulated first)
-    const initialStatus = shouldSimulate() ? 'pending' : 'ready';
+    const initialStatus = getInitialExecutionStatus();
     const item: ExecutionItem = {
       id,
       agentResult,
@@ -217,6 +216,23 @@ export class ExecutionArray {
       this.notifyError(item, new Error(error));
     }
   }
+
+  /**
+   * Update simulation status for an execution item
+   */
+  updateSimulationStatus(id: string, simulationStatus: SimulationStatus | undefined): void {
+    const item = this.getItem(id);
+    if (!item) {
+      console.warn('[ExecutionArray] ⚠️ Cannot update simulation status - item not found:', id);
+      return;
+    }
+    
+    item.simulationStatus = simulationStatus;
+    
+    // Notify callbacks so UI updates
+    this.notifyStatus(item);
+    this.notifyProgress();
+  }
   
   /**
    * Update execution result for an item
@@ -380,11 +396,11 @@ export class ExecutionArray {
    * Notify status callbacks
    */
   private notifyStatus(item: ExecutionItem): void {
-    this.statusCallbacks.forEach(callback => {
+    this.statusCallbacks.forEach((callback) => {
       try {
         callback(item);
       } catch (error) {
-        console.error('Error in status callback:', error);
+        console.error('[ExecutionArray] ❌ Error in status callback:', error);
       }
     });
   }
@@ -394,11 +410,11 @@ export class ExecutionArray {
    */
   private notifyProgress(): void {
     const state = this.getState();
-    this.progressCallbacks.forEach(callback => {
+    this.progressCallbacks.forEach((callback) => {
       try {
         callback(state);
       } catch (error) {
-        console.error('Error in progress callback:', error);
+        console.error('[ExecutionArray] ❌ Error in progress callback:', error);
       }
     });
   }

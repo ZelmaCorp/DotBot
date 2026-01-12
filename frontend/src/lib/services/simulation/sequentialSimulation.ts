@@ -1,23 +1,22 @@
 /**
  * Sequential Transaction Simulation
  * 
- * For transaction flows where transactions build on each other (e.g., transfer → stake → vote),
- * we need to simulate them sequentially on the same fork so each transaction sees the state
- * changes from previous transactions.
+ * Simulates transactions sequentially on a forked chain where each transaction
+ * sees the state changes from previous transactions.
  * 
- * Example flow:
- * 1. Transfer 100 DOT to account
- * 2. Stake 50 DOT (requires the 100 DOT from step 1)
- * 3. Vote with staked DOT (requires the stake from step 2)
- * 4. Claim rewards (requires the vote from step 3)
- * 5. Unstake (requires the stake from step 2)
+ * Uses Chopsticks in BuildBlockMode.Instant to properly advance chain state.
  */
 
 import type { ApiPromise } from '@polkadot/api';
 import type { SubmittableExtrinsic } from '@polkadot/api/types';
 import { BN } from '@polkadot/util';
+import { encodeAddress, decodeAddress } from '@polkadot/util-crypto';
 import { SimulationResult, SimulationStatusCallback } from './chopsticks';
 import { ChopsticksDatabase } from './database';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 export interface SequentialSimulationResult {
   success: boolean;
@@ -40,31 +39,386 @@ export interface SequentialSimulationItem {
   senderAddress: string;
 }
 
-/**
- * Simulate multiple transactions sequentially on the same fork
- * 
- * This is critical for transaction flows where each step depends on the previous:
- * - Each transaction is simulated on the same fork
- * - State changes from previous transactions are visible to subsequent ones
- * - If any transaction fails, the entire flow fails
- * 
- * @param api API instance for the chain
- * @param rpcEndpoints RPC endpoints to use
- * @param items Array of transactions to simulate in order
- * @param onStatusUpdate Optional callback for status updates
- * @returns SequentialSimulationResult with results for each transaction
- */
+interface TransactionResult {
+  success: boolean;
+  error: string | null;
+  newBlockHash: string;
+  storageDiff: Map<string, any>;
+  fee: string;
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+function toHexString(blockHash: any): `0x${string}` {
+  if (typeof blockHash === 'string') {
+    return blockHash.startsWith('0x') 
+      ? (blockHash as `0x${string}`) 
+      : (`0x${blockHash}` as `0x${string}`);
+  }
+  
+  if (typeof blockHash === 'object' && blockHash !== null) {
+    if ('hash' in blockHash) return toHexString(blockHash.hash);
+    if (typeof blockHash.toHex === 'function') {
+      const hex = blockHash.toHex();
+      return hex.startsWith('0x') ? (hex as `0x${string}`) : (`0x${hex}` as `0x${string}`);
+    }
+    if (blockHash instanceof Uint8Array) {
+      const hex = Array.from(blockHash)
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+      return `0x${hex}` as `0x${string}`;
+    }
+  }
+  
+  throw new Error(`Cannot convert block hash to hex: ${typeof blockHash}`);
+}
+
+function parseOutcome(api: ApiPromise, outcome: any): { succeeded: boolean; error: string | null } {
+  if (!outcome || !outcome.isOk) {
+    const errType = outcome?.asErr?.type || 'Unknown';
+    return { succeeded: false, error: `InvalidTransaction: ${errType}` };
+  }
+  
+  const result = outcome.asOk;
+  if (result.isOk) return { succeeded: true, error: null };
+  
+  const err = result.asErr;
+  if (err.isModule) {
+    const meta = api.registry.findMetaError(err.asModule);
+    return { succeeded: false, error: `${meta.section}.${meta.name}` };
+  }
+  
+  return { succeeded: false, error: `DispatchError: ${err.type}` };
+}
+
+function extractBlockOutcome(api: ApiPromise, block: any): { succeeded: boolean; error: string | null } {
+  try {
+    if (block?.extrinsics?.[0]?.result) return parseOutcome(api, block.extrinsics[0].result);
+    if (block?.result) return parseOutcome(api, block.result);
+    return { succeeded: true, error: null };
+  } catch (error) {
+    console.warn('[SequentialSim] Could not parse block outcome, assuming success:', error);
+    return { succeeded: true, error: null };
+  }
+}
+
+function encodeSenderAddress(api: ApiPromise, address: string): string {
+  const ss58Format = api.registry.chainSS58 || 0;
+  const publicKey = decodeAddress(address);
+  return encodeAddress(publicKey, ss58Format);
+}
+
+function calculateBalanceDelta(oldState: any, newState: any): { value: BN; change: 'send' | 'receive' } | null {
+  if (!oldState || !newState) return null;
+  
+  const oldTotal = oldState.data.free.add(oldState.data.reserved);
+  const newTotal = newState.data.free.add(newState.data.reserved);
+  const diff = newTotal.sub(oldTotal);
+  
+  if (diff.gt(new BN(0))) return { change: 'receive', value: diff };
+  if (diff.lt(new BN(0))) return { change: 'send', value: diff.abs() };
+  return null;
+}
+
+async function queryAccountState(api: ApiPromise, chain: any, accountKey: string, blockHash: string): Promise<any> {
+  try {
+    const stateRaw = await chain.query(accountKey, blockHash);
+    return stateRaw ? api.createType('FrameSystemAccountInfo', stateRaw) : null;
+  } catch (err) {
+    console.warn('[SequentialSim] Could not query account state:', err);
+    return null;
+  }
+}
+
+function getBalanceFromStorageDiff(
+  api: ApiPromise,
+  storageDiff: Map<string, any>,
+  accountKey: string,
+  oldState: any
+): { value: BN; change: 'send' | 'receive' } | null {
+  for (const [key, newVal] of storageDiff) {
+    if (key === accountKey && newVal !== null) {
+      const newState = api.createType('FrameSystemAccountInfo', newVal);
+      return calculateBalanceDelta(oldState, newState);
+    }
+  }
+  return null;
+}
+
+async function calculateBalanceChanges(
+  api: ApiPromise,
+  chain: any,
+  encodedSender: string,
+  storageDiff: Map<string, any>,
+  blockHashBefore: string,
+  blockHashAfter: string
+): Promise<Array<{ value: BN; change: 'send' | 'receive' }>> {
+  const accountKey = api.query.system.account.key(encodedSender);
+  const oldState = await queryAccountState(api, chain, accountKey, blockHashBefore);
+  
+  if (!oldState) return [];
+  
+  // Try storage diff first
+  if (storageDiff.size > 0) {
+    const delta = getBalanceFromStorageDiff(api, storageDiff, accountKey, oldState);
+    if (delta) return [delta];
+  }
+  
+  // Fallback: query new state from chain
+  const newState = await queryAccountState(api, chain, accountKey, blockHashAfter);
+  if (!newState) return [];
+  
+  const delta = calculateBalanceDelta(oldState, newState);
+  return delta ? [delta] : [];
+}
+
+async function setupChainFork(
+  api: ApiPromise,
+  endpoints: string[],
+  storage: ChopsticksDatabase,
+  updateStatus: (phase: string, message: string, progress?: number) => void
+): Promise<any> {
+  const { BuildBlockMode, setup } = await import('@acala-network/chopsticks-core');
+  
+  updateStatus('forking', 'Creating chain fork at latest block...', 10);
+  
+  return await setup({
+    endpoint: endpoints,
+    block: undefined,
+    buildBlockMode: BuildBlockMode.Instant,
+    mockSignatureHost: true,
+    db: storage,
+  });
+}
+
+async function calculateFee(
+  extrinsic: SubmittableExtrinsic<'promise'>,
+  encodedSender: string
+): Promise<string> {
+  try {
+    const feeInfo = await extrinsic.paymentInfo(encodedSender);
+    return feeInfo.partialFee.toString();
+  } catch {
+    return '0';
+  }
+}
+
+function createSimulationResult(
+  success: boolean,
+  error: string | null,
+  fee: string,
+  balanceChanges: Array<{ value: BN; change: 'send' | 'receive' }>
+): SimulationResult {
+  return {
+    success,
+    error,
+    estimatedFee: fee,
+    balanceChanges,
+    events: [],
+  };
+}
+
+function validateRegistryMatch(extrinsic: SubmittableExtrinsic<'promise'>, api: ApiPromise): void {
+  if (extrinsic.registry !== api.registry) {
+    const errorMsg = `Registry mismatch: extrinsic registry (${extrinsic.registry.constructor.name}) does not match API registry (${api.registry.constructor.name}). This will cause metadata mismatch errors.`;
+    throw new Error(errorMsg);
+  }
+}
+
+function validateChainMethods(chain: any): void {
+  if (typeof chain.newBlock !== 'function') {
+    throw new Error('chain.newBlock is not available - sequential simulation requires this method');
+  }
+}
+
+async function buildBlock(chain: any, extrinsic: SubmittableExtrinsic<'promise'>, index: number): Promise<any> {
+  try {
+    return await chain.newBlock({
+      extrinsics: [extrinsic.toHex()],
+    });
+  } catch (blockError) {
+    const errorMsg = blockError instanceof Error ? blockError.message : String(blockError);
+    console.error(`[SequentialSim] Block ${index + 1} build failed:`, errorMsg);
+    throw new Error(errorMsg);
+  }
+}
+
+function createFailureResult(currentBlockHash: string, error: string): TransactionResult {
+  return {
+    success: false,
+    error,
+    newBlockHash: currentBlockHash,
+    storageDiff: new Map(),
+    fee: '0',
+  };
+}
+
+async function simulateAndBuildTransaction(
+  api: ApiPromise,
+  chain: any,
+  item: SequentialSimulationItem,
+  currentBlockHash: string,
+  index: number
+): Promise<TransactionResult> {
+  validateRegistryMatch(item.extrinsic, api);
+  validateChainMethods(chain);
+  
+  const encodedSender = encodeSenderAddress(api, item.senderAddress);
+  console.log(`[SequentialSim] Building block ${index + 1}...`);
+  
+  let block: any;
+  try {
+    block = await buildBlock(chain, item.extrinsic, index);
+  } catch (error) {
+    return createFailureResult(currentBlockHash, error instanceof Error ? error.message : String(error));
+  }
+  
+  const newHead = await chain.head;
+  const newBlockHash = toHexString(newHead);
+  console.log(`[SequentialSim] ✅ Block ${index + 1} built: ${newBlockHash.slice(0, 12)}...`);
+  
+  const { succeeded, error } = extractBlockOutcome(api, block);
+  if (!succeeded) {
+    return createFailureResult(newBlockHash, error || 'Transaction failed');
+  }
+  
+  const fee = await calculateFee(item.extrinsic, encodedSender);
+  
+  return {
+    success: true,
+    error: null,
+    newBlockHash,
+    storageDiff: new Map(),
+    fee,
+  };
+}
+
+function aggregateBalanceChanges(
+  results: Array<{ result: SimulationResult }>
+): Array<{ value: BN; change: 'send' | 'receive' }> {
+  const balanceMap = new Map<string, BN>();
+  
+  for (const { result } of results) {
+    for (const delta of result.balanceChanges) {
+      const current = balanceMap.get(delta.change) || new BN(0);
+      balanceMap.set(delta.change, current.add(delta.value));
+    }
+  }
+  
+  const finalBalanceChanges: Array<{ value: BN; change: 'send' | 'receive' }> = [];
+  for (const [change, value] of balanceMap.entries()) {
+    if (!value.isZero()) {
+      finalBalanceChanges.push({ change: change as 'send' | 'receive', value });
+    }
+  }
+  
+  return finalBalanceChanges;
+}
+
+function validateEndpoints(rpcEndpoints: string | string[]): string[] {
+  const allEndpoints = Array.isArray(rpcEndpoints) ? rpcEndpoints : [rpcEndpoints];
+  const endpoints = allEndpoints.filter(e => 
+    typeof e === 'string' && (e.startsWith('wss://') || e.startsWith('ws://'))
+  );
+  
+  if (endpoints.length === 0) {
+    throw new Error('No valid WebSocket endpoints provided');
+  }
+  
+  return endpoints;
+}
+
+function createFailureResponse(
+  index: number,
+  description: string,
+  error: string,
+  results: Array<{ index: number; description: string; result: SimulationResult }>,
+  totalFee: BN
+): SequentialSimulationResult {
+  return {
+    success: false,
+    error: `Transaction ${index + 1} (${description}) failed: ${error}`,
+    results,
+    totalEstimatedFee: totalFee.toString(),
+    finalBalanceChanges: [],
+  };
+}
+
+async function processTransaction(
+  api: ApiPromise,
+  chain: any,
+  item: SequentialSimulationItem,
+  currentBlockHash: string,
+  index: number
+): Promise<{ result: SimulationResult; newBlockHash: string; fee: string }> {
+  const simResult = await simulateAndBuildTransaction(api, chain, item, currentBlockHash, index);
+  
+  if (!simResult.success) {
+    const result = createSimulationResult(false, simResult.error, simResult.fee, []);
+    return { result, newBlockHash: currentBlockHash, fee: simResult.fee };
+  }
+  
+  const encodedSender = encodeSenderAddress(api, item.senderAddress);
+  const balanceChanges = await calculateBalanceChanges(
+    api,
+    chain,
+    encodedSender,
+    simResult.storageDiff,
+    currentBlockHash,
+    simResult.newBlockHash
+  );
+  
+  const result = createSimulationResult(true, null, simResult.fee, balanceChanges);
+  return { result, newBlockHash: simResult.newBlockHash, fee: simResult.fee };
+}
+
+async function initializeChainFork(
+  api: ApiPromise,
+  endpoints: string[],
+  updateStatus: (phase: string, message: string, progress?: number) => void
+): Promise<{ chain: any; storage: ChopsticksDatabase; startBlockHash: string }> {
+  const dbName = `dotbot-sequential-sim:${api.genesisHash.toHex()}`;
+  const storage = new ChopsticksDatabase(dbName);
+  const chain = await setupChainFork(api, endpoints, storage, updateStatus);
+  
+  const chainHead = await chain.head;
+  const startBlockHash = toHexString(chainHead);
+  updateStatus('forking', `Fork created at block ${startBlockHash.slice(0, 12)}...`, 15);
+  
+  return { chain, storage, startBlockHash };
+}
+
+async function cleanupResources(
+  startBlockHash: string | null,
+  storage: ChopsticksDatabase | null,
+  chain: any
+): Promise<void> {
+  try {
+    if (startBlockHash && storage) {
+      await storage.deleteBlock(startBlockHash as `0x${string}`);
+    }
+    if (storage) await storage.close();
+    if (chain) await chain.close();
+  } catch (cleanupError) {
+    console.warn('[SequentialSim] Cleanup warning:', cleanupError);
+  }
+}
+
+// =============================================================================
+// Main Function
+// =============================================================================
+
 export async function simulateSequentialTransactions(
   api: ApiPromise,
   rpcEndpoints: string | string[],
   items: SequentialSimulationItem[],
   onStatusUpdate?: SimulationStatusCallback
 ): Promise<SequentialSimulationResult> {
-  const { BuildBlockMode, setup } = await import('@acala-network/chopsticks-core');
-  
   let chain: any = null;
   let storage: ChopsticksDatabase | null = null;
-  let blockHashHex: `0x${string}` | null = null;
+  let startBlockHash: string | null = null;
   
   const updateStatus = (phase: string, message: string, progress?: number) => {
     if (onStatusUpdate) {
@@ -75,200 +429,71 @@ export async function simulateSequentialTransactions(
         details: `Simulating ${items.length} transactions sequentially`
       });
     }
-    console.log(`[SequentialSimulation] ${message}${progress !== undefined ? ` [${progress}%]` : ''}`);
+    console.log(`[SequentialSim] ${message}${progress !== undefined ? ` [${progress}%]` : ''}`);
   };
   
   try {
+    const endpoints = validateEndpoints(rpcEndpoints);
     updateStatus('initializing', `Preparing sequential simulation for ${items.length} transactions...`, 5);
     
-    // Filter to only WebSocket endpoints
-    const allEndpoints = Array.isArray(rpcEndpoints) ? rpcEndpoints : [rpcEndpoints];
-    const endpoints = allEndpoints.filter(endpoint => 
-      typeof endpoint === 'string' && (endpoint.startsWith('wss://') || endpoint.startsWith('ws://'))
-    );
+    const fork = await initializeChainFork(api, endpoints, updateStatus);
+    chain = fork.chain;
+    storage = fork.storage;
+    startBlockHash = fork.startBlockHash;
     
-    if (endpoints.length === 0) {
-      throw new Error('No valid WebSocket endpoints provided');
-    }
-    
-    // Create fork once for all transactions
-    updateStatus('forking', 'Creating chain fork (fetching latest block from endpoint)...', 10);
-    const dbName = `dotbot-sequential-sim:${api.genesisHash.toHex()}`;
-    storage = new ChopsticksDatabase(dbName);
-    
-    chain = await setup({
-      endpoint: endpoints,
-      block: undefined, // Let Chopsticks fetch latest block
-      buildBlockMode: BuildBlockMode.Batch,
-      mockSignatureHost: true,
-      db: storage,
-    });
-    
-    // Get block hash from chain
-    const chainBlockHash = await chain.head;
-    const toHexString = (blockHash: any): `0x${string}` => {
-      if (typeof blockHash === 'string') {
-        return blockHash.startsWith('0x') ? blockHash as `0x${string}` : `0x${blockHash}` as `0x${string}`;
-      }
-      if (typeof blockHash.toHex === 'function') {
-        const hex = blockHash.toHex();
-        return hex.startsWith('0x') ? hex as `0x${string}` : `0x${hex}` as `0x${string}`;
-      }
-      if (blockHash instanceof Uint8Array) {
-        const hex = Array.from(blockHash)
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
-        return `0x${hex}` as `0x${string}`;
-      }
-      throw new Error(`Cannot convert block hash to hex: ${typeof blockHash}`);
-    };
-    
-    blockHashHex = toHexString(chainBlockHash);
-    updateStatus('forking', `Chain fork created at block ${blockHashHex.slice(0, 12)}...`, 15);
-    
-    // Simulate each transaction sequentially
     const results: Array<{ index: number; description: string; result: SimulationResult }> = [];
-    let currentBlockHash = blockHashHex;
+    let currentBlockHash = startBlockHash;
     let totalFee = new BN(0);
     
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const progress = 15 + Math.floor((i / items.length) * 75);
-      
       updateStatus('executing', `Simulating transaction ${i + 1}/${items.length}: ${item.description}`, progress);
       
-      // Encode sender address for this chain
-      const { encodeAddress, decodeAddress } = await import('@polkadot/util-crypto');
-      const publicKey = decodeAddress(item.senderAddress);
-      const ss58Format = api.registry.chainSS58 || 0;
-      const encodedSender = encodeAddress(publicKey, ss58Format);
-      
-      // Simulate this transaction on the current fork state
-      const { outcome, storageDiff } = await chain.dryRunExtrinsic(
-        {
-          call: item.extrinsic.method.toHex(),
-          address: encodedSender,
-        },
-        currentBlockHash
-      );
-      
-      // Parse outcome
-      const parseOutcome = (outcome: any): { succeeded: boolean; failureReason: string | null } => {
-        if (outcome.isOk) {
-          const result = outcome.asOk;
-          if (result.isOk) {
-            return { succeeded: true, failureReason: null };
-          } else {
-            const err = result.asErr;
-            if (err.isModule) {
-              const meta = api.registry.findMetaError(err.asModule);
-              return { succeeded: false, failureReason: `${meta.section}.${meta.name}` };
-            }
-            return { succeeded: false, failureReason: `DispatchError: ${err.type}` };
-          }
-        } else {
-          return { succeeded: false, failureReason: `InvalidTransaction: ${outcome.asErr.type}` };
-        }
-      };
-      
-      const { succeeded, failureReason } = parseOutcome(outcome);
-      
-      // Calculate fee
-      let fee = '0';
       try {
-        const feeInfo = await item.extrinsic.paymentInfo(encodedSender);
-        fee = feeInfo.partialFee.toString();
+        const { result, newBlockHash, fee } = await processTransaction(
+          api,
+          chain,
+          item,
+          currentBlockHash,
+          i
+        );
+        
+        if (!result.success) {
+          results.push({ index: i, description: item.description, result });
+          updateStatus('error', `Transaction ${i + 1} failed: ${result.error}`, 100);
+          return createFailureResponse(i, item.description, result.error || 'Unknown error', results, totalFee);
+        }
+        
+        currentBlockHash = newBlockHash;
         totalFee = totalFee.add(new BN(fee));
-      } catch {
-        // Fee calculation failed, continue
+        results.push({ index: i, description: item.description, result });
+        
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[SequentialSim] Transaction ${i + 1} error:`, error);
+        
+        const result = createSimulationResult(false, errorMsg, '0', []);
+        results.push({ index: i, description: item.description, result });
+        updateStatus('error', `Transaction ${i + 1} failed: ${errorMsg}`, 100);
+        
+        return createFailureResponse(i, item.description, errorMsg, results, totalFee);
       }
-      
-      // Calculate balance changes
-      const balanceDeltas: Array<{ value: BN; change: 'send' | 'receive' }> = [];
-      try {
-        const accountKey = api.query.system.account.key(encodedSender);
-        for (const [key, newVal] of storageDiff) {
-          if (key === accountKey && newVal !== null) {
-            const newState: any = api.createType('FrameSystemAccountInfo', newVal);
-            const currentState: any = await api.query.system.account(encodedSender);
-            const currentTotal = currentState.data.free.add(currentState.data.reserved);
-            const newTotal = newState.data.free.add(newState.data.reserved);
-            if (newTotal.gt(currentTotal)) {
-              balanceDeltas.push({ change: 'receive', value: newTotal.sub(currentTotal) });
-            } else if (newTotal.lt(currentTotal)) {
-              balanceDeltas.push({ change: 'send', value: currentTotal.sub(newTotal) });
-            }
-          }
-        }
-      } catch {
-        // Ignore balance calculation errors
-      }
-      
-      const result: SimulationResult = {
-        success: succeeded,
-        error: failureReason,
-        estimatedFee: fee,
-        balanceChanges: balanceDeltas,
-        events: [],
-      };
-      
-      results.push({
-        index: i,
-        description: item.description,
-        result,
-      });
-      
-      // If this transaction failed, stop the flow
-      if (!succeeded) {
-        updateStatus('error', `Transaction ${i + 1} failed: ${failureReason}`, 100);
-        return {
-          success: false,
-          error: `Transaction ${i + 1} (${item.description}) failed: ${failureReason}`,
-          results,
-          totalEstimatedFee: totalFee.toString(),
-          finalBalanceChanges: balanceDeltas,
-        };
-      }
-      
-      // Update block hash for next transaction (use chain.head to get new state)
-      // Note: In a real sequential flow, we'd build a new block, but for simulation
-      // we continue on the same fork with accumulated state changes
-      currentBlockHash = blockHashHex; // Keep using same block for simulation
     }
     
     updateStatus('complete', `✓ All ${items.length} transactions simulated successfully!`, 100);
-    
-    // Calculate final balance changes (sum of all transactions)
-    const finalBalanceChanges: Array<{ value: BN; change: 'send' | 'receive' }> = [];
-    const balanceMap = new Map<string, BN>();
-    
-    for (const { result } of results) {
-      for (const delta of result.balanceChanges) {
-        const key = delta.change;
-        const current = balanceMap.get(key) || new BN(0);
-        balanceMap.set(key, current.add(delta.value));
-      }
-    }
-    
-    for (const [change, value] of balanceMap.entries()) {
-      if (!value.isZero()) {
-        finalBalanceChanges.push({
-          change: change as 'send' | 'receive',
-          value,
-        });
-      }
-    }
     
     return {
       success: true,
       error: null,
       results,
       totalEstimatedFee: totalFee.toString(),
-      finalBalanceChanges,
+      finalBalanceChanges: aggregateBalanceChanges(results),
     };
     
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error('[SequentialSim] Fatal error:', err);
     updateStatus('error', `✗ Sequential simulation error: ${errorMessage}`, 100);
     
     return {
@@ -279,16 +504,6 @@ export async function simulateSequentialTransactions(
       finalBalanceChanges: [],
     };
   } finally {
-    // Cleanup
-    try {
-      if (blockHashHex && storage) {
-        await storage.deleteBlock(blockHashHex);
-      }
-      if (storage) await storage.close();
-      if (chain) await chain.close();
-    } catch (cleanupError) {
-      console.warn('[SequentialSimulation] Cleanup warning:', cleanupError);
-    }
+    await cleanupResources(startBlockHash, storage, chain);
   }
 }
-

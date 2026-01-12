@@ -84,28 +84,14 @@ export class ASIOneService {
         max_tokens: this.config.maxTokens,
         stream: false
       };
-      
-      console.log('📤 Request to ASI-One:', {
-        model: request.model,
-        messageCount: request.messages.length,
-        temperature: request.temperature,
-        max_tokens: request.max_tokens
-      });
 
       // Make the API call
-      console.log('🌐 Calling ASI-One API...');
       const response = await this.callASIOneAPI(request);
-      console.log('✅ ASI-One API response received:', {
-        choices: response.choices?.length,
-        firstChoice: response.choices?.[0]?.message?.content?.substring(0, 100)
-      });
+      console.info('Response received from ASI-One:', response.choices?.[0]?.message?.content?.substring(0, 100));
       
       // Extract and return the assistant's response
       const assistantMessage = response.choices[0]?.message?.content || 'Sorry, I could not generate a response.';
       
-      // NOTE: We don't save history here - that's the frontend's job now
-      console.log('📝 Response ready - frontend will manage history');
-
       logger.info({
         responseLength: assistantMessage.length,
         usage: response.usage
@@ -150,13 +136,6 @@ export class ASIOneService {
     // Get conversation history from context (provided by frontend)
     const conversationHistory = context?.conversationHistory || [];
     
-    console.log('🔍 ASIOneService - Building messages:', {
-      hasSystemPrompt: !!context?.systemPrompt,
-      promptLength: systemPrompt.length,
-      historyLength: conversationHistory.length,
-      hasCurrentMessage: !!currentUserMessage
-    });
-    
     if (context?.systemPrompt) {
       logger.info({ 
         promptLength: systemPrompt.length,
@@ -180,9 +159,6 @@ export class ASIOneService {
       // Limit to last 20 messages to avoid token limits
       const recentHistory = conversationHistory.slice(-20);
       messages.push(...recentHistory);
-      console.log('📜 Including conversation history from frontend:', recentHistory.length, 'messages');
-    } else {
-      console.log('📜 No conversation history provided');
     }
 
     // ALWAYS add the current user message
@@ -191,15 +167,7 @@ export class ASIOneService {
         role: 'user',
         content: currentUserMessage
       });
-      console.log('✅ Added current user message to request');
     }
-
-    console.log('📤 Final message array to LLM:', {
-      totalMessages: messages.length,
-      systemPromptLength: messages[0]?.content.length,
-      historyMessages: conversationHistory.length,
-      currentMessage: currentUserMessage?.substring(0, 50)
-    });
 
     return messages;
   }
@@ -234,12 +202,7 @@ Keep responses concise but informative. Use bullet points for multiple options a
   private async callASIOneAPI(request: ASIOneRequest): Promise<ASIOneResponse> {
     const url = process.env.REACT_APP_ASI_ONE_API_URL || `${this.config.baseUrl}/chat/completions`;
     
-    console.log('📡 Fetching from ASI-One:', {
-      url,
-      method: 'POST',
-      messageCount: request.messages.length,
-      model: request.model
-    });
+    console.info('Fetching from ASI-One, model:', request.model);
     
     const response = await fetch(url, {
       method: 'POST',
@@ -251,12 +214,6 @@ Keep responses concise but informative. Use bullet points for multiple options a
       body: JSON.stringify(request)
     });
 
-    console.log('📡 ASI-One HTTP response:', {
-      status: response.status,
-      ok: response.ok,
-      statusText: response.statusText
-    });
-
     if (!response.ok) {
       const errorText = await response.text();
       console.error('❌ ASI-One API error response:', errorText);
@@ -264,11 +221,7 @@ Keep responses concise but informative. Use bullet points for multiple options a
     }
 
     const data = await response.json();
-    console.log('📦 ASI-One API data:', {
-      hasChoices: !!data.choices,
-      choicesLength: data.choices?.length,
-      firstMessageLength: data.choices?.[0]?.message?.content?.length
-    });
+
     return data as ASIOneResponse;
   }
 
