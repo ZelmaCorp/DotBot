@@ -221,7 +221,18 @@ All agents create production-safe extrinsics with:
 
 ### 2. Optional Chopsticks Simulation
 
-Simulation is **optional**. When enabled, DotBot simulates transactions using Chopsticks before execution:
+Simulation is **optional and configurable**. When enabled, DotBot simulates transactions using Chopsticks before execution. Configuration is managed via `SettingsManager` and can be toggled in the UI (SettingsModal).
+
+**Configuration:**
+- Default: `enabled: true` (simulation enabled by default)
+- Settings persist to localStorage
+- UI toggle available in SettingsModal
+- All components check `isSimulationEnabled()` for current state
+
+**Multi-Transaction Flows:**
+For flows with multiple transactions, simulation uses sequential execution on a single fork. Each transaction sees the state changes from previous transactions, ensuring accurate simulation of complex flows (e.g., transfer → stake → vote).
+
+When enabled, DotBot simulates transactions using Chopsticks before execution:
 - Real runtime execution
 - Balance change preview
 - Error detection before signing
