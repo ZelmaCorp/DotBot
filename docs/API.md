@@ -2085,6 +2085,129 @@ disableSimulation(); // Same as updateSimulationConfig({ enabled: false })
 
 ---
 
+## Sequential Simulation API
+
+**NEW** in v0.2.1: Sequential transaction simulation for multi-transaction flows.
+
+### Overview
+
+`simulateSequentialTransactions()` simulates multiple transactions sequentially on a single forked chain, ensuring each transaction sees state changes from previous transactions. This is essential for accurate simulation of complex flows (e.g., transfer → stake → vote).
+
+**Key Features:**
+- Sequential execution on single fork (state persists between transactions)
+- Uses Chopsticks `BuildBlockMode.Instant` and `chain.newBlock()` for proper state advancement
+- Registry validation to prevent metadata mismatches
+- Stops on first failure with accurate transaction indexing
+- Cumulative fee calculation across all transactions
+
+### `simulateSequentialTransactions()`
+
+Simulate multiple transactions sequentially on a forked chain.
+
+```typescript
+import { simulateSequentialTransactions } from './lib/services/simulation/sequentialSimulation';
+
+async function simulateSequentialTransactions(
+  api: ApiPromise,
+  rpcEndpoints: string | string[],
+  items: SequentialSimulationItem[],
+  onStatusUpdate?: SimulationStatusCallback
+): Promise<SequentialSimulationResult>
+```
+
+**Parameters:**
+- `api` (ApiPromise): Polkadot API instance (must match extrinsic registries)
+- `rpcEndpoints` (string | string[]): RPC endpoint(s) for chain fork
+- `items` (SequentialSimulationItem[]): Array of transactions to simulate
+- `onStatusUpdate` (SimulationStatusCallback, optional): Progress callback
+
+**Returns:**
+```typescript
+interface SequentialSimulationResult {
+  success: boolean;
+  error: string | null;
+  results: Array<{
+    index: number;              // 0-based index
+    description: string;
+    result: SimulationResult;   // Individual transaction result
+  }>;
+  totalEstimatedFee: string;    // Cumulative fee across all successful transactions
+  finalBalanceChanges: Array<{
+    value: BN;
+    change: 'send' | 'receive';
+  }>;
+}
+```
+
+**Item Structure:**
+```typescript
+interface SequentialSimulationItem {
+  extrinsic: SubmittableExtrinsic<'promise'>;
+  description: string;
+  senderAddress: string;
+}
+```
+
+**Example:**
+```typescript
+import { simulateSequentialTransactions } from './lib/services/simulation/sequentialSimulation';
+
+const items = [
+  {
+    extrinsic: transferExtrinsic,
+    description: 'Transfer 100 DOT',
+    senderAddress: userAddress,
+  },
+  {
+    extrinsic: stakeExtrinsic,
+    description: 'Stake 50 DOT',
+    senderAddress: userAddress,
+  },
+];
+
+const result = await simulateSequentialTransactions(
+  api,
+  ['wss://rpc.polkadot.io'],
+  items,
+  (status) => {
+    console.log(`[${status.phase}] ${status.message} (${status.progress}%)`);
+  }
+);
+
+if (result.success) {
+  console.log(`All ${result.results.length} transactions simulated successfully`);
+  console.log(`Total fee: ${result.totalEstimatedFee}`);
+} else {
+  console.error(`Simulation failed: ${result.error}`);
+  // Error message format: "Transaction N (Description) failed: Error"
+}
+```
+
+**Behavior:**
+- Creates a single chain fork at the latest block
+- Executes transactions sequentially using `chain.newBlock()`
+- Each transaction sees state changes from previous ones
+- Stops on first failure (returns all results up to failure point)
+- Validates registry matching between extrinsics and API
+- Calculates fees only for successful transactions
+
+**Error Handling:**
+- Registry mismatch: Throws if `extrinsic.registry !== api.registry`
+- Missing `chain.newBlock`: Throws if method not available
+- Transaction failure: Returns `success: false` with error message
+- Error message format: `"Transaction N (Description) failed: Error"` (1-based transaction number)
+
+**Status Callbacks:**
+- `'initializing'`: Preparing simulation
+- `'forking'`: Creating chain fork
+- `'executing'`: Simulating transaction N/M
+- `'complete'`: All transactions successful
+- `'error'`: Simulation failed
+
+**Version Added:** v0.2.1 (January 2026)
+
+---
+
 ## Utilities API
 
 ### RpcManager
@@ -3503,8 +3626,13 @@ const array = dotbot.currentChat.getExecutionArray(execMessage.executionId);
 **New Features:**
 - SettingsManager for centralized configuration management
 - Simulation configuration with UI toggle (SettingsModal)
-- Sequential multi-transaction simulation (transactions see state from previous transactions)
+- Sequential multi-transaction simulation (`simulateSequentialTransactions()`) - transactions see state from previous transactions
 - ExecutionFlow appears immediately when ExecutionMessage is added (before simulation)
+- ExecutionFlow component refactored into modular sub-components (ExecutionFlowHeader, ExecutionFlowItem, ExecutionFlowFooter, etc.)
+- Simulation status displayed at top of ExecutionFlow header
+- Amount parser and improved decimal handling
+- Expressions system in ScenarioEngine (initial implementation with `calculateInsufficientBalance`, `calculateInsufficientBalanceAmount`)
+- ScenarioEngineOverlay can display scenario details
 
 **Improvements:**
 - All components use `isSimulationEnabled()` for consistent simulation state checking

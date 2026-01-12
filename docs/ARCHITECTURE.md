@@ -198,9 +198,7 @@ executionEngine/
 - **RpcManager**: Multi-endpoint management with health monitoring, failover, and **network-awareness**
 - **Chopsticks**: Runtime simulation for pre-execution validation (network-configurable)
 - **SettingsManager**: Centralized settings management with persistence (simulation config, extensible for future settings)
-- **SequentialSimulation**: Multi-transaction simulation service (sequential execution on single fork for state tracking)
-- **SettingsManager**: Centralized settings management with persistence (simulation config, future: UI preferences, etc.)
-- **SequentialSimulation**: Multi-transaction simulation with state tracking (uses single fork for sequential state)
+- **SequentialSimulation**: Multi-transaction simulation service that simulates transactions sequentially on a single forked chain, ensuring each transaction sees state changes from previous ones. Uses Chopsticks `BuildBlockMode.Instant` and `chain.newBlock()` for proper state advancement.
 
 **RpcManager Network Features:**
 - Network-scoped storage keys (health tracking isolated per network)
@@ -325,10 +323,17 @@ lib/
    - Supports both user and bot messages with proper styling
 
 3. **Execution Flow**
-   - `ExecutionFlow` - Visual representation of ExecutionArray
+   - `ExecutionFlow` - Visual representation of ExecutionArray (refactored into modular sub-components)
    - Shows transaction steps, status, and progress
    - "Accept & Start" button for user approval
    - Respects simulation setting (shows/hides simulation UI)
+   - **Component Structure**:
+     - `ExecutionFlowHeader` - Overall status, summary badges, simulation status line
+     - `ExecutionFlowItem` - Individual transaction item with expandable details
+     - `ExecutionFlowFooter` - Approval actions and progress bar
+     - Sub-components: `LoadingState`, `ApprovalMessage`, `ItemHeader`, `ItemDetails`, `SimulationStatus`, etc.
+   - **Custom Hooks**: `useExecutionFlowState`, `useExpandedItems` for state management
+   - Simulation status displayed at top of ExecutionFlow (non-compact mode)
 
 4. **Wallet Integration**
    - `WalletModal` - Wallet connection and account management
@@ -687,6 +692,14 @@ if (items.length > 1) {
   await this.simulateItem(...);
 }
 ```
+
+**Sequential Simulation Details:**
+- Uses Chopsticks in `BuildBlockMode.Instant` to properly advance chain state
+- Each transaction executes on the same fork, seeing state changes from previous transactions
+- Validates registry matching between extrinsics and API to prevent metadata errors
+- Uses `chain.newBlock()` (not `dryRunExtrinsic`) for proper sequential state tracking
+- Stops on first failure (transaction index reported correctly in error messages)
+- Calculates cumulative fees across all transactions
 
 **History:**
 - v0.2.0 (January 2026): Made simulation optional with status-aware initialization

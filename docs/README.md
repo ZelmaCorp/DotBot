@@ -230,7 +230,7 @@ Simulation is **optional and configurable**. When enabled, DotBot simulates tran
 - All components check `isSimulationEnabled()` for current state
 
 **Multi-Transaction Flows:**
-For flows with multiple transactions, simulation uses sequential execution on a single fork. Each transaction sees the state changes from previous transactions, ensuring accurate simulation of complex flows (e.g., transfer → stake → vote).
+For flows with multiple transactions, simulation uses sequential execution on a single fork using `simulateSequentialTransactions()`. Each transaction sees the state changes from previous transactions, ensuring accurate simulation of complex flows (e.g., transfer → stake → vote). The sequential simulation uses Chopsticks `BuildBlockMode.Instant` and `chain.newBlock()` for proper state advancement.
 
 When enabled, DotBot simulates transactions using Chopsticks before execution:
 - Real runtime execution
