@@ -1,25 +1,17 @@
 // Agent communication service - works independently of backend
 
 import { AgentRequest, AgentResponse, AgentInfo, AgentStatus } from '../../types/agents';
-import { getASIOneService, ASIOneService } from './asiOneService';
+import { AIService, AIServiceConfig, AIProviderType } from './ai/aiService';
 import { createSubsystemLogger, Subsystem } from './logger';
 
 export class AgentCommunicationService {
   private agents: Map<string, AgentInfo> = new Map();
-  private asiOneEndpoint: string;
-  private apiKey: string;
-  private asiOneService: ASIOneService;
+  private aiService: AIService;
   private logger = createSubsystemLogger(Subsystem.AGENT_COMM);
 
-  constructor(asiOneEndpoint?: string, apiKey?: string) {
-    this.asiOneEndpoint = asiOneEndpoint || process.env.REACT_APP_ASI_ONE_ENDPOINT || 'https://api.asi1.ai/v1';
-    this.apiKey = apiKey || process.env.REACT_APP_ASI_ONE_API_KEY || 'sk_55aa3a95dcd341c6a2e13a4244e612f550f0520ca67342d88e0ad81812909ad5';
-    
-    // Initialize ASI-One service
-    this.asiOneService = getASIOneService({
-      apiKey: this.apiKey,
-      baseUrl: this.asiOneEndpoint
-    });
+  constructor(config?: AIServiceConfig) {
+    // Initialize AI service (supports multiple providers: ASI-One, Claude, etc.)
+    this.aiService = new AIService(config);
     
     // Initialize available agents
     this.initializeAgents();
@@ -119,17 +111,18 @@ export class AgentCommunicationService {
     return 'asset-transfer';
   }
 
-  // Send message to agent via ASI-One
+  // Send message to agent via AI service (ASI-One, Claude, etc.)
   async sendToAgent(request: AgentRequest): Promise<AgentResponse> {
     try {
       this.logger.info({
         agentId: request.agentId,
         messageLength: request.message.length,
-        hasContext: !!request.context
-      }, 'Sending message to agent via ASI-One');
+        hasContext: !!request.context,
+        providerType: this.aiService.getProviderType()
+      }, 'Sending message to agent via AI service');
 
-      // Use ASI-One service for AI-powered responses
-      const aiResponse = await this.asiOneService.sendMessage(request.message, {
+      // Use AI service for AI-powered responses (supports multiple providers)
+      const aiResponse = await this.aiService.sendMessage(request.message, {
         agentId: request.agentId,
         walletAddress: request.context?.userWallet,
         network: request.context?.network || 'Polkadot',
@@ -153,8 +146,9 @@ export class AgentCommunicationService {
       this.logger.info({
         agentId: request.agentId,
         responseLength: aiResponse.length,
-        messageId: response.messageId
-      }, 'Received response from ASI-One');
+        messageId: response.messageId,
+        providerType: this.aiService.getProviderType()
+      }, 'Received response from AI service');
 
       return response;
 
@@ -164,20 +158,22 @@ export class AgentCommunicationService {
         error: error instanceof Error ? error.message : 'Unknown error'
       }, 'Agent communication error');
       
-      // Fallback to local processing if ASI-One is unavailable
+      // Fallback to local processing if AI service is unavailable
       return this.fallbackProcessing(request);
     }
   }
 
   // Call agent via ASI-One (legacy method - not currently used)
   private async callAgentVerse(request: AgentRequest): Promise<AgentResponse> {
-    const agentEndpoint = `${this.asiOneEndpoint}/agents/${request.agentId}`;
+    const asiOneEndpoint = process.env.REACT_APP_ASI_ONE_ENDPOINT || 'https://api.asi1.ai/v1';
+    const apiKey = process.env.REACT_APP_ASI_ONE_API_KEY || '';
+    const agentEndpoint = `${asiOneEndpoint}/agents/${request.agentId}`;
     
     const response = await fetch(agentEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         message: request.message,
@@ -288,12 +284,12 @@ export class AgentCommunicationService {
   async checkAgentAvailability(): Promise<Record<string, boolean>> {
     const availability: Record<string, boolean> = {};
     
-    // Test ASI-One connectivity
-    const asiOneAvailable = await this.asiOneService.testConnection();
+    // Test AI service connectivity
+    const aiServiceAvailable = await this.aiService.testConnection();
     
     for (const agentId of this.agents.keys()) {
-      availability[agentId] = asiOneAvailable;
-      this.updateAgentStatus(agentId, asiOneAvailable ? 'online' : 'offline');
+      availability[agentId] = aiServiceAvailable;
+      this.updateAgentStatus(agentId, aiServiceAvailable ? 'online' : 'offline');
     }
     
     return availability;
@@ -302,14 +298,20 @@ export class AgentCommunicationService {
   /**
    * NOTE: Conversation management has been moved to the frontend (App.tsx).
    * 
-   * ASIOneService is now stateless - conversation history is managed by the frontend
+   * AI service is now stateless - conversation history is managed by the frontend
    * and passed via context when calling sendMessage().
    * 
    * The frontend maintains conversationHistory in React state.
    */
 
-  // Get ASI-One service instance (for direct access if needed)
-  getASIOneService(): ASIOneService {
-    return this.asiOneService;
+  // Get AI service instance (for direct access if needed)
+  getAIService(): AIService {
+    return this.aiService;
+  }
+
+  // Switch AI provider
+  switchProvider(providerType: AIProviderType, config?: AIServiceConfig): void {
+    this.aiService.switchProvider(providerType, config);
+    this.logger.info({ providerType }, 'Switched AI provider');
   }
 }
