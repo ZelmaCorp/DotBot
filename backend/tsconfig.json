@@ -13,15 +13,8 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "moduleResolution": "node",
-    "baseUrl": "..",
-    "paths": {
-      "@dotbot/core": ["lib/dotbot-core"],
-      "@dotbot/core/*": ["lib/dotbot-core/*"],
-      "@dotbot/express": ["lib/dotbot-express/src"],
-      "@dotbot/express/*": ["lib/dotbot-express/src/*"]
-    }
+    "moduleResolution": "node"
   },
-  "include": ["src/**/*", "../lib/**/*"],
-  "exclude": ["node_modules", "dist", "../lib/**/tests", "../lib/**/*.test.ts"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

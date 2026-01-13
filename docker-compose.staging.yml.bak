@@ -42,11 +42,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - dotbot-staging
-    depends_on:
-      - frontend
-
-networks:
-  dotbot-staging:
-    driver: bridge

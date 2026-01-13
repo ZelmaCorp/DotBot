@@ -4,12 +4,182 @@ This document explains **why** DotBot is built the way it is. It covers design d
 
 ## Table of Contents
 
+- [System Architecture](#system-architecture)
 - [Core Design Principles](#core-design-principles)
 - [Module Structure](#module-structure)
 - [Design Decisions](#design-decisions)
 - [Data Flow](#data-flow)
 - [Conventions](#conventions)
 - [Dependencies](#dependencies)
+
+---
+
+## System Architecture
+
+DotBot is a distributed system with frontend and backend components, designed for secure API key management and scalable blockchain operations.
+
+### High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         FRONTEND                            │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │  React Application                                  │    │
+│  │  - UI Components                                    │    │
+│  │  - Wallet Integration                               │    │
+│  │  - dotbot-core (client-side operations)  │    │
+│  └────────────────────────────────────────────────────┘    │
+│                          ↓ HTTP API                         │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│                         BACKEND                             │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │  Express.js Server                                  │    │
+│  │  - @dotbot/express (routes & middleware)            │    │
+│  │  - @dotbot/core (server-side operations)            │    │
+│  │  - Secure API key management                        │    │
+│  └────────────────────────────────────────────────────┘    │
+│                          ↓                                  │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │  AI Providers                                       │    │
+│  │  - ASI-One (Fetch.ai)                              │    │
+│  │  - Claude (Anthropic)                              │    │
+│  └────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Project Structure
+
+```
+DotBot/
+├── lib/                     # Shared libraries (both frontend & backend)
+│   ├── dotbot-core/         # @dotbot/core - Core blockchain logic
+│   │   ├── agents/          # Blockchain operation agents
+│   │   ├── executionEngine/ # Transaction execution system
+│   │   ├── services/        # AI services, RPC management
+│   │   ├── prompts/         # LLM system prompts
+│   │   └── env.ts           # Environment abstraction (browser/Node.js)
+│   └── dotbot-express/      # @dotbot/express - Express integration
+│       ├── routes/          # API routes (chat, operations)
+│       └── middleware/      # Request logging, error handling
+│
+├── backend/
+│   ├── src/
+│   │   └── index.ts         # Main Express server
+│   └── tsconfig.json        # Imports from ../lib
+│
+└── frontend/
+    ├── src/
+    │   ├── components/      # React UI components
+    │   └── services/
+    │       └── backendApi.ts # Backend API client
+    └── tsconfig.json        # Imports from ../lib
+```
+
+**Key principle:** Both frontend and backend import from the **same** `lib/` folder at project root. No code duplication.
+
+### Design Rationale: Why Backend?
+
+**Problem**: AI provider API keys exposed in frontend code
+
+**Solution**: Move AI services to backend, keep blockchain operations client-side
+
+**Benefits**:
+1. **Security**: API keys never exposed to client
+2. **Flexibility**: Easy to switch AI providers server-side
+3. **Cost Control**: Rate limiting and usage monitoring
+4. **Hybrid Architecture**: Blockchain ops stay client-side (leverages user's wallet)
+
+### dotbot-core: Environment-Agnostic Design
+
+The `@dotbot/core` library is designed to work in both browser and Node.js:
+
+```typescript
+// Environment abstraction (lib/dotbot-core/env.ts)
+export function getEnv(key: string): string | undefined {
+  // In browser: tries REACT_APP_* first, falls back to regular name
+  // In Node.js: uses process.env directly
+  if (typeof process !== 'undefined' && process.env) {
+    const reactAppKey = key.startsWith('REACT_APP_') ? key : `REACT_APP_${key}`;
+    return process.env[reactAppKey] || process.env[key];
+  }
+  return undefined;
+}
+```
+
+**Key Features**:
+- Works in both environments without modification
+- Storage abstraction (localStorage in browser, in-memory in Node.js)
+- No browser-specific APIs in core logic
+- **Shared codebase**: Both frontend and backend import from `lib/dotbot-core`
+- Future-ready for npm package publishing
+
+**Usage in both environments:**
+```typescript
+// In frontend/src/App.tsx
+import { DotBot } from '@dotbot/core';
+import { AssetTransferAgent } from '@dotbot/core/agents/asset-transfer';
+
+// In backend/src/index.ts
+import { AIService } from '@dotbot/core/services/ai/aiService';
+
+// Both resolve to: ../lib/dotbot-core (same files!)
+```
+
+### API Flow: Chat Example
+
+```typescript
+// 1. Frontend sends request to backend
+const response = await fetch('http://localhost:8000/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({
+    message: 'Transfer 10 DOT to Alice',
+    provider: 'asi-one'
+  })
+});
+
+// 2. Backend (dotbot-express) handles request
+router.post('/api/chat', async (req, res) => {
+  const aiService = new AIService(); // Uses server-side API keys
+  const response = await aiService.sendMessage(req.body.message);
+  res.json({ response });
+});
+
+// 3. AI response returned to frontend
+// 4. Frontend uses dotbot-core to execute blockchain operations client-side
+```
+
+### Shared Library Development
+
+**Current Setup (Monorepo):**
+```
+DotBot/lib/dotbot-core     ← Shared by frontend and backend
+         └─ (TypeScript path aliases allow importing as @dotbot/core)
+```
+
+**Advantages:**
+- Edit once, both frontend and backend get updates immediately
+- No code duplication or sync issues
+- Single source of truth for business logic
+- Type safety across entire stack
+
+**Future npm Package Migration:**
+
+When `@dotbot/core` stabilizes, publish to npm:
+
+```bash
+npm install @dotbot/core      # Shared blockchain operations
+npm install @dotbot/express   # Backend Express integration
+npm install @dotbot/react     # Frontend React components (future)
+```
+
+**Migration Path**:
+1. ✅ Current: Monorepo with shared `lib/` folder
+2. Publish `@dotbot/core` when stable (usable in any environment)
+3. Publish `@dotbot/express` for backend integrations
+4. Publish `@dotbot/react` for frontend components
+5. Projects install packages instead of sharing via monorepo
 
 ---
 

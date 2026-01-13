@@ -36,22 +36,32 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
     "./*": {
       "import": "./dist/*.js",
+      "require": "./dist/*.js",
       "types": "./dist/*.d.ts"
+    },
+    "./services/ai": {
+      "import": "./dist/services/ai/index.js",
+      "require": "./dist/services/ai/index.js",
+      "types": "./dist/services/ai/index.d.ts"
     },
     "./agents": {
       "import": "./dist/agents/index.js",
+      "require": "./dist/agents/index.js",
       "types": "./dist/agents/index.d.ts"
     },
     "./prompts": {
       "import": "./dist/prompts/system/index.js",
+      "require": "./dist/prompts/system/index.js",
       "types": "./dist/prompts/system/index.d.ts"
     },
     "./scenarioEngine": {
       "import": "./dist/scenarioEngine/index.js",
+      "require": "./dist/scenarioEngine/index.js",
       "types": "./dist/scenarioEngine/index.d.ts"
     }
   },

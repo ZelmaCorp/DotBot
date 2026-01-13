@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { AIService, AIServiceConfig, AIProviderType } from '@dotbot/core/services/ai/aiService';
+import { AIService, AIServiceConfig, AIProviderType } from '@dotbot/core/services/ai';
 
 const router = Router();
 
