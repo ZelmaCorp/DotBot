@@ -1,0 +1,16 @@
+{
+  "name": "@dotbot/express",
+  "version": "0.1.0",
+  "description": "Express.js integration layer for DotBot - provides routes and middleware to use DotBot",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "author": "",
+  "license": "GNU General Public License v3.0",
+  "dependencies": {
+    "@dotbot/core": "file:../dotbot-core",
+    "express": "^4.18.2"
+  },
+  "peerDependencies": {
+    "express": "^4.18.2"
+  }
+}
