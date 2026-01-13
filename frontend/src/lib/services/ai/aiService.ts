@@ -63,11 +63,10 @@ export class AIService {
       case AIProviderType.CLAUDE:
         const claudeApiKey = config?.claudeConfig?.apiKey || process.env.REACT_APP_CLAUDE_API_KEY;
         if (!claudeApiKey) {
-          logger.warn({}, 'Claude API key not found, falling back to ASI-One');
-          return new ASIOneProvider();
+          logger.warn({}, 'Claude API key not found. Please set REACT_APP_CLAUDE_API_KEY environment variable.');
         }
         return new ClaudeProvider({
-          apiKey: claudeApiKey,
+          apiKey: claudeApiKey || '',
           baseUrl: config?.claudeConfig?.baseUrl || process.env.REACT_APP_CLAUDE_BASE_URL,
           model: config?.claudeConfig?.model || process.env.REACT_APP_CLAUDE_MODEL,
           maxTokens: config?.claudeConfig?.maxTokens,
@@ -80,7 +79,13 @@ export class AIService {
 
       default:
         logger.warn({ type }, 'Unknown provider type, falling back to ASI-One');
-        return new ASIOneProvider();
+        return new ASIOneProvider({
+          apiKey: config?.asiOneConfig?.apiKey || process.env.REACT_APP_ASI_ONE_API_KEY,
+          baseUrl: config?.asiOneConfig?.baseUrl || process.env.REACT_APP_ASI_ONE_BASE_URL,
+          model: config?.asiOneConfig?.model || process.env.REACT_APP_ASI_ONE_MODEL,
+          temperature: config?.asiOneConfig?.temperature,
+          maxTokens: config?.asiOneConfig?.maxTokens
+        });
     }
   }
 

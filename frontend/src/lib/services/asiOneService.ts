@@ -49,8 +49,14 @@ export class ASIOneService {
   private config: ASIOneConfig;
 
   constructor(config?: Partial<ASIOneConfig>) {
+    const apiKey = config?.apiKey || process.env.REACT_APP_ASI_ONE_API_KEY;
+    
+    if (!apiKey) {
+      logger.warn({}, 'ASI-One API key not provided. Please set REACT_APP_ASI_ONE_API_KEY environment variable. API calls will fail without a valid key.');
+    }
+    
     this.config = {
-      apiKey: config?.apiKey || process.env.REACT_APP_ASI_ONE_API_KEY || 'sk_55aa3a95dcd341c6a2e13a4244e612f550f0520ca67342d88e0ad81812909ad5',
+      apiKey: apiKey || '',
       baseUrl: config?.baseUrl || process.env.REACT_APP_ASI_ONE_BASE_URL || 'https://api.asi1.ai/v1',
       model: config?.model || process.env.REACT_APP_ASI_ONE_MODEL || 'asi1-mini',
       temperature: config?.temperature || 0.7,
