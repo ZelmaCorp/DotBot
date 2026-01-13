@@ -19,9 +19,15 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "downlevelIteration": true
+    "downlevelIteration": true,
+    "baseUrl": "..",
+    "paths": {
+      "@dotbot/core": ["lib/dotbot-core"],
+      "@dotbot/core/*": ["lib/dotbot-core/*"]
+    }
   },
   "include": [
-    "src"
+    "src",
+    "../lib/dotbot-core"
   ]
 }
