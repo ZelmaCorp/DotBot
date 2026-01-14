@@ -1,5 +1,5 @@
 # Frontend Dockerfile
-FROM node:18-alpine as builder
+FROM node:22-alpine as builder
 
 # Set working directory
 WORKDIR /app
@@ -7,15 +7,22 @@ WORKDIR /app
 # Copy shared libraries first (needed for file: dependencies)
 COPY lib/ ./lib/
 
-# Copy frontend package files
+# Build dotbot-core library first (required by frontend)
+# Use npm install instead of npm ci to handle file: dependencies and devDependencies
+WORKDIR /app/lib/dotbot-core
+RUN npm install && npm run build
+
+# Copy frontend package files (reset WORKDIR first)
+WORKDIR /app
 COPY frontend/package*.json ./frontend/
 COPY frontend/tsconfig.json ./frontend/
 COPY frontend/craco.config.js ./frontend/
 COPY frontend/public ./frontend/public
 
 # Install frontend dependencies (npm will resolve file:../lib/dotbot-core)
+# Use npm install instead of npm ci to handle file: dependencies in monorepo
 WORKDIR /app/frontend
-RUN npm ci
+RUN npm install
 
 # Copy frontend source code
 COPY frontend/src ./src

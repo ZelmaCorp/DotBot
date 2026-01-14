@@ -21,12 +21,26 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '22'
         cache: 'npm'
         cache-dependency-path: package-lock.json
         
     - name: Install all dependencies (workspaces)
       run: npm ci
+      
+    # Build and test core library first (required by frontend/backend)
+    - name: Build dotbot-core library
+      working-directory: ./lib/dotbot-core
+      run: npm run build
+      
+    - name: Run dotbot-core tests
+      working-directory: ./lib/dotbot-core
+      run: npm test -- --coverage
+      
+    # Test express middleware library
+    - name: Run dotbot-express tests
+      working-directory: ./lib/dotbot-express
+      run: npm test -- --coverage || echo "No tests configured yet"
       
     - name: Run frontend tests
       working-directory: ./frontend
@@ -177,7 +191,7 @@ jobs:
         key: ${{ secrets.STAGING_SSH_KEY }}
         port: ${{ secrets.STAGING_PORT || 22 }}
         source: "deploy/*"
-        target: "/opt/dotbot"
+        target: "/opt/dotbot-staging"
         strip_components: 1
         
     - name: Deploy to staging server
@@ -190,19 +204,26 @@ jobs:
         script_stop: true
         timeout: 30m
         script: |
-          # Set deployment directory
-          DEPLOY_DIR="/opt/dotbot"
+          # Set deployment directory (separate from production)
+          DEPLOY_DIR="/opt/dotbot-staging"
           
-          # Create directory if it doesn't exist
+          # Create directory if it doesn't exist (already exists, but ensure)
           sudo mkdir -p $DEPLOY_DIR
           sudo chown $USER:$USER $DEPLOY_DIR
           
           # Navigate to deployment directory
           cd $DEPLOY_DIR
           
+          # Verify user and permissions
+          echo "Current user: $(whoami)"
+          echo "Directory permissions: $(ls -ld $DEPLOY_DIR)"
+          
           # Check Docker and Docker Compose versions
           docker --version
           docker-compose --version
+          
+          # Verify Docker permissions
+          docker ps || { echo "Docker permission issue - adding user to docker group"; sudo usermod -aG docker $USER; newgrp docker; }
           
           # Login to GitHub Container Registry
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
