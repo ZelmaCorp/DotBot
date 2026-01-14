@@ -35,6 +35,11 @@ jobs:
       working-directory: ./lib/dotbot-core
       run: npm test -- --coverage
       
+    # Build dotbot-express library (required by backend)
+    - name: Build dotbot-express library
+      working-directory: ./lib/dotbot-express
+      run: npm run build
+      
     # Test express middleware library
     - name: Run dotbot-express tests
       working-directory: ./lib/dotbot-express
@@ -103,6 +108,9 @@ jobs:
         push: true
         tags: ${{ steps.meta-frontend.outputs.tags }}
         labels: ${{ steps.meta-frontend.outputs.labels }}
+        build-args: |
+          REACT_APP_API_URL=https://sandbox.dotbot.zelmacorp.io/api
+          REACT_APP_BACKEND_URL=https://sandbox.dotbot.zelmacorp.io/api
         cache-from: type=gha
         cache-to: type=gha,mode=max
         
