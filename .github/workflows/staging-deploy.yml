@@ -113,6 +113,7 @@ jobs:
           REACT_APP_BACKEND_URL=https://sandbox.dotbot.zelmacorp.io/api
         cache-from: type=gha
         cache-to: type=gha,mode=max
+      # Verify build args are being used (will show in build logs)
         
     - name: Extract backend metadata
       id: meta-backend

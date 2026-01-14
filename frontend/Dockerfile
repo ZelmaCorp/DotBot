@@ -1,6 +1,14 @@
 # Frontend Dockerfile
 FROM node:22-alpine as builder
 
+# Build arguments for environment variables
+ARG REACT_APP_API_URL=http://localhost:8000
+ARG REACT_APP_BACKEND_URL=http://localhost:8000
+
+# Set environment variables for build
+ENV REACT_APP_API_URL=$REACT_APP_API_URL
+ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
+
 # Set working directory
 WORKDIR /app
 
@@ -27,8 +35,10 @@ RUN npm install
 # Copy frontend source code
 COPY frontend/src ./src
 
-# Build the application
-RUN npm run build
+# Build the application (verify env vars are set)
+RUN echo "Building with REACT_APP_API_URL=$REACT_APP_API_URL" && \
+    echo "Building with REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL" && \
+    npm run build
 
 # Production stage
 FROM nginx:alpine
