@@ -196,7 +196,21 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 // Determine log level
 const getLogLevel = (): string => {
   const envLevel = getEnv('LOG_LEVEL') || getEnv('DOTBOT_LOG_LEVEL');
-  if (envLevel) return envLevel;
+  if (envLevel) {
+    // Normalize log level to pino's expected format (lowercase)
+    const normalized = envLevel.toLowerCase();
+    // Map common variations to pino levels
+    const levelMap: Record<string, string> = {
+      'warning': 'warn',
+      'warn': 'warn',
+      'error': 'error',
+      'info': 'info',
+      'debug': 'debug',
+      'trace': 'trace',
+      'fatal': 'fatal',
+    };
+    return levelMap[normalized] || normalized;
+  }
   
   // Default levels by environment
   if (NODE_ENV === 'production') return 'info';
