@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "@polkadot/api": "^10.12.4",
-    "@polkadot/extension-dapp": "^0.47.2",
-    "@polkadot/keyring": "^12.6.2",
-    "@polkadot/types": "^10.12.4",
-    "@polkadot/util": "^12.6.2",
-    "@polkadot/util-crypto": "^12.6.2",
+    "@acala-network/chopsticks-core": "^1.2.5",
+    "@dotbot/core": "file:../lib/dotbot-core",
+    "@polkadot/api": "^14.3.1",
+    "@polkadot/extension-dapp": "^0.53.1",
+    "@polkadot/keyring": "^14.0.1",
+    "@polkadot/types": "^14.3.1",
+    "@polkadot/util": "^14.0.1",
+    "@polkadot/util-crypto": "^14.0.1",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^14.5.2",
@@ -16,11 +18,15 @@
     "@types/node": "^16.18.68",
     "@types/react": "^18.2.42",
     "@types/react-dom": "^18.2.17",
+    "diff-match-patch": "^1.0.5",
     "framer-motion": "^10.16.16",
+    "idb": "^8.0.3",
+    "jsondiffpatch": "^0.7.3",
+    "lodash-es": "^4.17.22",
     "lucide-react": "^0.294.0",
-    "pino": "^8.17.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
     "react-query": "^3.39.3",
     "react-router-dom": "^6.20.1",
     "react-scripts": "5.0.1",
@@ -31,13 +37,14 @@
     "zustand": "^4.4.7"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
+    "start": "craco start",
+    "build": "craco build",
+    "test": "craco test",
     "eject": "react-scripts eject",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix"
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "generate-prompt": "node scripts/generate-system-prompt.js"
   },
   "eslintConfig": {
     "extends": [
@@ -58,8 +65,29 @@
     ]
   },
   "devDependencies": {
+    "@babel/plugin-transform-class-static-block": "^7.28.3",
+    "@craco/craco": "^7.1.0",
+    "@types/lodash-es": "^4.17.12",
     "@types/socket.io-client": "^3.0.0",
     "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.32"
+    "buffer": "^6.0.3",
+    "crypto-browserify": "^3.12.1",
+    "path-browserify": "^1.0.1",
+    "pino": "^9.9.4",
+    "postcss": "^8.4.32",
+    "process": "^0.11.10",
+    "stream-browserify": "^3.0.0",
+    "url": "^0.11.4",
+    "util": "^0.12.5"
+  },
+  "overrides": {
+    "@polkadot/util": "^14.0.1",
+    "@polkadot/util-crypto": "^14.0.1",
+    "@polkadot/rpc-augment": "^14.3.1"
+  },
+  "jest": {
+    "transformIgnorePatterns": [
+      "node_modules/(?!(@polkadot|@acala-network)/)"
+    ]
   }
 }

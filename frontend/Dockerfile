@@ -1,17 +1,31 @@
 # Frontend Dockerfile
-FROM node:18-alpine as builder
+FROM node:22-alpine as builder
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy shared libraries first (needed for file: dependencies)
+COPY lib/ ./lib/
 
-# Install dependencies
+# Build dotbot-core library first (required by frontend)
+# Use npm install instead of npm ci to handle file: dependencies and devDependencies
+WORKDIR /app/lib/dotbot-core
+RUN npm install && npm run build
+
+# Copy frontend package files (reset WORKDIR first)
+WORKDIR /app
+COPY frontend/package*.json ./frontend/
+COPY frontend/tsconfig.json ./frontend/
+COPY frontend/craco.config.js ./frontend/
+COPY frontend/public ./frontend/public
+
+# Install frontend dependencies (npm will resolve file:../lib/dotbot-core)
+# Use npm install instead of npm ci to handle file: dependencies in monorepo
+WORKDIR /app/frontend
 RUN npm install
 
-# Copy source code
-COPY . .
+# Copy frontend source code
+COPY frontend/src ./src
 
 # Build the application
 RUN npm run build
@@ -23,7 +37,7 @@ FROM nginx:alpine
 RUN apk add --no-cache curl
 
 # Copy built app to nginx
-COPY --from=builder /app/build /usr/share/nginx/html
+COPY --from=builder /app/frontend/build /usr/share/nginx/html
 
 # Create minimal nginx configuration for container
 RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'

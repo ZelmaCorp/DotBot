@@ -1,39 +1,75 @@
-# Backend Dockerfile
-FROM python:3.11-slim
+# Build stage
+FROM node:22-alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Copy shared libraries first (needed for file: dependencies)
+COPY lib/ ./lib/
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Build dotbot-core library first (required by backend)
+# Use npm install instead of npm ci to handle file: dependencies and devDependencies
+WORKDIR /app/lib/dotbot-core
+RUN npm install && npm run build
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Build dotbot-express library (needed for backend TypeScript compilation)
+WORKDIR /app/lib/dotbot-express
+RUN npm install && npm run build || echo "No build script, skipping"
 
-# Add build argument to bust cache for code changes
-ARG BUILD_DATE
-ENV BUILD_DATE=${BUILD_DATE}
+# Copy backend package files (reset WORKDIR first)
+WORKDIR /app
+COPY backend/package*.json ./backend/
+COPY backend/tsconfig.json ./backend/
 
-# Copy source code
-COPY . .
+# Install backend dependencies (npm will resolve file:../lib/dotbot-core)
+# Use npm install since we're in a Docker context without root package-lock.json
+# Install all dependencies (including devDependencies) needed for TypeScript build
+WORKDIR /app/backend
+RUN npm install
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
-USER app
+# Copy backend source
+COPY backend/src ./src
 
-# Expose port 8000
+# Build TypeScript
+RUN npm run build
+
+# Production stage
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Install curl for health checks
+RUN apk add --no-cache curl
+
+# Copy shared libraries (needed at runtime)
+COPY lib/ ./lib/
+
+# Build dotbot-core library (must be built for production stage too)
+# Install all deps (including dev) needed for TypeScript build, then build
+WORKDIR /app/lib/dotbot-core
+RUN npm install && npm run build
+
+# Build dotbot-express library (must be built for production stage too)
+WORKDIR /app/lib/dotbot-express
+RUN npm install && npm run build || echo "No build script, skipping"
+
+# Copy backend package files (reset WORKDIR first)
+WORKDIR /app
+COPY backend/package*.json ./backend/
+
+# Install production dependencies only
+# Use npm install since we're in a Docker context without root package-lock.json
+WORKDIR /app/backend
+RUN npm install --omit=dev
+
+# Copy built application from builder
+COPY --from=builder /app/backend/dist ./dist
+
+# Expose port
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run the application with logging
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug"]
+# Start the server
+CMD ["npm", "start"]

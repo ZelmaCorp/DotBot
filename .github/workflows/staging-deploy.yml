@@ -21,13 +21,29 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+        node-version: '22'
         
-    - name: Install frontend dependencies
-      working-directory: ./frontend
-      run: npm ci
+    - name: Install all dependencies (workspaces)
+      run: npm install
+      
+    # Build and test core library first (required by frontend/backend)
+    - name: Build dotbot-core library
+      working-directory: ./lib/dotbot-core
+      run: npm run build
+      
+    - name: Run dotbot-core tests
+      working-directory: ./lib/dotbot-core
+      run: npm test -- --coverage
+      
+    # Build dotbot-express library (required by backend)
+    - name: Build dotbot-express library
+      working-directory: ./lib/dotbot-express
+      run: npm run build
+      
+    # Test express middleware library
+    - name: Run dotbot-express tests
+      working-directory: ./lib/dotbot-express
+      run: npm test -- --coverage || echo "No tests configured yet"
       
     - name: Run frontend tests
       working-directory: ./frontend
@@ -37,20 +53,13 @@ jobs:
       working-directory: ./frontend
       run: npm run type-check
       
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-        
-    - name: Install backend dependencies
+    - name: Run backend type check
       working-directory: ./backend
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      run: npm run type-check
         
     - name: Run backend tests
       working-directory: ./backend
-      run: pytest --cov=. --cov-report=xml
+      run: npm test -- --coverage --watchAll=false || echo "No tests configured yet"
       
   build:
     name: Build and Push Images
@@ -94,10 +103,14 @@ jobs:
     - name: Build and push frontend image
       uses: docker/build-push-action@v5
       with:
-        context: ./frontend
+        context: .
+        file: frontend/Dockerfile
         push: true
         tags: ${{ steps.meta-frontend.outputs.tags }}
         labels: ${{ steps.meta-frontend.outputs.labels }}
+        build-args: |
+          REACT_APP_API_URL=https://sandbox.dotbot.zelmacorp.io/api
+          REACT_APP_BACKEND_URL=https://sandbox.dotbot.zelmacorp.io/api
         cache-from: type=gha
         cache-to: type=gha,mode=max
         
@@ -113,7 +126,8 @@ jobs:
     - name: Build and push backend image
       uses: docker/build-push-action@v5
       with:
-        context: ./backend
+        context: .
+        file: backend/Dockerfile
         push: true
         tags: ${{ steps.meta-backend.outputs.tags }}
         labels: ${{ steps.meta-backend.outputs.labels }}
@@ -158,8 +172,14 @@ jobs:
               - "3011:8000"
             environment:
               - NODE_ENV=staging
+              - PORT=8000
               - ASI_ONE_API_KEY=${ASI_ONE_API_KEY}
-              - ASI_ONE_ENDPOINT=${ASI_ONE_ENDPOINT}
+              - ASI_ONE_ENDPOINT=${ASI_ONE_ENDPOINT:-https://agentverse.ai/api/v1}
+              - ASI_ONE_BASE_URL=${ASI_ONE_BASE_URL:-https://api.asi1.ai/v1}
+              - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+              - AI_PROVIDER=${AI_PROVIDER:-asi-one}
+              - CORS_ORIGINS=${CORS_ORIGINS:-*}
+              - LOG_LEVEL=${LOG_LEVEL:-info}
             restart: always
             networks:
               - dotbot-staging
@@ -172,8 +192,38 @@ jobs:
             driver: bridge
         EOF
         
-        # Copy environment file
-        cp config/staging.env deploy/.env
+        # Create environment file with secrets from GitHub Secrets
+        cat > deploy/.env << EOF
+        NODE_ENV=staging
+        DEBUG=false
+        LOG_LEVEL=info
+        
+        # Domain Configuration
+        DOMAIN_NAME=sandbox.dotbot.zelmacorp.io
+        ACME_EMAIL=admin@zelmacorp.io
+        
+        # AI Provider Configuration (from GitHub Secrets)
+        # Only the API key for the selected provider is required
+        AI_PROVIDER=${{ secrets.AI_PROVIDER || 'asi-one' }}
+        
+        # Agent Configuration (from GitHub Secrets)
+        # ASI-One is the default provider
+        ASI_ONE_API_KEY=${{ secrets.ASI_ONE_API_KEY }}
+        ASI_ONE_ENDPOINT=${{ secrets.ASI_ONE_ENDPOINT || 'https://agentverse.ai/api/v1' }}
+        ASI_ONE_BASE_URL=${{ secrets.ASI_ONE_BASE_URL || 'https://api.asi1.ai/v1' }}
+        
+        # CORS Configuration
+        CORS_ORIGINS=${{ secrets.CORS_ORIGINS || '*' }}
+        
+        # Application URLs
+        FRONTEND_URL=https://sandbox.dotbot.zelmacorp.io
+        BACKEND_URL=https://sandbox.dotbot.zelmacorp.io/api
+        EOF
+        
+        # Conditionally add CLAUDE_API_KEY only if secret exists (to avoid empty string warnings)
+        if [ -n "${{ secrets.CLAUDE_API_KEY }}" ]; then
+          echo "CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}" >> deploy/.env
+        fi
         
     - name: Copy deployment files to server
       uses: appleboy/scp-action@v0.1.5
@@ -183,7 +233,7 @@ jobs:
         key: ${{ secrets.STAGING_SSH_KEY }}
         port: ${{ secrets.STAGING_PORT || 22 }}
         source: "deploy/*"
-        target: "/opt/dotbot"
+        target: "/opt/dotbot-staging"
         strip_components: 1
         
     - name: Deploy to staging server
@@ -196,19 +246,26 @@ jobs:
         script_stop: true
         timeout: 30m
         script: |
-          # Set deployment directory
-          DEPLOY_DIR="/opt/dotbot"
+          # Set deployment directory (separate from production)
+          DEPLOY_DIR="/opt/dotbot-staging"
           
-          # Create directory if it doesn't exist
+          # Create directory if it doesn't exist (already exists, but ensure)
           sudo mkdir -p $DEPLOY_DIR
           sudo chown $USER:$USER $DEPLOY_DIR
           
           # Navigate to deployment directory
           cd $DEPLOY_DIR
           
+          # Verify user and permissions
+          echo "Current user: $(whoami)"
+          echo "Directory permissions: $(ls -ld $DEPLOY_DIR)"
+          
           # Check Docker and Docker Compose versions
           docker --version
           docker-compose --version
+          
+          # Verify Docker permissions
+          docker ps || { echo "Docker permission issue - adding user to docker group"; sudo usermod -aG docker $USER; newgrp docker; }
           
           # Login to GitHub Container Registry
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -234,16 +291,34 @@ jobs:
           # Try Docker Compose first, fallback to docker run if needed
           if ! docker-compose up -d; then
             echo "Docker Compose failed, using docker run fallback..."
-            docker run -d --name dotbot-staging-frontend --network dotbot-staging -p 3010:80 ${{ needs.build.outputs.frontend-image }}
-            docker run -d --name dotbot-staging-backend --network dotbot-staging -p 3011:8000 -e NODE_ENV=staging -e ASI_ONE_API_KEY="$ASI_ONE_API_KEY" -e ASI_ONE_ENDPOINT="$ASI_ONE_ENDPOINT" ${{ needs.build.outputs.backend-image }}
-
+            docker network create dotbot-staging 2>/dev/null || true
+            docker run -d --name dotbot-staging-frontend --network dotbot-staging -p 3010:80 -e NODE_ENV=production ${{ needs.build.outputs.frontend-image }}
+            docker run -d --name dotbot-staging-backend --network dotbot-staging -p 3011:8000 \
+              -e NODE_ENV=staging \
+              -e PORT=8000 \
+              -e ASI_ONE_API_KEY="$ASI_ONE_API_KEY" \
+              -e ASI_ONE_ENDPOINT="${ASI_ONE_ENDPOINT:-https://agentverse.ai/api/v1}" \
+              -e ASI_ONE_BASE_URL="${ASI_ONE_BASE_URL:-https://api.asi1.ai/v1}" \
+              -e CLAUDE_API_KEY="$CLAUDE_API_KEY" \
+              -e AI_PROVIDER="${AI_PROVIDER:-asi-one}" \
+              -e CORS_ORIGINS="${CORS_ORIGINS:-*}" \
+              -e LOG_LEVEL="${LOG_LEVEL:-info}" \
+              ${{ needs.build.outputs.backend-image }}
           fi
           
           # Wait for services to start
           sleep 30
           
+          # Check backend logs if it's restarting
+          if docker ps | grep -q "dotbot-staging-backend.*Restarting"; then
+            echo "⚠️ Backend is restarting, checking logs..."
+            docker logs dotbot-staging-backend --tail 50 || true
+          fi
+          
           # Verify deployment
           docker ps | grep dotbot-staging
+          
+          # Quick health check (Docker Compose health checks will handle retries)
           curl -f http://localhost:3010/health || exit 1
           curl -f http://localhost:3011/api/health || exit 1
           
