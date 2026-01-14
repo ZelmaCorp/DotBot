@@ -1,0 +1,27 @@
+{
+  "name": "dotbot-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "lib/dotbot-core",
+    "lib/dotbot-express",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run start --workspace=frontend",
+    "build:core": "npm run build --workspace=@dotbot/core",
+    "build": "npm run build:core && npm run build --workspace=backend && npm run build --workspace=frontend",
+    "test": "npm run test --workspaces --if-present",
+    "test:core": "npm run test --workspace=@dotbot/core",
+    "test:express": "npm run test --workspace=@dotbot/express",
+    "test:backend": "npm run test --workspace=backend",
+    "test:frontend": "npm run test --workspace=frontend",
+    "install:all": "npm install && npm run install --workspaces"
+  },
+  "devDependencies": {
+    "@stoplight/prism-cli": "^5.14.2",
+    "lerna": "^8.0.0"
+  }
+}

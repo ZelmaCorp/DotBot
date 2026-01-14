@@ -4,12 +4,207 @@ This document explains **why** DotBot is built the way it is. It covers design d
 
 ## Table of Contents
 
+- [System Architecture](#system-architecture)
 - [Core Design Principles](#core-design-principles)
 - [Module Structure](#module-structure)
+- [Testing Infrastructure](#testing-infrastructure)
 - [Design Decisions](#design-decisions)
 - [Data Flow](#data-flow)
 - [Conventions](#conventions)
 - [Dependencies](#dependencies)
+
+---
+
+## System Architecture
+
+DotBot is a distributed system with frontend and backend components, designed for secure API key management and scalable blockchain operations.
+
+### High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         FRONTEND                            │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │  React Application                                  │    │
+│  │  - UI Components                                    │    │
+│  │  - Wallet Integration                               │    │
+│  │  - dotbot-core (client-side operations)  │    │
+│  └────────────────────────────────────────────────────┘    │
+│                          ↓ HTTP API                         │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│                         BACKEND                             │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │  Express.js Server (TypeScript)                     │    │
+│  │  - @dotbot/express (routes & middleware)            │    │
+│  │  - @dotbot/core (server-side operations)            │    │
+│  │  - Secure API key management                        │    │
+│  │  - OpenAPI specification (base truth)               │    │
+│  │  - Prism mock server for testing                    │    │
+│  └────────────────────────────────────────────────────┘    │
+│                          ↓                                  │
+│  ┌────────────────────────────────────────────────────┐    │
+│  │  AI Providers                                       │    │
+│  │  - ASI-One (Fetch.ai)                              │    │
+│  │  - Claude (Anthropic)                              │    │
+│  └────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Project Structure
+
+```
+DotBot/                      # Monorepo root
+├── package.json             # Workspace configuration (4 workspaces)
+│
+├── lib/                     # Shared libraries (both frontend & backend)
+│   ├── dotbot-core/         # @dotbot/core - Core blockchain logic
+│   │   ├── agents/          # Blockchain operation agents
+│   │   ├── executionEngine/ # Transaction execution system
+│   │   ├── services/        # AI services, RPC management, logging
+│   │   ├── prompts/         # LLM system prompts
+│   │   ├── scenarioEngine/  # Testing framework
+│   │   └── env.ts           # Environment abstraction (browser/Node.js)
+│   │
+│   └── dotbot-express/      # @dotbot/express - Express integration
+│       ├── src/
+│       │   ├── routes/      # API routes (chat, dotbot operations, sessions)
+│       │   ├── middleware/  # Request logging, error handling
+│       │   ├── utils/       # Utilities (logger)
+│       │   └── index.ts     # Main exports
+│       └── package.json
+│
+├── backend/
+│   ├── src/
+│   │   ├── app.ts           # Express app configuration
+│   │   └── index.ts         # Main server entry point
+│   ├── test/
+│   │   └── integration/
+│   │       └── openapi-test-runner.ts  # OpenAPI-based integration tests
+│   ├── openapi.yaml         # API specification (base truth)
+│   ├── test-mock-api.sh     # Prism mock server launcher
+│   ├── package.json         # Links to @dotbot/core, @dotbot/express
+│   └── tsconfig.json
+│
+└── frontend/
+    ├── src/
+    │   ├── components/      # React UI components
+    │   └── services/
+    │       └── backendApi.ts # Backend API client
+    ├── package.json         # Links to @dotbot/core
+    └── tsconfig.json
+```
+
+**Key principle:** Both frontend and backend import from the **same** `lib/` folder at project root. No code duplication.
+
+**Monorepo Structure:**
+- **Root**: npm workspaces configuration
+- **4 Workspaces**: `backend`, `frontend`, `lib/dotbot-core`, `lib/dotbot-express`
+- **Shared Dependencies**: Libraries link via `file:../lib/dotbot-core` syntax
+- **Independent Development**: Each workspace has its own build/test scripts
+
+### Design Rationale: Why Backend?
+
+**Problem**: AI provider API keys exposed in frontend code
+
+**Solution**: Move AI services to backend, keep blockchain operations client-side
+
+**Benefits**:
+1. **Security**: API keys never exposed to client
+2. **Flexibility**: Easy to switch AI providers server-side
+3. **Cost Control**: Rate limiting and usage monitoring
+4. **Hybrid Architecture**: Blockchain ops stay client-side (leverages user's wallet)
+
+### dotbot-core: Environment-Agnostic Design
+
+The `@dotbot/core` library is designed to work in both browser and Node.js:
+
+```typescript
+// Environment abstraction (lib/dotbot-core/env.ts)
+export function getEnv(key: string): string | undefined {
+  // In browser: tries REACT_APP_* first, falls back to regular name
+  // In Node.js: uses process.env directly
+  if (typeof process !== 'undefined' && process.env) {
+    const reactAppKey = key.startsWith('REACT_APP_') ? key : `REACT_APP_${key}`;
+    return process.env[reactAppKey] || process.env[key];
+  }
+  return undefined;
+}
+```
+
+**Key Features**:
+- Works in both environments without modification
+- Storage abstraction (localStorage in browser, in-memory in Node.js)
+- No browser-specific APIs in core logic
+- **Shared codebase**: Both frontend and backend import from `lib/dotbot-core`
+- Future-ready for npm package publishing
+
+**Usage in both environments:**
+```typescript
+// In frontend/src/App.tsx
+import { DotBot } from '@dotbot/core';
+import { AssetTransferAgent } from '@dotbot/core/agents/asset-transfer';
+
+// In backend/src/index.ts
+import { AIService } from '@dotbot/core/services/ai/aiService';
+
+// Both resolve to: ../lib/dotbot-core (same files!)
+```
+
+### API Flow: Chat Example
+
+```typescript
+// 1. Frontend sends request to backend
+const response = await fetch('http://localhost:8000/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({
+    message: 'Transfer 10 DOT to Alice',
+    provider: 'asi-one'
+  })
+});
+
+// 2. Backend (dotbot-express) handles request
+router.post('/api/chat', async (req, res) => {
+  const aiService = new AIService(); // Uses server-side API keys
+  const response = await aiService.sendMessage(req.body.message);
+  res.json({ response });
+});
+
+// 3. AI response returned to frontend
+// 4. Frontend uses dotbot-core to execute blockchain operations client-side
+```
+
+### Shared Library Development
+
+**Current Setup (Monorepo):**
+```
+DotBot/lib/dotbot-core     ← Shared by frontend and backend
+         └─ (TypeScript path aliases allow importing as @dotbot/core)
+```
+
+**Advantages:**
+- Edit once, both frontend and backend get updates immediately
+- No code duplication or sync issues
+- Single source of truth for business logic
+- Type safety across entire stack
+
+**Future npm Package Migration:**
+
+When `@dotbot/core` stabilizes, publish to npm:
+
+```bash
+npm install @dotbot/core      # Shared blockchain operations
+npm install @dotbot/express   # Backend Express integration
+npm install @dotbot/react     # Frontend React components (future)
+```
+
+**Migration Path**:
+1. ✅ Current: Monorepo with shared `lib/` folder
+2. Publish `@dotbot/core` when stable (usable in any environment)
+3. Publish `@dotbot/express` for backend integrations
+4. Publish `@dotbot/react` for frontend components
+5. Projects install packages instead of sharing via monorepo
 
 ---
 
@@ -473,6 +668,84 @@ scenarioEngine/
 - Generate detailed evaluation reports
 
 **Design Principle**: ScenarioEngine tests DotBot **through** the UI, not around it. This ensures tests reflect real user experience and catch UI-level issues.
+
+---
+
+## Testing Infrastructure
+
+### OpenAPI-Based Testing
+
+**Purpose**: Ensure backend API implementation matches the OpenAPI specification (base truth).
+
+**Structure:**
+```
+backend/
+├── openapi.yaml                    # API specification (base truth)
+├── test-mock-api.sh               # Launch Prism mock server
+└── test/
+    └── integration/
+        └── openapi-test-runner.ts  # OpenAPI test runner
+```
+
+**Key Components:**
+
+1. **OpenAPI Specification (`openapi.yaml`)**
+   - Single source of truth for all API contracts
+   - Defines endpoints, request/response schemas, error codes
+   - Used by Prism for mock server generation
+   - Validated against actual implementation in tests
+
+2. **Prism Mock Server**
+   - Generates realistic mock API based on openapi.yaml
+   - Enables frontend development before backend completion
+   - Runs on port 8000 (same as real backend)
+   - Command: `npm run mock` (from backend/)
+
+3. **OpenAPITestRunner**
+   - Validates actual backend implementation against openapi.yaml
+   - Tests all endpoints defined in specification
+   - Validates request/response schemas using AJV
+   - Can test specific endpoints: `npm run test:endpoint /api/health`
+   - Run all tests: `npm run test:integration`
+
+**Testing Workflow:**
+
+```
+1. Define API contract in openapi.yaml
+   ↓
+2. Generate mock server with Prism
+   ↓
+3. Develop frontend against mock
+   ↓
+4. Implement backend endpoints
+   ↓
+5. Run OpenAPITestRunner to validate
+   ↓
+6. Fix discrepancies until all tests pass
+```
+
+**Example Test Run:**
+
+```bash
+# Test all endpoints
+cd backend
+npm run test:integration
+
+# Test specific endpoint
+npm run test:endpoint /api/health
+
+# Start mock server for development
+npm run mock
+```
+
+**Benefits:**
+- Contract-first API development
+- Frontend and backend can develop in parallel
+- Automated validation of API compliance
+- Self-documenting API specification
+- Consistent error responses
+
+**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -1551,23 +1824,82 @@ class AgentError extends Error {
 **Polkadot.js API** (`@polkadot/api`)
 - Purpose: Blockchain interaction
 - Why: Industry standard, well-maintained
-- Version: Latest stable
+- Version: ^14.3.1
 
 **Polkadot.js Util** (`@polkadot/util`, `@polkadot/util-crypto`)
 - Purpose: Address encoding, BN math, cryptography
 - Why: Polkadot-native utilities
+- Version: ^14.0.1
 
 **Chopsticks** (`@acala-network/chopsticks`)
 - Purpose: Runtime simulation
 - Why: Most accurate pre-execution validation
 - Optional: Falls back to dry-run if unavailable
 
+### Backend Dependencies
+
+**Express.js** (`express`)
+- Purpose: HTTP server and routing
+- Why: Industry-standard Node.js web framework
+- Version: ^4.18.2
+
+**@dotbot/express**
+- Purpose: Express integration layer for DotBot
+- Why: Encapsulates routing, middleware, session management
+- Location: `lib/dotbot-express` (workspace)
+
+**@dotbot/core**
+- Purpose: Core blockchain logic (shared with frontend)
+- Why: Single source of truth for DotBot functionality
+- Location: `lib/dotbot-core` (workspace)
+
+**Pino** (`pino`)
+- Purpose: Structured logging
+- Why: Fast, low-overhead, production-ready
+- Version: ^9.9.4
+
+### Testing & Development Dependencies
+
+**Prism** (`@stoplight/prism-cli`)
+- Purpose: OpenAPI mock server
+- Why: Generate realistic mocks from openapi.yaml
+- Version: ^5.14.2
+
+**TypeScript** (`typescript`)
+- Purpose: Type-safe JavaScript
+- Why: Type safety across entire stack
+- Version: ^5.3.3
+
+**ts-node-dev** (`ts-node-dev`)
+- Purpose: Development server with hot reload
+- Why: Fast development iteration
+- Version: ^2.0.0
+
+**AJV** (`ajv`, `ajv-formats`)
+- Purpose: JSON schema validation
+- Why: Validate OpenAPI request/response schemas
+- Version: ^8.17.1
+
+**Axios** (`axios`)
+- Purpose: HTTP client for integration tests
+- Why: Reliable, well-documented
+- Version: ^1.13.2
+
+### Monorepo Dependencies
+
+**npm workspaces** (built-in)
+- Purpose: Monorepo management
+- Why: Built into npm, no extra tools needed
+- Workspaces: backend, frontend, lib/dotbot-core, lib/dotbot-express
+
 ### Design Rationale
 
 1. **Minimal Dependencies**: Only essential libraries
-2. **No Framework Lock-in**: Core logic is framework-agnostic
-3. **Production-Tested**: All dependencies widely used in Polkadot ecosystem
-4. **Type Safety**: All dependencies have TypeScript support
+2. **TypeScript Everywhere**: Type safety across frontend, backend, libs
+3. **No Framework Lock-in**: Core logic (`@dotbot/core`) is framework-agnostic
+4. **Production-Tested**: All dependencies widely used in production
+5. **Contract-First**: OpenAPI + Prism ensures API compliance
+6. **Monorepo Benefits**: Shared dependencies, atomic changes
 
 ---
 
@@ -1833,6 +2165,184 @@ const result = evaluator.evaluate(scenario, stepResults);
   - StateAllocator with multi-mode support
   - ScenarioExecutor with event-driven UI integration
   - Evaluator with LLM-consumable logging
+
+---
+
+### Decision 12: TypeScript Backend Migration and Monorepo Structure
+
+**Context:**
+- Initial backend was Python-based with FastAPI (was not used)
+- Frontend was React/TypeScript with separate lib folder
+- Code duplication between frontend lib and potential backend usage
+- Different languages complicated development workflow
+- Agent system was separate (Python-based Fetch.ai agents)
+
+**Decision:**
+Migrate to TypeScript backend with monorepo structure:
+1. Replace Python backend with Express.js/TypeScript backend
+2. Move `@dotbot/core` to project root `lib/` folder
+3. Create `@dotbot/express` library for backend Express integration
+4. Use npm workspaces for monorepo management
+5. Define API contract in `openapi.yaml` as base truth
+6. Use Prism for mock server generation
+7. Implement OpenAPI-based integration testing
+
+**Rationale:**
+
+1. **Type Safety Across Stack**: TypeScript everywhere (frontend, backend, shared libs)
+2. **Code Sharing**: `@dotbot/core` shared between frontend and backend without duplication
+3. **Developer Experience**: Single language, consistent tooling, easier debugging
+4. **Monorepo Benefits**: 
+   - Single dependency management
+   - Atomic cross-workspace changes
+   - Easier refactoring
+   - Better CI/CD
+5. **Contract-First API**: OpenAPI spec as single source of truth prevents drift
+6. **Testing Infrastructure**: Prism + OpenAPITestRunner ensure compliance
+
+**Implementation:**
+
+**Before (v0.1.0):**
+```
+DotBot/
+├── frontend/
+│   ├── src/lib/         # Frontend-only lib
+│   └── package.json
+├── backend/             # Python/FastAPI
+│   ├── main.py
+│   └── requirements.txt
+└── agents/              # Separate Python agents
+```
+
+**After (v0.2.0):**
+```
+DotBot/                  # Monorepo root
+├── package.json         # Workspaces: backend, frontend, lib/*
+├── lib/
+│   ├── dotbot-core/     # Shared core logic
+│   └── dotbot-express/  # Express integration
+├── backend/             # TypeScript/Express
+│   ├── src/
+│   ├── openapi.yaml
+│   └── package.json     # Depends on: @dotbot/core, @dotbot/express
+└── frontend/            # React/TypeScript
+    └── package.json     # Depends on: @dotbot/core
+```
+
+**API Structure:**
+
+```typescript
+// Shared core (lib/dotbot-core)
+export { DotBot } from './dotbot';
+export { AssetTransferAgent } from './agents/asset-transfer';
+export { AIService } from './services/ai/aiService';
+
+// Express integration (lib/dotbot-express)
+export { chatRouter } from './routes/chat';
+export { dotbotRouter } from './routes/dotbot';
+export { sessionManager } from './sessionManager';
+
+// Backend (backend/src)
+import express from 'express';
+import { chatRouter, dotbotRouter } from '@dotbot/express';
+
+const app = express();
+app.use('/api', chatRouter);
+app.use('/api', dotbotRouter);
+```
+
+**OpenAPI Contract Example:**
+
+```yaml
+# backend/openapi.yaml
+paths:
+  /api/chat:
+    post:
+      summary: Send a chat message
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: { type: string }
+                provider: { type: string, enum: [asi-one, claude] }
+      responses:
+        '200':
+          description: Chat response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+```
+
+**Alternatives Considered:**
+
+1. ❌ **Keep Python Backend**
+   - Problem: Code duplication (Python backend can't use TypeScript lib)
+   - Problem: Different dev environments
+   - Problem: Type mismatches at API boundary
+
+2. ❌ **Polyrepo (Separate Repositories)**
+   - Problem: Dependency management complexity
+   - Problem: Hard to make atomic changes across packages
+   - Problem: Version synchronization issues
+
+3. ✅ **TypeScript Backend + Monorepo**
+   - Type safety across entire stack
+   - Code sharing without duplication
+   - Unified development environment
+   - Atomic cross-package changes
+
+**Consequences:**
+
+✅ **Benefits:**
+- Single language (TypeScript) across stack
+- Shared `@dotbot/core` logic (no duplication)
+- Better type safety (no JSON type mismatches)
+- Easier refactoring (changes propagate)
+- Consistent developer experience
+- OpenAPI ensures API contract compliance
+- Prism enables parallel frontend/backend development
+
+⚠️ **Trade-offs:**
+- Migration effort (Python → TypeScript)
+- Monorepo complexity (workspace management)
+- OpenAPI maintenance (must keep in sync)
+
+📊 **Migration Stats:**
+- **Deleted**: ~2000 lines Python backend
+- **Deleted**: Separate agents/ folder (now in `@dotbot/core`)
+- **Added**: `lib/dotbot-express` (~800 lines)
+- **Added**: `openapi.yaml` (1100 lines)
+- **Added**: OpenAPITestRunner (~400 lines)
+- **Added**: Prism integration
+- **Refactored**: Frontend to use shared `lib/dotbot-core`
+
+**Testing Infrastructure:**
+
+```bash
+# Run mock server (Prism)
+npm run mock
+
+# Test specific endpoint
+npm run test:endpoint /api/health
+
+# Test all endpoints
+npm run test:integration
+```
+
+**Future Extensions:**
+
+This architecture enables:
+1. **NPM Publishing**: Publish `@dotbot/core` and `@dotbot/express` to npm
+2. **Additional Backends**: Other frameworks can use `@dotbot/core` + `@dotbot/express`
+3. **Microservices**: Extract workspaces into separate services if needed
+4. **Shared Tooling**: ESLint, Prettier, TSConfig across all workspaces
+
+**History:**
+- v0.2.0 (PR #60+, January 2026): TypeScript backend migration, monorepo structure
+- v0.1.0: Python backend with FastAPI
 
 ---
 

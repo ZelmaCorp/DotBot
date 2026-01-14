@@ -5,12 +5,15 @@ This document provides comprehensive API documentation for integrating DotBot in
 ## Table of Contents
 
 - [Getting Started](#getting-started)
+- [Backend API](#backend-api) ← NEW in v0.2.0
+- [OpenAPI Specification](#openapi-specification) ← NEW in v0.2.0
+- [Integration Testing](#integration-testing) ← NEW in v0.2.0
 - [Core Concepts](#core-concepts)
 - [Multi-Network Configuration](#multi-network-configuration)
 - [DotBot Core Multi-Network Support](#dotbot-core-multi-network-support)
-- [ChatInstance API](#chatinstance-api) ← NEW in v0.2.0
-- [Storage API](#storage-api) ← NEW in v0.2.0
-- [DataManager API](#datamanager-api) ← NEW in v0.2.0
+- [ChatInstance API](#chatinstance-api)
+- [Storage API](#storage-api)
+- [DataManager API](#datamanager-api)
 - [Agents API](#agents-api)
 - [Execution Engine API](#execution-engine-api)
 - [Utilities API](#utilities-api)
@@ -24,9 +27,46 @@ This document provides comprehensive API documentation for integrating DotBot in
 
 ### Installation
 
+#### Monorepo Setup (Recommended)
+
+```bash
+# Clone repository
+git clone <repository-url>
+cd DotBot
+
+# Install all workspaces
+npm install
+
+# Build shared libraries
+npm run build:core
+
+# Start backend (Terminal 1)
+npm run dev:backend
+
+# Start frontend (Terminal 2)
+npm run dev:frontend
+```
+
+**Monorepo Structure:**
+```
+DotBot/
+├── package.json         # Workspace root (4 workspaces)
+├── lib/
+│   ├── dotbot-core/     # Shared blockchain logic
+│   └── dotbot-express/  # Express integration
+├── backend/             # TypeScript/Express backend
+└── frontend/            # React frontend
+```
+
+#### Standalone Installation (Advanced)
+
+If using DotBot libraries in your own project:
+
 ```bash
 npm install @polkadot/api @polkadot/util @polkadot/util-crypto
 ```
+
+**Note:** In v0.2.0, `@dotbot/core` and `@dotbot/express` are workspace packages. Future versions will publish to npm for standalone installation.
 
 ### Basic Setup
 
@@ -150,6 +190,685 @@ DotBot has multi-network infrastructure:
 - ⚠️ **Partial**: RPC infrastructure only (uses Polkadot knowledge as fallback)
 
 **Kusama Note:** Infrastructure is ready (RPC endpoints, factory functions), but Kusama-specific knowledge base is not yet implemented. Operations will work but LLM context will use Polkadot information (may mention wrong parachains/DEXes).
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+## Backend API
+
+**NEW** in v0.2.0: DotBot backend provides REST API endpoints for AI chat and blockchain operations.
+
+### Architecture
+
+```
+Frontend ←HTTP→ Backend (Express.js) ←→ @dotbot/core ←→ Polkadot Network
+                    ↓
+              AI Providers (ASI-One, Claude)
+```
+
+**Key Benefits:**
+- **Secure API Key Management**: AI provider keys stored server-side
+- **Session Management**: Persistent DotBot instances across requests
+- **Unified Interface**: Single API for chat + blockchain operations
+
+### Base URL
+
+```
+Development: http://localhost:8000
+Production: https://api.dotbot.example.com
+```
+
+### Authentication
+
+Currently no authentication required for local development. Production deployments should implement appropriate auth mechanisms.
+
+---
+
+### Health Endpoints
+
+#### `GET /hello`
+
+Simple hello world endpoint.
+
+**Response:**
+```json
+{
+  "message": "Hello World",
+  "service": "DotBot Backend",
+  "version": "0.1.0"
+}
+```
+
+---
+
+#### `GET /api/health`
+
+Health check endpoint.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-01-14T12:00:00.000Z"
+}
+```
+
+---
+
+#### `GET /api/status`
+
+Detailed status information.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "uptime": 3600,
+  "memory": {
+    "used": 150000000,
+    "total": 500000000
+  },
+  "timestamp": "2026-01-14T12:00:00.000Z"
+}
+```
+
+---
+
+### Chat Endpoints
+
+#### `POST /api/chat`
+
+Simple AI chat endpoint (no blockchain operations).
+
+**Request:**
+```json
+{
+  "message": "What is Polkadot?",
+  "provider": "asi-one",
+  "conversationHistory": [
+    { "role": "user", "content": "Previous message" },
+    { "role": "assistant", "content": "Previous response" }
+  ]
+}
+```
+
+**Parameters:**
+- `message` (string, required): User's message
+- `provider` (string, optional): AI provider (`asi-one` or `claude`). Default: `asi-one`
+- `conversationHistory` (array, optional): Previous conversation context
+
+**Response:**
+```json
+{
+  "response": "Polkadot is a multi-chain platform...",
+  "provider": "asi-one",
+  "timestamp": "2026-01-14T12:00:00.000Z"
+}
+```
+
+**Example:**
+```typescript
+const response = await fetch('http://localhost:8000/api/chat', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    message: 'What is Polkadot?',
+    provider: 'asi-one'
+  })
+});
+
+const data = await response.json();
+console.log(data.response);
+```
+
+---
+
+### DotBot Endpoints
+
+Full DotBot functionality with blockchain operations.
+
+#### `POST /api/dotbot/initialize`
+
+Initialize a new DotBot session.
+
+**Request:**
+```json
+{
+  "wallet": {
+    "address": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+    "name": "Alice",
+    "source": "polkadot-js"
+  },
+  "network": "westend",
+  "environment": "testnet"
+}
+```
+
+**Parameters:**
+- `wallet` (object, required): Wallet account information
+- `network` (string, optional): Network identifier. Default: `'polkadot'`
+- `environment` (string, optional): Environment (`'mainnet'` | `'testnet'`). Auto-detected from network
+
+**Response:**
+```json
+{
+  "sessionId": "session_1234567890_abc",
+  "wallet": {
+    "address": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+    "name": "Alice"
+  },
+  "network": "westend",
+  "environment": "testnet"
+}
+```
+
+---
+
+#### `POST /api/dotbot/chat`
+
+Send a message to DotBot (with blockchain operations support).
+
+**Request:**
+```json
+{
+  "sessionId": "session_1234567890_abc",
+  "message": "Send 2 DOT to Bob",
+  "provider": "asi-one"
+}
+```
+
+**Parameters:**
+- `sessionId` (string, required): Session ID from `/initialize`
+- `message` (string, required): User's message
+- `provider` (string, optional): AI provider. Default: `'asi-one'`
+
+**Response:**
+```json
+{
+  "response": "I've prepared a transfer of 2 DOT to Bob...",
+  "plan": {
+    "operations": [
+      {
+        "agent": "AssetTransferAgent",
+        "action": "transfer",
+        "params": {
+          "recipient": "Bob",
+          "amount": "2",
+          "chain": "assetHub"
+        }
+      }
+    ]
+  },
+  "executed": false,
+  "conversationItems": [...]
+}
+```
+
+---
+
+#### `POST /api/dotbot/execute`
+
+Execute a prepared transaction (after user approval).
+
+**Request:**
+```json
+{
+  "sessionId": "session_1234567890_abc",
+  "executionId": "exec_1234567890_xyz"
+}
+```
+
+**Parameters:**
+- `sessionId` (string, required): Session ID
+- `executionId` (string, required): Execution ID from chat response
+
+**Response:**
+```json
+{
+  "status": "completed",
+  "result": {
+    "success": true,
+    "txHash": "0x1234...",
+    "blockHash": "0x5678..."
+  }
+}
+```
+
+---
+
+#### `GET /api/dotbot/session/:sessionId`
+
+Get session details.
+
+**Response:**
+```json
+{
+  "sessionId": "session_1234567890_abc",
+  "wallet": { "address": "...", "name": "Alice" },
+  "network": "westend",
+  "environment": "testnet",
+  "chatId": "chat_1234567890_xyz",
+  "createdAt": "2026-01-14T12:00:00.000Z"
+}
+```
+
+---
+
+#### `GET /api/dotbot/history/:sessionId`
+
+Get conversation history for a session.
+
+**Response:**
+```json
+{
+  "sessionId": "session_1234567890_abc",
+  "messages": [
+    {
+      "type": "user",
+      "content": "Send 2 DOT to Bob",
+      "timestamp": 1705233600000
+    },
+    {
+      "type": "bot",
+      "content": "I've prepared a transfer...",
+      "timestamp": 1705233601000
+    }
+  ]
+}
+```
+
+---
+
+#### `DELETE /api/dotbot/session/:sessionId`
+
+Delete a session and clean up resources.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Session deleted successfully"
+}
+```
+
+---
+
+### Error Responses
+
+All endpoints return consistent error format:
+
+```json
+{
+  "error": "Error message",
+  "code": "ERROR_CODE",
+  "details": { ... }
+}
+```
+
+**Common Error Codes:**
+- `SESSION_NOT_FOUND` - Session ID not found
+- `INVALID_REQUEST` - Request validation failed
+- `AI_PROVIDER_ERROR` - AI provider returned error
+- `BLOCKCHAIN_ERROR` - Blockchain operation failed
+- `INTERNAL_ERROR` - Server internal error
+
+**HTTP Status Codes:**
+- `200` - Success
+- `400` - Bad Request (validation error)
+- `404` - Not Found (session/resource not found)
+- `500` - Internal Server Error
+
+---
+
+### Client Example
+
+Complete TypeScript client example:
+
+```typescript
+class DotBotClient {
+  constructor(private baseUrl: string) {}
+
+  async initialize(wallet: WalletAccount, network?: Network) {
+    const response = await fetch(`${this.baseUrl}/api/dotbot/initialize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet, network })
+    });
+    const data = await response.json();
+    return data.sessionId;
+  }
+
+  async chat(sessionId: string, message: string) {
+    const response = await fetch(`${this.baseUrl}/api/dotbot/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, message })
+    });
+    return await response.json();
+  }
+
+  async execute(sessionId: string, executionId: string) {
+    const response = await fetch(`${this.baseUrl}/api/dotbot/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, executionId })
+    });
+    return await response.json();
+  }
+}
+
+// Usage
+const client = new DotBotClient('http://localhost:8000');
+
+const sessionId = await client.initialize({
+  address: userAddress,
+  name: 'Alice',
+  source: 'polkadot-js'
+}, 'westend');
+
+const chatResult = await client.chat(sessionId, 'Send 2 DOT to Bob');
+console.log(chatResult.response);
+
+if (chatResult.plan && userApproved) {
+  const execResult = await client.execute(sessionId, chatResult.executionId);
+  console.log('Transaction:', execResult.result.txHash);
+}
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+## OpenAPI Specification
+
+**NEW** in v0.2.0: Complete API contract defined in `backend/openapi.yaml`.
+
+### Overview
+
+The OpenAPI specification (`openapi.yaml`) serves as the **single source of truth** for the DotBot backend API:
+
+- **Contract-First Development**: API contract defined before implementation
+- **Automated Validation**: Tests validate implementation against spec
+- **Mock Server Generation**: Prism generates realistic mocks
+- **Documentation**: Self-documenting API
+
+### Location
+
+```
+backend/openapi.yaml
+```
+
+### Specification Structure
+
+```yaml
+openapi: 3.0.3
+info:
+  title: DotBot Backend API
+  version: 0.1.0
+  description: AI-powered Polkadot blockchain operations
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+  - url: https://api.dotbot.example.com
+    description: Production
+
+tags:
+  - Health      # Health check endpoints
+  - Chat        # Simple AI chat
+  - DotBot      # Full DotBot functionality
+  - Sessions    # Session management
+  - Execution   # Transaction execution
+
+paths:
+  /api/health: ...
+  /api/chat: ...
+  /api/dotbot/initialize: ...
+  /api/dotbot/chat: ...
+  # ... (full spec in openapi.yaml)
+
+components:
+  schemas:
+    ChatRequest: ...
+    ChatResponse: ...
+    ExecutionPlan: ...
+    # ... (see openapi.yaml)
+```
+
+### Using the Specification
+
+#### Generate Mock Server
+
+```bash
+cd backend
+npm run mock
+
+# Mock server runs on http://localhost:8000
+# Responds with realistic data based on openapi.yaml
+```
+
+#### View Documentation
+
+1. **Swagger UI**: Paste `openapi.yaml` into https://editor.swagger.io
+2. **Redoc**: Use Redoc to generate beautiful docs
+3. **Postman**: Import `openapi.yaml` into Postman
+
+#### Generate Client SDKs
+
+```bash
+# Generate TypeScript client
+npx openapi-generator-cli generate \
+  -i backend/openapi.yaml \
+  -g typescript-axios \
+  -o generated/typescript-client
+
+# Generate Python client
+npx openapi-generator-cli generate \
+  -i backend/openapi.yaml \
+  -g python \
+  -o generated/python-client
+```
+
+### Maintaining the Specification
+
+**When adding new endpoints:**
+
+1. Define endpoint in `openapi.yaml` first
+2. Generate mock with Prism
+3. Develop frontend against mock
+4. Implement backend endpoint
+5. Run integration tests to validate
+
+**Schema Validation:**
+
+All request/response schemas are validated using AJV:
+- Request bodies validated against `requestBody` schema
+- Responses validated against `responses` schema
+- Automatic error on schema mismatch
+
+**Example Schema:**
+
+```yaml
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: User's message
+        provider:
+          type: string
+          enum: [asi-one, claude]
+          default: asi-one
+        conversationHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationMessage'
+```
+
+**Version Added:** v0.2.0 (January 2026)
+
+---
+
+## Integration Testing
+
+**NEW** in v0.2.0: OpenAPI-based integration testing ensures API compliance.
+
+### Overview
+
+DotBot uses **OpenAPITestRunner** to validate backend implementation against `openapi.yaml`:
+
+- Loads OpenAPI specification
+- Tests all defined endpoints
+- Validates request/response schemas
+- Reports schema mismatches
+
+### Test Runner
+
+**Location:** `backend/test/integration/openapi-test-runner.ts`
+
+**Features:**
+- AJV-based schema validation
+- Detailed error reporting
+- Specific endpoint testing
+- Full API coverage testing
+
+### Running Tests
+
+#### Test All Endpoints
+
+```bash
+cd backend
+npm run test:integration
+```
+
+**Output:**
+```
+Testing endpoint: GET /hello
+✓ GET /hello passed
+
+Testing endpoint: GET /api/health
+✓ GET /api/health passed
+
+Testing endpoint: POST /api/chat
+✓ POST /api/chat passed
+
+All 12 tests passed!
+```
+
+#### Test Specific Endpoint
+
+```bash
+npm run test:endpoint /api/health
+```
+
+**Output:**
+```
+Testing specific endpoint: GET /api/health
+✓ Response validation passed
+✓ Schema validation passed
+Test passed!
+```
+
+#### Watch Mode
+
+```bash
+# Terminal 1: Start backend
+npm run dev
+
+# Terminal 2: Run tests on file change
+npm run test:integration -- --watch
+```
+
+### Test Configuration
+
+Tests require backend to be running:
+
+```bash
+# Terminal 1: Start backend
+cd backend
+npm run dev
+
+# Terminal 2: Run tests
+npm run test:integration
+```
+
+### Schema Validation
+
+All responses are validated against OpenAPI schemas:
+
+```typescript
+// Example validation
+const response = await axios.get('http://localhost:8000/api/health');
+
+// Validate against schema
+const schema = openApiSpec.paths['/api/health'].get.responses['200'].content['application/json'].schema;
+const valid = ajv.validate(schema, response.data);
+
+if (!valid) {
+  console.error('Schema mismatch:', ajv.errors);
+  throw new Error('Response does not match schema');
+}
+```
+
+### Error Reporting
+
+Detailed errors when validation fails:
+
+```
+✗ POST /api/chat failed
+  Schema validation error:
+    - data.response should be string (got: number)
+    - data.provider is required but missing
+  
+  Expected:
+    { response: string, provider: string, timestamp: string }
+  
+  Received:
+    { response: 123, timestamp: "2026-01-14T12:00:00Z" }
+```
+
+### Mock Server Testing
+
+Test frontend against mock before backend is ready:
+
+```bash
+# Terminal 1: Start mock server
+cd backend
+npm run mock
+
+# Terminal 2: Start frontend
+cd frontend
+npm start
+
+# Frontend connects to mock server (same URL as real backend)
+```
+
+**Mock Benefits:**
+- Realistic responses based on OpenAPI examples
+- No backend implementation required
+- Consistent test data
+- Fast development iteration
+
+### Continuous Integration
+
+Integration tests run in CI pipeline:
+
+```yaml
+# .github/workflows/test.yml
+- name: Start backend
+  run: npm run dev --workspace=backend &
+  
+- name: Wait for backend
+  run: npx wait-on http://localhost:8000/api/health
+  
+- name: Run integration tests
+  run: npm run test:integration --workspace=backend
+```
 
 **Version Added:** v0.2.0 (January 2026)
 

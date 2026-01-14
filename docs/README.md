@@ -6,6 +6,8 @@ Welcome to DotBot's documentation. This guide will help you understand what DotB
 
 DotBot is a ChatGPT-like web application that makes interacting with the Polkadot ecosystem simple and intuitive. Instead of navigating complex dApps and understanding technical details, users can perform blockchain operations through natural language conversations.
 
+**Architecture:** DotBot consists of a React frontend, TypeScript/Express backend, and shared core libraries in a monorepo structure. The backend securely manages AI provider API keys, while the shared `@dotbot/core` library handles blockchain operations for both frontend and backend.
+
 ### Core Concept
 
 ```
@@ -32,7 +34,9 @@ Transaction executes on-chain
 ### Prerequisites
 
 - Node.js 18+
+- npm 8+ (with workspaces support)
 - A Polkadot wallet (Talisman, SubWallet, etc.)
+- ASI-One or Claude API key (for backend)
 - Basic understanding of Polkadot addresses and tokens
 
 ### Installation
@@ -42,12 +46,19 @@ Transaction executes on-chain
 git clone <repository-url>
 cd DotBot
 
-# Install frontend dependencies
-cd frontend
+# Install all workspace dependencies (monorepo)
 npm install
 
-# Start development server
-npm start
+# Build shared libraries
+npm run build:core
+
+# Terminal 1: Start backend
+npm run dev:backend
+# Backend runs on http://localhost:8000
+
+# Terminal 2: Start frontend
+npm run dev:frontend
+# Frontend runs on http://localhost:3000
 ```
 
 ### First Transaction
@@ -66,37 +77,38 @@ That's it! DotBot handles the complexity behind the scenes.
 
 ## Architecture Overview
 
-DotBot follows a clean, scalable architecture:
+DotBot follows a clean, scalable monorepo architecture:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                      User Interface                       │
-│              (ChatGPT-like web application)              │
+│                  Frontend (React)                         │
+│               ChatGPT-like web interface                  │
+│         Uses @dotbot/core for blockchain ops              │
+└─────────────────────────────────────────────────────────┘
+                            ↓ HTTP API
+┌─────────────────────────────────────────────────────────┐
+│              Backend (TypeScript/Express)                 │
+│         @dotbot/express routes & middleware               │
+│      Secure AI provider API key management                │
+│          Session management for DotBot instances          │
 └─────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────┐
-│                    Specialized Agents                     │
+│             @dotbot/core (Shared Library)                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │Asset Transfer│  │  Asset Swap  │  │  Governance  │  │
+│  │Asset Transfer│  │  Governance  │  │   Staking    │  │
 │  └──────────────┘  └──────────────┘  └──────────────┘  │
 │                                                           │
-│  Each agent:                                             │
-│  - Validates user input                                  │
-│  - Creates production-safe extrinsics                    │
-│  - Returns ready-to-sign transactions                    │
-└─────────────────────────────────────────────────────────┘
-                            ↓
-┌─────────────────────────────────────────────────────────┐
-│                    Execution Engine                       │
+│  Agents:                                                 │
+│  - Validate user input                                   │
+│  - Create production-safe extrinsics                     │
+│  - Return ready-to-sign transactions                     │
 │                                                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │  Simulator   │→ │    Signer    │→ │ Broadcaster  │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  │
-│                                                           │
-│  - Optionally simulates with Chopsticks (if enabled)     │
-│  - Signs with user's wallet                              │
-│  - Broadcasts to network                                 │
-│  - Monitors for finalization                             │
+│  Execution Engine:                                       │
+│  - Optional Chopsticks simulation                        │
+│  - Wallet signing                                        │
+│  - Network broadcasting                                  │
+│  - Finalization monitoring                               │
 └─────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────┐
@@ -107,42 +119,71 @@ DotBot follows a clean, scalable architecture:
 
 ### Why This Architecture?
 
-1. **Separation of Concerns**: Agents create, executioner executes
-2. **Scalability**: Add new agents without modifying execution engine
-3. **Testability**: Each component can be tested independently
-4. **Flexibility**: Agents work with any execution environment
+1. **Monorepo Benefits**: Shared code, atomic changes, single source of truth
+2. **Type Safety**: TypeScript across entire stack (frontend, backend, libs)
+3. **Separation of Concerns**: Agents create, executioner executes
+4. **Scalability**: Add new agents without modifying execution engine
+5. **Testability**: Each component tested independently + integration tests
+6. **Security**: API keys stored server-side, never exposed to frontend
+7. **Contract-First**: OpenAPI specification ensures API compliance
 
 ## Project Structure
 
 ```
-DotBot/
-├── frontend/
-│   ├── src/
-│   │   ├── lib/
-│   │   │   ├── agents/              # Specialized agents
-│   │   │   │   ├── asset-transfer/  # DOT/token transfers
-│   │   │   │   ├── baseAgent.ts     # Base class for all agents
-│   │   │   │   └── types.ts         # Agent interfaces
-│   │   │   │
-│   │   │   ├── executionEngine/     # Transaction execution
-│   │   │   │   ├── executioner.ts   # Main execution coordinator
-│   │   │   │   ├── executionArray.ts # Transaction queue
-│   │   │   │   ├── simulation/      # Chopsticks simulation
-│   │   │   │   ├── signing/         # Transaction signing
-│   │   │   │   └── broadcasting/    # Network broadcasting
-│   │   │   │
-│   │   │   ├── services/            # Core services
-│   │   │   │   ├── rpcManager.ts    # Multi-endpoint RPC management
-│   │   │   │   └── simulation/      # Chopsticks integration
-│   │   │   │
-│   │   │   ├── scenarioEngine/      # Testing framework
-│   │   │   │   ├── components/      # EntityCreator, StateAllocator, etc.
-│   │   │   │   └── scenarios/       # Test scenarios
-│   │   │   │
-│   │   │   └── types/               # TypeScript types
+DotBot/                              # Monorepo root
+├── package.json                     # Workspace configuration (4 workspaces)
+│
+├── lib/                             # Shared libraries
+│   ├── dotbot-core/                 # @dotbot/core
+│   │   ├── agents/                  # Specialized agents
+│   │   │   ├── asset-transfer/      # DOT/token transfers
+│   │   │   ├── governance/          # Voting, delegation
+│   │   │   ├── staking/             # Staking operations
+│   │   │   └── baseAgent.ts         # Base class for all agents
 │   │   │
-│   │   └── components/              # React UI components
+│   │   ├── executionEngine/         # Transaction execution
+│   │   │   ├── executioner.ts       # Main execution coordinator
+│   │   │   ├── executionArray.ts    # Transaction queue
+│   │   │   ├── simulation/          # Chopsticks simulation
+│   │   │   ├── signing/             # Transaction signing
+│   │   │   └── broadcasting/        # Network broadcasting
+│   │   │
+│   │   ├── services/                # Core services
+│   │   │   ├── ai/                  # AI service abstraction
+│   │   │   ├── rpcManager.ts        # Multi-endpoint RPC
+│   │   │   ├── simulation/          # Chopsticks integration
+│   │   │   └── logger.ts            # Structured logging
+│   │   │
+│   │   ├── scenarioEngine/          # Testing framework
+│   │   │   ├── components/          # EntityCreator, StateAllocator, etc.
+│   │   │   └── scenarios/           # Test scenarios
+│   │   │
+│   │   └── types/                   # TypeScript types
 │   │
+│   └── dotbot-express/              # @dotbot/express
+│       ├── src/
+│       │   ├── routes/              # API routes (chat, dotbot, sessions)
+│       │   ├── middleware/          # Logging, error handling
+│       │   ├── sessionManager.ts    # DotBot session management
+│       │   └── utils/               # Utilities (logger)
+│       └── package.json
+│
+├── backend/                         # TypeScript/Express backend
+│   ├── src/
+│   │   ├── app.ts                   # Express app configuration
+│   │   └── index.ts                 # Server entry point
+│   ├── test/
+│   │   └── integration/             # OpenAPI integration tests
+│   │       └── openapi-test-runner.ts
+│   ├── openapi.yaml                 # API specification (base truth)
+│   ├── test-mock-api.sh             # Prism mock server launcher
+│   └── package.json
+│
+├── frontend/                        # React web application
+│   ├── src/
+│   │   ├── components/              # React UI components
+│   │   └── services/
+│   │       └── backendApi.ts        # Backend API client
 │   └── package.json
 │
 ├── docs/                            # Documentation
@@ -152,6 +193,12 @@ DotBot/
 │
 └── README.md                        # Project README
 ```
+
+**Monorepo Workspaces:**
+- `backend` - TypeScript/Express backend
+- `frontend` - React frontend
+- `lib/dotbot-core` - Shared blockchain logic
+- `lib/dotbot-express` - Express integration layer
 
 ## Available Agents
 
@@ -279,26 +326,64 @@ Smart endpoint management:
 
 ### Development
 
+**Full Stack (Frontend + Backend):**
 ```bash
+# Terminal 1: Backend
+npm run dev:backend
+
+# Terminal 2: Frontend
+npm run dev:frontend
+```
+
+**Frontend Only (Mock API):**
+```bash
+# Terminal 1: Mock API server (Prism)
+cd backend
+npm run mock
+
+# Terminal 2: Frontend
 cd frontend
 npm start
 ```
 
 - Hot reload enabled
 - Development tooling active
-- Local storage for state
+- OpenAPI mock server for parallel development
 
 ### Production
 
 ```bash
-cd frontend
+# Build all workspaces
 npm run build
+
+# Start backend
+cd backend
+npm start
+
+# Serve frontend build
+cd frontend
 npm run preview
 ```
 
-- Optimized bundle
+- Optimized bundles
 - Production endpoints
 - Error tracking
+
+### Testing
+
+**Unit Tests:**
+```bash
+npm test --workspace=@dotbot/core
+npm test --workspace=backend
+npm test --workspace=frontend
+```
+
+**Integration Tests (OpenAPI):**
+```bash
+cd backend
+npm run test:integration           # Test all endpoints
+npm run test:endpoint /api/health  # Test specific endpoint
+```
 
 ## Common Use Cases
 

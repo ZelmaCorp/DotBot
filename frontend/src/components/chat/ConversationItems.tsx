@@ -8,16 +8,17 @@
  */
 
 import React from 'react';
-import type { DotBot, ConversationItem } from '../../lib';
+import type { DotBot, ConversationItem } from '@dotbot/core';
 import Message from './Message';
 import ExecutionFlow from '../execution-flow/ExecutionFlow';
 
 interface ConversationItemsProps {
   items: ConversationItem[];
   dotbot: DotBot;
+  backendSessionId?: string | null;
 }
 
-const ConversationItems: React.FC<ConversationItemsProps> = ({ items, dotbot }) => {
+const ConversationItems: React.FC<ConversationItemsProps> = ({ items, dotbot, backendSessionId }) => {
   // Deduplicate execution messages by executionId - keep only the latest one
   // This prevents duplicate ExecutionFlow components from being rendered
   const executionMessagesByExecutionId = new Map<string, typeof items[0]>();
@@ -67,6 +68,7 @@ const ConversationItems: React.FC<ConversationItemsProps> = ({ items, dotbot }) 
               key={item.id}
               executionMessage={item}
               dotbot={dotbot}
+              backendSessionId={backendSessionId}
             />
           );
         }
