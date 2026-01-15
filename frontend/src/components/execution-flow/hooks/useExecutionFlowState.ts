@@ -2,7 +2,7 @@
  * Custom hook for managing execution flow state
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
 import { ExecutionMessage, DotBot } from '@dotbot/core';
 import { setupExecutionSubscription } from '../executionFlowUtils';
@@ -20,18 +20,37 @@ export function useExecutionFlowState(
 ): ExecutionArrayState | null {
   const [liveExecutionState, setLiveExecutionState] = useState<ExecutionArrayState | null>(null);
   
+  // Track previous executionId to detect changes
+  const prevExecutionIdRef = useRef<string | undefined>(executionMessage?.executionId);
+  
   // Get WebSocket subscription function (optional - might not be connected)
-  let wsSubscribe: ((executionId: string, callback: (state: ExecutionArrayState) => void) => (() => void)) | undefined;
+  // Use try-catch to handle case where WebSocketContext is not available
+  let subscribeToExecution: ((executionId: string, callback: (state: ExecutionArrayState) => void) => (() => void)) | undefined;
+  let isConnected = false;
   try {
-    const { subscribeToExecution, isConnected } = useWebSocket();
-    // Only use WebSocket if connected
-    if (isConnected) {
-      wsSubscribe = subscribeToExecution;
-    }
+    const wsContext = useWebSocket();
+    subscribeToExecution = wsContext.subscribeToExecution;
+    isConnected = wsContext.isConnected;
   } catch (error) {
     // WebSocket context not available (not wrapped in provider)
     // This is OK - we'll fall back to polling
   }
+
+  // Memoize wsSubscribe to avoid unnecessary re-subscriptions
+  // Only include subscribeToExecution if WebSocket is connected
+  const wsSubscribe = useMemo(() => {
+    return isConnected ? subscribeToExecution : undefined;
+  }, [isConnected, subscribeToExecution]);
+
+  // Reset state when executionId changes
+  useEffect(() => {
+    const currentExecutionId = executionMessage?.executionId;
+    if (prevExecutionIdRef.current !== currentExecutionId) {
+      // Reset live state when switching to a different execution
+      setLiveExecutionState(null);
+      prevExecutionIdRef.current = currentExecutionId;
+    }
+  }, [executionMessage?.executionId]);
 
   // Subscribe to execution updates when using new API
   useEffect(() => {
@@ -48,7 +67,6 @@ export function useExecutionFlowState(
     );
 
     return cleanup;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executionMessage?.executionId, dotbot, backendSessionId, wsSubscribe]);
 
   // Use live state if available, otherwise fall back to snapshot or legacy state

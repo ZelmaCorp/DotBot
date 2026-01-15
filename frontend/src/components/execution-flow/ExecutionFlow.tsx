@@ -25,6 +25,7 @@ import {
   isFlowSuccessful,
   isFlowFailed
 } from './executionFlowUtils';
+import { startExecution } from '../../services/dotbotApi';
 import './execution-flow.css';
 
 export interface ExecutionFlowProps {
@@ -49,13 +50,27 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   onCancel,
   show = true
 }) => {
+  console.log('[ExecutionFlow] Rendering with:', { 
+    hasExecutionMessage: !!executionMessage, 
+    executionId: executionMessage?.executionId,
+    hasDotbot: !!dotbot, 
+    hasBackendSessionId: !!backendSessionId,
+    show 
+  });
+  
   // Use custom hooks for state management (passes backendSessionId for polling)
   const executionState = useExecutionFlowState(executionMessage, dotbot, state, backendSessionId);
   const { isExpanded, toggleExpand } = useExpandedItems();
 
+  console.log('[ExecutionFlow] ExecutionState:', {
+    hasState: !!executionState,
+    itemsCount: executionState?.items.length
+  });
+
   // Determine if we should show the component
   const shouldShow = executionMessage ? true : show;
   if (!shouldShow) {
+    console.log('[ExecutionFlow] Not showing - shouldShow is false');
     return null;
   }
 
@@ -93,22 +108,21 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   // Handle execution through DotBot if using new API
   // Execution always happens on frontend (where signing handlers are available)
   // If backend has state, use it; otherwise rebuild from executionPlan locally
-  const handleAcceptAndStart = async () => {
+  const handleAcceptAndStart = () => {
     if (executionMessage && dotbot) {
-      try {
-        // Check if we need to get state from backend (stateless mode)
-        if (backendSessionId && (!dotbot.currentChat || !dotbot.currentChat.getExecutionArray(executionMessage.executionId))) {
-          // Try to get state from backend (may fail if server restarted)
-          try {
-            const { startExecution } = await import('../../services/dotbotApi');
-            const response = await startExecution(backendSessionId, executionMessage.executionId, false);
-            
+      // Check if we need to get state from backend (stateless mode) - run in background
+      if (backendSessionId && (!dotbot.currentChat || !dotbot.currentChat.getExecutionArray(executionMessage.executionId))) {
+        // Try to get state from backend (may fail if server restarted) - don't block UI
+        console.info('Starting execution from backend');
+        startExecution(backendSessionId, executionMessage.executionId, false)
+          .then(response => {
             // Update execution message with state from backend
             if (response.state && executionMessage) {
               executionMessage.executionArray = response.state;
             }
-            console.log('[ExecutionFlow] Got execution state from backend');
-          } catch (error: any) {
+            console.info('[ExecutionFlow] Got execution state from backend', response);
+          })
+          .catch((error: any) => {
             // Backend doesn't have state (e.g., server restarted) - that's OK
             // We'll rebuild from executionPlan locally
             if (error.message?.includes('404') || error.message?.includes('not found')) {
@@ -116,19 +130,19 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
             } else {
               console.warn('[ExecutionFlow] Failed to get state from backend:', error);
             }
-          }
-          
-          // Execute on frontend - startExecution will rebuild ExecutionArray from executionPlan if needed
-          // This works even if backend state was lost (server restart)
-          await dotbot.startExecution(executionMessage.executionId, { autoApprove: false });
-          console.log('[ExecutionFlow] Executing on frontend (rebuilt from executionPlan if needed)...');
-        } else {
-          // Frontend execution: use local DotBot instance (stateful mode)
-          await dotbot.startExecution(executionMessage.executionId, { autoApprove: false });
-        }
-      } catch (error) {
-        console.error('Failed to start execution:', error);
+          });
+        console.info('Finished starting execution from backend');
       }
+      
+      // Execute on frontend (both stateful and stateless modes)
+      // DON'T await - let execution run in background, WebSocket subscription will update UI
+      // Use setTimeout to defer execution to next event loop tick (prevents UI freezing)
+      // startExecution will rebuild ExecutionArray from executionPlan if needed
+      setTimeout(() => {
+        dotbot.startExecution(executionMessage.executionId, { autoApprove: false })
+          .catch(error => console.error('[ExecutionFlow] Execution failed:', error));
+      }, 0);
+      console.log('[ExecutionFlow] Started execution in background...');
     } else if (onAcceptAndStart) {
       onAcceptAndStart();
     }
