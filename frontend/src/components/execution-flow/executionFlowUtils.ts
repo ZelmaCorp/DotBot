@@ -62,6 +62,14 @@ function setupWebSocketSubscription(
   };
   
   return wsSubscribe(executionId, (state) => {
+    // Log all updates to debug simulation progress
+    console.log('[ExecutionFlow] WebSocket update received:', {
+      executionId,
+      itemsCount: state.items.length,
+      hasSimulationStatus: state.items.some(item => item.simulationStatus),
+      simulationPhases: state.items.map(item => item.simulationStatus?.phase).filter(Boolean),
+    });
+    
     // Only update state if it actually changed (prevents unnecessary re-renders)
     if (hasStateChanged(state, lastState)) {
       lastState = state;
@@ -73,6 +81,8 @@ function setupWebSocketSubscription(
       if (isFlowComplete(state)) {
         console.log('[ExecutionFlow] Execution completed via WebSocket');
       }
+    } else {
+      console.log('[ExecutionFlow] WebSocket update ignored (state unchanged)');
     }
   });
 }
@@ -254,12 +264,14 @@ export function setupExecutionSubscription(
   if (needsBackendUpdates) {
     // Try WebSocket first (real-time, efficient)
     if (wsSubscribe) {
+      console.log('[ExecutionFlow] Setting up WebSocket subscription for execution:', executionId);
       wsUnsubscribe = setupWebSocketSubscription(
         executionId,
         executionMessage,
         wsSubscribe,
         setLiveExecutionState
       );
+      console.log('[ExecutionFlow] WebSocket subscription active for execution:', executionId);
     } else {
       // Fallback to HTTP polling (edge case - WebSocketContext not available)
       pollCleanup = setupPollingFallback(

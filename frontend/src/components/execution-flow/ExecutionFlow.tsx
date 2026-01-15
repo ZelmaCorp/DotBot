@@ -50,57 +50,73 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   onCancel,
   show = true
 }) => {
-  console.log('[ExecutionFlow] Rendering with:', { 
-    hasExecutionMessage: !!executionMessage, 
-    executionId: executionMessage?.executionId,
-    hasDotbot: !!dotbot, 
-    hasBackendSessionId: !!backendSessionId,
-    show 
-  });
+  // Removed verbose logging - was causing console spam
   
   // Use custom hooks for state management (passes backendSessionId for polling)
   const executionState = useExecutionFlowState(executionMessage, dotbot, state, backendSessionId);
   const { isExpanded, toggleExpand } = useExpandedItems();
 
-  console.log('[ExecutionFlow] ExecutionState:', {
-    hasState: !!executionState,
-    itemsCount: executionState?.items.length
-  });
-
   // Determine if we should show the component
   const shouldShow = executionMessage ? true : show;
   if (!shouldShow) {
-    console.log('[ExecutionFlow] Not showing - shouldShow is false');
     return null;
   }
 
-  // Loading states
-  if (executionMessage && !executionState) {
-    return (
-      <div className="execution-flow-container">
-        <ExecutionFlowHeader
-          executionState={null}
-          isWaitingForApproval={false}
-          isExecuting={false}
-        />
-        <LoadingState />
-      </div>
-    );
+  // If we have executionMessage, always show something (loading or content)
+  // This ensures the component is visible while state is being fetched
+  if (executionMessage) {
+    // Show loading if we don't have state yet
+    if (!executionState) {
+      return (
+        <div className="execution-flow-container">
+          <ExecutionFlowHeader
+            executionState={null}
+            isWaitingForApproval={false}
+            isExecuting={false}
+          />
+          <LoadingState />
+        </div>
+      );
+    }
+
+    // Show loading if state exists but has no items yet
+    if (executionState.items.length === 0) {
+      return (
+        <div className="execution-flow-container">
+          <ExecutionFlowHeader
+            executionState={executionState}
+            isWaitingForApproval={false}
+            isExecuting={false}
+          />
+          <LoadingState />
+        </div>
+      );
+    }
+
+    // We have state with items - render the full component
+    // (executionState is guaranteed to be truthy here)
+  } else {
+    // Legacy mode: need state to render
+    if (!executionState) {
+      return null;
+    }
+
+    // Show loading if state has no items
+    if (executionState.items.length === 0) {
+      return (
+        <div className="execution-flow-container">
+          <ExecutionFlowHeader
+            executionState={executionState}
+            isWaitingForApproval={false}
+            isExecuting={false}
+          />
+          <LoadingState />
+        </div>
+      );
+    }
   }
 
-  if (executionState && executionState.items.length === 0) {
-    return (
-      <div className="execution-flow-container">
-        <ExecutionFlowHeader
-          executionState={executionState}
-          isWaitingForApproval={false}
-          isExecuting={false}
-        />
-        <LoadingState />
-      </div>
-    );
-  }
-
+  // Final check - executionState must exist at this point
   if (!executionState) {
     return null;
   }

@@ -22,9 +22,9 @@ async function handleFetchError(response: Response, context: string): Promise<ne
     } catch {
       errorMessage = `${errorMessage}: ${response.status} ${response.statusText}`;
     }
-  } else {
-    errorMessage = `${errorMessage}: Network error (CORS or connection issue)`;
   }
+  // Note: If response.ok is true, this function shouldn't be called
+  // But if it is, we'll use a generic error message
   
   console.error(`[DotBot API] ${errorMessage}`, {
     url: response.url,
@@ -119,7 +119,14 @@ export async function createDotBotSession(
         await handleFetchError(response, 'create DotBot session');
       }
 
-      return response.json();
+      try {
+        return await response.json();
+      } catch (jsonError) {
+        throw new Error(
+          `Invalid JSON response from backend API. ` +
+          `The server may be experiencing issues. Please try again later.`
+        );
+      }
     } catch (fetchError: any) {
       clearTimeout(timeoutId);
       
@@ -133,7 +140,9 @@ export async function createDotBotSession(
       throw fetchError;
     }
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
+    // Handle network errors (fetch failures, CORS, connection issues)
+    // TypeError is thrown when fetch fails (network error, CORS, invalid URL, etc.)
+    if (error instanceof TypeError) {
       throw new Error(
         `Cannot connect to backend API at ${API_BASE_URL}. ` +
         `Make sure the backend server is running and CORS is configured correctly.`
@@ -159,9 +168,18 @@ export async function getDotBotSession(sessionId: string): Promise<DotBotSession
       await handleFetchError(response, 'get DotBot session');
     }
 
-    return response.json();
+    try {
+      return await response.json();
+    } catch (jsonError) {
+      throw new Error(
+        `Invalid JSON response from backend API. ` +
+        `The server may be experiencing issues. Please try again later.`
+      );
+    }
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
+    // Handle network errors (fetch failures, CORS, connection issues)
+    // TypeError is thrown when fetch fails (network error, CORS, invalid URL, etc.)
+    if (error instanceof TypeError) {
       throw new Error(
         `Cannot connect to backend API at ${API_BASE_URL}. ` +
         `Make sure the backend server is running and CORS is configured correctly.`
@@ -202,7 +220,9 @@ export async function sendDotBotMessage(
 
     return response.json();
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
+    // Handle network errors (fetch failures, CORS, connection issues)
+    // TypeError is thrown when fetch fails (network error, CORS, invalid URL, etc.)
+    if (error instanceof TypeError) {
       throw new Error(
         `Cannot connect to backend API at ${API_BASE_URL}. ` +
         `Make sure the backend server is running and CORS is configured correctly.`
@@ -235,9 +255,18 @@ export async function startExecution(
       await handleFetchError(response, 'start execution');
     }
 
-    return response.json();
+    try {
+      return await response.json();
+    } catch (jsonError) {
+      throw new Error(
+        `Invalid JSON response from backend API. ` +
+        `The server may be experiencing issues. Please try again later.`
+      );
+    }
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
+    // Handle network errors (fetch failures, CORS, connection issues)
+    // TypeError is thrown when fetch fails (network error, CORS, invalid URL, etc.)
+    if (error instanceof TypeError) {
       throw new Error(
         `Cannot connect to backend API at ${API_BASE_URL}. ` +
         `Make sure the backend server is running and CORS is configured correctly.`
@@ -268,7 +297,9 @@ export async function getExecutionState(
 
     return response.json();
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
+    // Handle network errors (fetch failures, CORS, connection issues)
+    // TypeError is thrown when fetch fails (network error, CORS, invalid URL, etc.)
+    if (error instanceof TypeError) {
       throw new Error(
         `Cannot connect to backend API at ${API_BASE_URL}. ` +
         `Make sure the backend server is running and CORS is configured correctly.`
@@ -294,9 +325,18 @@ export async function deleteDotBotSession(sessionId: string): Promise<{ success:
       await handleFetchError(response, 'delete DotBot session');
     }
 
-    return response.json();
+    try {
+      return await response.json();
+    } catch (jsonError) {
+      throw new Error(
+        `Invalid JSON response from backend API. ` +
+        `The server may be experiencing issues. Please try again later.`
+      );
+    }
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
+    // Handle network errors (fetch failures, CORS, connection issues)
+    // TypeError is thrown when fetch fails (network error, CORS, invalid URL, etc.)
+    if (error instanceof TypeError) {
       throw new Error(
         `Cannot connect to backend API at ${API_BASE_URL}. ` +
         `Make sure the backend server is running and CORS is configured correctly.`
