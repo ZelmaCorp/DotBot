@@ -176,6 +176,35 @@ router.post('/chat', async (req: Request, res: Response) => {
       }, 'Created temporary chat instance for stateless mode');
     }
 
+    // Set up WebSocket broadcasting callback BEFORE calling dotbot.chat()
+    // This ensures broadcasting is active during simulation (not after)
+    const wsManager: WebSocketManager | undefined = req.app.locals.wsManager;
+    if (wsManager && dotbot.currentChat) {
+      // Access config via private property (we need to set up callback before chat)
+      // This is safe because we're only adding a callback, not modifying existing behavior
+      const dotbotInternal = dotbot as any;
+      if (dotbotInternal.config) {
+        // Store original onExecutionReady if it exists
+        const originalOnExecutionReady = dotbotInternal.config.onExecutionReady;
+        
+        // Set up our callback that will be called right after updateExecutionInChat but before simulation
+        dotbotInternal.config.onExecutionReady = (executionId: string, chat: ChatInstance) => {
+          // Call original callback if it exists
+          if (originalOnExecutionReady) {
+            originalOnExecutionReady(executionId, chat);
+          }
+          
+          // Set up WebSocket broadcasting for this execution
+          broadcastExecutionUpdates(chat, executionId, wsManager, effectiveSessionId);
+          
+          dotbotLogger.debug({
+            executionId,
+            sessionId: effectiveSessionId
+          }, 'WebSocket broadcasting enabled for execution (before simulation)');
+        };
+      }
+    }
+    
     // Call DotBot.chat() - this handles everything (AI, execution planning, etc.)
     dotbotLogger.info({ 
       sessionId: effectiveSessionId,
@@ -204,15 +233,13 @@ router.post('/chat', async (req: Request, res: Response) => {
         executionId: result.executionId
       }, 'DotBot chat completed successfully');
       
-      // Setup WebSocket broadcasting for new executions
-      if (result.executionId && dotbot.currentChat && req.app.locals.wsManager) {
-        const wsManager: WebSocketManager = req.app.locals.wsManager;
-        broadcastExecutionUpdates(dotbot.currentChat, result.executionId, wsManager);
-        
+      // WebSocket broadcasting is now set up via onExecutionReady callback (before simulation)
+      // This ensures real-time updates are broadcast during simulation, not just after completion
+      if (result.executionId) {
         dotbotLogger.debug({
           executionId: result.executionId,
           sessionId: effectiveSessionId
-        }, 'WebSocket broadcasting enabled for execution');
+        }, 'WebSocket broadcasting was set up before simulation via onExecutionReady callback');
       }
     } catch (chatError: any) {
       errorLogger.error({ 
