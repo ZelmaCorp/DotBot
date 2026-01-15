@@ -781,11 +781,26 @@ export class DotBot {
       const executionMessage = this.currentChat.getDisplayMessages()
         .find(m => m.type === 'execution' && (m as any).executionId === executionId) as any;
       
-      if (executionMessage?.executionPlan) {
+      let plan = executionMessage?.executionPlan;
+      
+      // Fallback: Try to extract plan from state if missing (e.g., created from WebSocket without plan)
+      if (!plan && executionMessage?.executionArray) {
+        this.dotbotLogger.debug({ executionId }, 'ExecutionPlan missing, attempting to extract from state');
+        // Use internal method via type assertion (extractExecutionPlanFromState is private)
+        const extractedPlan = (this.currentChat as any).extractExecutionPlanFromState(executionMessage.executionArray);
+        if (extractedPlan) {
+          plan = extractedPlan;
+          // Save extracted plan to execution message for future use
+          await this.currentChat.updateExecutionMessage(executionMessage.id, { executionPlan: plan });
+          this.dotbotLogger.info({ executionId }, 'Extracted and saved ExecutionPlan from state');
+        }
+      }
+      
+      if (plan) {
         // Rebuild requires new sessions
         // CRITICAL: Pass the original executionId to preserve the ExecutionMessage and prevent duplicates
         // CRITICAL: Skip simulation to prevent double simulation (simulation already ran during initial prepareExecution)
-        await this.prepareExecution(executionMessage.executionPlan, executionId, true);
+        await this.prepareExecution(plan, executionId, true);
         executionArray = this.currentChat.getExecutionArray(executionId);
         if (!executionArray) {
           throw new Error('Failed to rebuild execution array');

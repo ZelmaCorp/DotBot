@@ -1,22 +1,18 @@
 /**
  * useExecutionFlowState Hook Tests
  * 
- * Tests state management and subscription setup
+ * Tests state management with context-based state (updated implementation)
  */
 
 import { renderHook, waitFor } from '@testing-library/react';
 import { useExecutionFlowState } from '../../components/execution-flow/hooks/useExecutionFlowState';
 import { createMockDotBot, createMockExecutionMessage, createMockExecutionArrayState } from '../../test-utils/mocks';
-import { setupExecutionSubscription } from '../../components/execution-flow/executionFlowUtils';
 
-// Mock dependencies
-jest.mock('../../components/execution-flow/executionFlowUtils');
-jest.mock('../../contexts/WebSocketContext', () => ({
-  useWebSocket: jest.fn(),
+// Mock useExecutionState from App.tsx (context provider)
+const mockUseExecutionState = jest.fn();
+jest.mock('../../App', () => ({
+  useExecutionState: (executionId: string | undefined) => mockUseExecutionState(executionId),
 }));
-
-const mockSetupExecutionSubscription = setupExecutionSubscription as jest.MockedFunction<typeof setupExecutionSubscription>;
-const mockUseWebSocket = require('../../contexts/WebSocketContext').useWebSocket;
 
 describe('useExecutionFlowState', () => {
   let mockDotBot: ReturnType<typeof createMockDotBot>;
@@ -27,30 +23,23 @@ describe('useExecutionFlowState', () => {
     
     mockDotBot = createMockDotBot();
     mockUnsubscribe = jest.fn();
-    mockSetupExecutionSubscription.mockReturnValue(mockUnsubscribe);
     
-    // Default WebSocket mock (not connected)
-    mockUseWebSocket.mockReturnValue({
-      isConnected: false,
-      subscribeToExecution: jest.fn(),
-    });
+    // Default: no context state (returns undefined)
+    mockUseExecutionState.mockReturnValue(undefined);
   });
 
-  describe('subscription setup', () => {
-    it('should call setupExecutionSubscription on mount', () => {
+  describe('state sources', () => {
+    it('should return state from context when available', () => {
       const executionMessage = createMockExecutionMessage();
+      const contextState = createMockExecutionArrayState({ id: executionMessage.executionId });
+      
+      mockUseExecutionState.mockReturnValue(contextState);
 
-      renderHook(() =>
+      const { result } = renderHook(() =>
         useExecutionFlowState(executionMessage, mockDotBot, undefined, 'test-session')
       );
 
-      expect(mockSetupExecutionSubscription).toHaveBeenCalledWith(
-        executionMessage,
-        mockDotBot,
-        expect.any(Function), // setLiveExecutionState
-        'test-session',
-        undefined // wsSubscribe (not connected)
-      );
+      expect(result.current).toBe(contextState);
     });
 
     it('should return correct initial state from executionMessage', () => {
@@ -76,8 +65,16 @@ describe('useExecutionFlowState', () => {
       expect(result.current).toBe(legacyState);
     });
 
-    it('should cleanup subscription on unmount', () => {
+    it('should cleanup local subscription on unmount (stateful mode)', () => {
       const executionMessage = createMockExecutionMessage();
+      const mockExecutionArray = {
+        getState: jest.fn().mockReturnValue(createMockExecutionArrayState()),
+      };
+      
+      // Mock stateful mode (has ExecutionArray)
+      (mockDotBot.currentChat as any).getExecutionArray = jest.fn().mockReturnValue(mockExecutionArray);
+      // Mock onExecutionUpdate to return unsubscribe function
+      (mockDotBot.currentChat as any).onExecutionUpdate = jest.fn().mockReturnValue(mockUnsubscribe);
 
       const { unmount } = renderHook(() =>
         useExecutionFlowState(executionMessage, mockDotBot, undefined, undefined)
@@ -88,12 +85,23 @@ describe('useExecutionFlowState', () => {
       expect(mockUnsubscribe).toHaveBeenCalled();
     });
 
-    it('should re-subscribe when executionId changes', () => {
+    it('should re-subscribe when executionId changes (stateful mode)', () => {
       const executionMessage1 = createMockExecutionMessage({
         executionId: 'exec-1',
       });
       const state1 = createMockExecutionArrayState({ id: 'exec-1' });
-      executionMessage1.executionArray = state1;
+      const mockExecutionArray1 = {
+        getState: jest.fn().mockReturnValue(state1),
+      };
+      
+      (mockDotBot.currentChat as any).getExecutionArray = jest.fn()
+        .mockReturnValueOnce(mockExecutionArray1)
+        .mockReturnValueOnce(null);
+      
+      // Mock onExecutionUpdate to return unsubscribe for first execution
+      (mockDotBot.currentChat as any).onExecutionUpdate = jest.fn()
+        .mockReturnValueOnce(mockUnsubscribe) // First subscription
+        .mockReturnValueOnce(() => {}); // Second subscription (won't be called since getExecutionArray returns null)
 
       const { result, rerender } = renderHook(
         ({ executionMessage }) =>
@@ -103,29 +111,33 @@ describe('useExecutionFlowState', () => {
         }
       );
 
-      // Initial state should be from executionMessage1
+      // Initial state should be from ExecutionArray
       expect(result.current).toBe(state1);
-      expect(mockSetupExecutionSubscription).toHaveBeenCalledTimes(1);
 
       const executionMessage2 = createMockExecutionMessage({
         executionId: 'exec-2',
       });
       const state2 = createMockExecutionArrayState({ id: 'exec-2' });
       executionMessage2.executionArray = state2;
-
-      // Reset mock to track new subscription
-      mockSetupExecutionSubscription.mockClear();
+      const mockExecutionArray2 = {
+        getState: jest.fn().mockReturnValue(state2),
+      };
+      
+      (mockDotBot.currentChat as any).getExecutionArray = jest.fn()
+        .mockReturnValueOnce(null) // First call (cleanup - no ExecutionArray for exec-1 anymore)
+        .mockReturnValue(mockExecutionArray2); // Second call (new ExecutionArray for exec-2)
+      
+      // Reset mocks but keep onExecutionUpdate returning unsubscribe
       mockUnsubscribe.mockClear();
+      (mockDotBot.currentChat as any).onExecutionUpdate = jest.fn().mockReturnValue(mockUnsubscribe);
 
       // rerender automatically handles act() wrapping
       rerender({ executionMessage: executionMessage2 });
 
-      // Should have been called again for new executionId
-      expect(mockSetupExecutionSubscription).toHaveBeenCalledTimes(1);
       // Cleanup from first subscription should have been called
       expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
       
-      // State should use executionMessage2 state (fallback when live state is null)
+      // State should use executionMessage2 state (from ExecutionArray)
       expect(result.current).toBe(state2);
     });
 
@@ -134,11 +146,18 @@ describe('useExecutionFlowState', () => {
         executionId: 'exec-1',
       });
       const liveState1 = createMockExecutionArrayState({ id: 'exec-1', items: [{ id: 'item-1', status: 'executing' }] as any });
-
-      let setStateCallback: ((state: any) => void) | null = null;
+      const mockExecutionArray1 = {
+        getState: jest.fn().mockReturnValue(liveState1),
+      };
       
-      mockSetupExecutionSubscription.mockImplementation((_, __, setState: (state: any) => void) => {
-        setStateCallback = setState;
+      (mockDotBot.currentChat as any).getExecutionArray = jest.fn()
+        .mockReturnValueOnce(mockExecutionArray1)
+        .mockReturnValueOnce(null);
+      
+      // Mock onExecutionUpdate to simulate state update
+      (mockDotBot.currentChat as any).onExecutionUpdate = jest.fn().mockImplementation((executionId, callback) => {
+        // Simulate state update
+        setTimeout(() => callback(liveState1), 0);
         return mockUnsubscribe;
       });
 
@@ -150,12 +169,7 @@ describe('useExecutionFlowState', () => {
         }
       );
 
-      // Set live state for execution-1
-      // waitFor automatically handles act() wrapping
-      if (setStateCallback) {
-        (setStateCallback as (state: any) => void)(liveState1);
-      }
-
+      // Wait for state update
       await waitFor(() => {
         expect(result.current).toBe(liveState1);
       });
@@ -167,10 +181,10 @@ describe('useExecutionFlowState', () => {
       const state2 = createMockExecutionArrayState({ id: 'exec-2' });
       executionMessage2.executionArray = state2;
 
-      // Reset callback capture
-      setStateCallback = null;
-      mockSetupExecutionSubscription.mockClear();
+      // Reset mocks - no ExecutionArray for exec-2 (stateless mode)
       mockUnsubscribe.mockClear();
+      (mockDotBot.currentChat as any).getExecutionArray = jest.fn().mockReturnValue(null);
+      (mockDotBot.currentChat as any).onExecutionUpdate = jest.fn().mockReturnValue(() => {});
 
       // rerender automatically handles act() wrapping
       rerender({ executionMessage: executionMessage2 });
@@ -183,46 +197,50 @@ describe('useExecutionFlowState', () => {
   });
 
   describe('state updates', () => {
-    it('should update state when setLiveExecutionState is called', async () => {
+    it('should update state when context state changes', async () => {
       const executionMessage = createMockExecutionMessage();
-      const newState = createMockExecutionArrayState({
+      const initialState = createMockExecutionArrayState({ id: 'exec-123' });
+      const updatedState = createMockExecutionArrayState({
         id: 'exec-123',
         items: [{ id: 'item-1', type: 'transfer', status: 'executing' }] as any,
       });
 
-      let setStateCallback: ((state: any) => void) | null = null;
-      
-      mockSetupExecutionSubscription.mockImplementation((_, __, setState: (state: any) => void) => {
-        setStateCallback = setState;
-        return mockUnsubscribe;
-      });
+      // Start with initial state
+      mockUseExecutionState.mockReturnValue(initialState);
 
-      const { result } = renderHook(() =>
+      const { result, rerender } = renderHook(() =>
         useExecutionFlowState(executionMessage, mockDotBot, undefined, undefined)
       );
 
-      // Simulate state update from subscription
-      // waitFor automatically handles act() wrapping
-      if (setStateCallback) {
-        (setStateCallback as (state: any) => void)(newState);
-      }
+      // Should return initial state
+      expect(result.current).toBe(initialState);
+
+      // Update context state
+      mockUseExecutionState.mockReturnValue(updatedState);
+      rerender();
 
       await waitFor(() => {
-        expect(result.current).toBe(newState);
+        expect(result.current).toBe(updatedState);
       });
     });
 
-    it('should prioritize liveExecutionState over executionMessage state', async () => {
+    it('should prioritize liveExecutionState (stateful) over context state', async () => {
       const executionMessage = createMockExecutionMessage();
-      const messageState = createMockExecutionArrayState({ id: 'from-message' });
+      const contextState = createMockExecutionArrayState({ id: 'from-context' });
       const liveState = createMockExecutionArrayState({ id: 'live-state' });
       
-      executionMessage.executionArray = messageState;
-
-      let setStateCallback: ((state: any) => void) | null = null;
+      mockUseExecutionState.mockReturnValue(contextState);
       
-      mockSetupExecutionSubscription.mockImplementation((_, __, setState: (state: any) => void) => {
-        setStateCallback = setState;
+      const mockExecutionArray = {
+        getState: jest.fn().mockReturnValue(liveState),
+      };
+      
+      (mockDotBot.currentChat as any).getExecutionArray = jest.fn().mockReturnValue(mockExecutionArray);
+      
+      // Mock onExecutionUpdate to simulate state update
+      (mockDotBot.currentChat as any).onExecutionUpdate = jest.fn().mockImplementation((executionId, callback) => {
+        // Simulate state update
+        setTimeout(() => callback(liveState), 0);
         return mockUnsubscribe;
       });
 
@@ -230,78 +248,58 @@ describe('useExecutionFlowState', () => {
         useExecutionFlowState(executionMessage, mockDotBot, undefined, undefined)
       );
 
-      // Initially should return message state
-      expect(result.current).toBe(messageState);
-
-      // Update with live state
-      // waitFor automatically handles act() wrapping
-      if (setStateCallback) {
-        (setStateCallback as (state: any) => void)(liveState);
-      }
-
+      // Should prioritize live state (stateful mode) over context state
       await waitFor(() => {
         expect(result.current).toBe(liveState);
       });
+      
+      // Should not use context state when live state is available
+      expect(result.current).not.toBe(contextState);
     });
   });
 
-  describe('WebSocket integration', () => {
-    it('should use WebSocket subscription when connected', () => {
+  describe('context integration', () => {
+    it('should use context state when available (stateless mode)', () => {
       const executionMessage = createMockExecutionMessage();
-      const mockSubscribeToExecution = jest.fn().mockReturnValue(() => {});
+      const contextState = createMockExecutionArrayState({ id: executionMessage.executionId });
       
-      mockUseWebSocket.mockReturnValue({
-        isConnected: true,
-        subscribeToExecution: mockSubscribeToExecution,
-      });
+      mockUseExecutionState.mockReturnValue(contextState);
 
-      renderHook(() =>
+      const { result } = renderHook(() =>
         useExecutionFlowState(executionMessage, mockDotBot, undefined, 'test-session')
       );
 
-      expect(mockSetupExecutionSubscription).toHaveBeenCalledWith(
-        executionMessage,
-        mockDotBot,
-        expect.any(Function),
-        'test-session',
-        mockSubscribeToExecution
-      );
+      expect(result.current).toBe(contextState);
+      expect(mockUseExecutionState).toHaveBeenCalledWith(executionMessage.executionId);
     });
 
-    it('should fall back to polling when WebSocket not connected', () => {
+    it('should fall back to executionMessage state when context state not available', () => {
       const executionMessage = createMockExecutionMessage();
+      const messageState = createMockExecutionArrayState();
+      executionMessage.executionArray = messageState;
       
-      mockUseWebSocket.mockReturnValue({
-        isConnected: false,
-        subscribeToExecution: jest.fn(),
-      });
+      mockUseExecutionState.mockReturnValue(undefined);
 
-      renderHook(() =>
+      const { result } = renderHook(() =>
         useExecutionFlowState(executionMessage, mockDotBot, undefined, 'test-session')
       );
 
-      expect(mockSetupExecutionSubscription).toHaveBeenCalledWith(
-        executionMessage,
-        mockDotBot,
-        expect.any(Function),
-        'test-session',
-        undefined // No WebSocket subscription
-      );
+      expect(result.current).toBe(messageState);
     });
 
-    it('should handle WebSocket context not available gracefully', () => {
+    it('should handle context returning undefined gracefully', () => {
       const executionMessage = createMockExecutionMessage();
+      const messageState = createMockExecutionArrayState();
+      executionMessage.executionArray = messageState;
       
-      mockUseWebSocket.mockImplementation(() => {
-        throw new Error('useWebSocket must be used within a WebSocketProvider');
-      });
+      mockUseExecutionState.mockReturnValue(undefined);
 
-      // Should not throw - hook should handle gracefully
-      expect(() => {
-        renderHook(() =>
-          useExecutionFlowState(executionMessage, mockDotBot, undefined, 'test-session')
-        );
-      }).not.toThrow();
+      const { result } = renderHook(() =>
+        useExecutionFlowState(executionMessage, mockDotBot, undefined, 'test-session')
+      );
+
+      // Should fall back to executionMessage state
+      expect(result.current).toBe(messageState);
     });
   });
 
@@ -315,22 +313,24 @@ describe('useExecutionFlowState', () => {
     });
 
     it('should handle missing executionMessage gracefully', () => {
+      mockUseExecutionState.mockReturnValue(undefined);
+      
       const { result } = renderHook(() =>
         useExecutionFlowState(undefined, mockDotBot, undefined, undefined)
       );
 
-      expect(mockSetupExecutionSubscription).not.toHaveBeenCalled();
       expect(result.current).toBeNull();
     });
 
     it('should handle missing dotbot gracefully', () => {
       const executionMessage = createMockExecutionMessage();
+      mockUseExecutionState.mockReturnValue(undefined);
 
       const { result } = renderHook(() =>
         useExecutionFlowState(executionMessage, undefined, undefined, undefined)
       );
 
-      expect(mockSetupExecutionSubscription).not.toHaveBeenCalled();
+      // Should return context state if available, otherwise null
       expect(result.current).toBeNull();
     });
   });

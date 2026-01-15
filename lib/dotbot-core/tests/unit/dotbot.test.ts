@@ -584,12 +584,19 @@ describe('DotBot', () => {
         return mockExecutionArray;
       });
       
+      // Mock initialize method for lazy loading
+      const mockInitialize = jest.fn().mockResolvedValue(undefined);
+      
       (dotbot as any).executionSystem = {
+        initialize: mockInitialize,
         getOrchestrator: jest.fn().mockReturnValue(mockOrchestrator),
         getExecutioner: jest.fn().mockReturnValue(mockExecutioner),
         orchestrateExecutionArray: mockOrchestrateExecutionArray,
         runSimulation: jest.fn().mockResolvedValue(undefined),
       };
+      
+      // Also update the mockExecutionSystem reference so the test assertion works
+      mockExecutionSystem.initialize = mockInitialize;
 
       // Clear any previous calls from creation
       jest.clearAllMocks();
@@ -600,7 +607,7 @@ describe('DotBot', () => {
 
       // LAZY LOADING: prepareExecution() (called by chat()) should trigger RPC connections
       expect(mockRelayChainManager.getReadApi).toHaveBeenCalled();
-      expect(mockExecutionSystem.initialize).toHaveBeenCalled();
+      expect(mockInitialize).toHaveBeenCalled();
 
       // chat() now only PREPARES execution (does not auto-execute)
       // If preparation succeeded, plan should be defined

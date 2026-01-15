@@ -79,8 +79,17 @@ export function useExecutionFlowState(
     }
   }, [executionMessage?.executionId]);
 
+  // Track unsubscribe function to ensure cleanup
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
   // For stateful mode (local ExecutionArray), subscribe to local updates
   useEffect(() => {
+    // Cleanup previous subscription if it exists
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
     if (!executionMessage || !dotbot || !dotbot.currentChat) {
       return;
     }
@@ -104,7 +113,15 @@ export function useExecutionFlowState(
       }
     );
 
-    return unsubscribe;
+    // Store unsubscribe function for cleanup
+    unsubscribeRef.current = unsubscribe;
+
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
   }, [executionMessage?.executionId, dotbot]);
 
   // Priority: live state (stateful) > context state (stateless) > snapshot > legacy

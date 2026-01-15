@@ -507,14 +507,23 @@ const AppContent: React.FC = () => {
             .then(() => console.log('[App] Execution message persisted'))
             .catch((err: unknown) => console.error('[App] Failed to persist execution message:', err))
         );
-      } else if (chatResult.executionArrayState) {
-        persistencePromises.push(
-          currentChat.updateExecutionMessage(existingMessage.id, {
-            executionArray: chatResult.executionArrayState,
-          })
-            .then(() => console.log('[App] Execution message updated'))
-            .catch((err: unknown) => console.error('[App] Failed to update execution message:', err))
-        );
+      } else {
+        // Update existing message with plan and/or state
+        const updates: any = {};
+        if (chatResult.executionArrayState) {
+          updates.executionArray = chatResult.executionArrayState;
+        }
+        if (chatResult.plan) {
+          updates.executionPlan = chatResult.plan;
+        }
+        
+        if (Object.keys(updates).length > 0) {
+          persistencePromises.push(
+            currentChat.updateExecutionMessage(existingMessage.id, updates)
+              .then(() => console.log('[App] Execution message updated:', Object.keys(updates)))
+              .catch((err: unknown) => console.error('[App] Failed to update execution message:', err))
+          );
+        }
       }
     }
 

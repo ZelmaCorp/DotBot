@@ -44,6 +44,16 @@ jest.mock('../components/chat/WelcomeScreen', () => {
 // Mock other components that might cause issues
 jest.mock('../contexts/WebSocketContext', () => ({
   WebSocketProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useWebSocket: () => ({
+    isConnected: true,
+    isConnecting: false,
+    connectionError: null,
+    subscribeToExecution: jest.fn(() => () => {}),
+    subscribeToSessionExecutions: jest.fn(() => () => {}),
+    connect: jest.fn(),
+    disconnect: jest.fn(),
+    reconnect: jest.fn(),
+  }),
 }));
 
 jest.mock('../contexts/ThemeContext', () => ({
@@ -163,10 +173,12 @@ describe('App', () => {
       // Now testOnSendMessage should be set - wait a bit more for React to update
       await waitFor(() => {
         expect(testOnSendMessage).toBeDefined();
+        expect(typeof testOnSendMessage).toBe('function');
       }, { timeout: 3000 });
 
       // Call handleSendMessage through the exposed function
       const onSendMessage = testOnSendMessage!;
+      expect(typeof onSendMessage).toBe('function');
       await act(async () => {
         await onSendMessage(testMessage);
       });
@@ -305,6 +317,7 @@ describe('App', () => {
       // Wait for onSendMessage to be available
       await waitFor(() => {
         expect(testOnSendMessage).toBeDefined();
+        expect(typeof testOnSendMessage).toBe('function');
       }, { timeout: 3000 });
 
       // Call handleSendMessage (should handle error)
@@ -314,16 +327,18 @@ describe('App', () => {
       });
 
       // Error should be handled and error message added to chat
-      expect(mockChat.addBotMessage).toHaveBeenCalledWith(
-        expect.stringContaining('Sorry, I encountered an error'),
-        expect.anything()
+      expect(mockChat.addBotMessage).toHaveBeenCalled();
+      const errorCall = mockChat.addBotMessage.mock.calls.find(
+        (call) => call[0] && call[0].includes('Sorry, I encountered an error')
       );
+      expect(errorCall).toBeDefined();
+      expect(errorCall![0]).toContain('Sorry, I encountered an error');
     });
 
-    it('should generate executionId if backend does not provide one', async () => {
+    it('should throw error when backend does not provide executionId for execution plan', async () => {
       const testMessage = 'Transfer 1 DOT';
       const chatResult = createChatResultWithExecution();
-      // Remove executionId and executionArrayState.id to test fallback generation
+      // Remove executionId and executionArrayState.id to test error handling
       delete chatResult.executionId;
       if (chatResult.executionArrayState) {
         delete chatResult.executionArrayState.id;
@@ -344,59 +359,10 @@ describe('App', () => {
       }, { timeout: 5000 });
 
       // Wait for component to render Chat or WelcomeScreen (which exposes onSendMessage)
-      // Check for either component's testid
       await waitFor(() => {
         const chatComponent = screen.queryByTestId('chat-component');
         const welcomeScreen = screen.queryByTestId('welcome-screen');
         expect(chatComponent || welcomeScreen).toBeInTheDocument();
-      }, { timeout: 5000 });
-
-      // Now testOnSendMessage should be set - wait a bit more for React to update
-      await waitFor(() => {
-        expect(testOnSendMessage).toBeDefined();
-      }, { timeout: 3000 });
-
-      // Call handleSendMessage
-      const onSendMessage = testOnSendMessage!;
-      await act(async () => {
-        await onSendMessage(testMessage);
-      });
-
-      // ExecutionId should be generated as fallback
-      // Verify addExecutionMessage was called with a generated executionId
-      expect(mockChat.addExecutionMessage).toHaveBeenCalled();
-      const executionIdArg = mockChat.addExecutionMessage.mock.calls[0][0];
-      expect(executionIdArg).toMatch(/^exec_\d+_[a-z0-9]+$/); // Format: exec_timestamp_random
-    });
-
-    it('should generate executionId if backend does not provide one', async () => {
-      const testMessage = 'Transfer 1 DOT';
-      const chatResult = createChatResultWithExecution();
-      // Remove ALL possible executionId sources to test fallback generation
-      delete chatResult.executionId;
-      if (chatResult.executionArrayState) {
-        delete chatResult.executionArrayState.id;
-      }
-      
-      mockSendDotBotMessage.mockResolvedValue({
-        success: true,
-        result: chatResult,
-        sessionId: 'test-session-id',
-        timestamp: new Date().toISOString(),
-      });
-
-      render(<App />);
-
-      // Wait for initialization
-      await waitFor(() => {
-        expect(mockCreateDotBotSession).toHaveBeenCalled();
-      }, { timeout: 5000 });
-
-      // Wait for component to render Chat or WelcomeScreen
-      await waitFor(() => {
-        const chatComponent = screen.queryByTestId('chat-component');
-        const welcomeScreen = screen.queryByTestId('welcome-screen');
-        return chatComponent || welcomeScreen;
       }, { timeout: 5000 });
 
       // Wait for onSendMessage to be available
@@ -404,17 +370,22 @@ describe('App', () => {
         expect(testOnSendMessage).toBeDefined();
       }, { timeout: 3000 });
 
-      // Call handleSendMessage
+      // Call handleSendMessage - should throw error and be caught
       const onSendMessage = testOnSendMessage!;
       await act(async () => {
         await onSendMessage(testMessage);
       });
 
-      // Verify fallback executionId was generated with correct format
-      expect(mockChat.addExecutionMessage).toHaveBeenCalled();
-      const executionIdArg = mockChat.addExecutionMessage.mock.calls[0][0];
-      // Updated format: exec_timestamp_random_performanceId (or with collision suffix)
-      expect(executionIdArg).toMatch(/^exec_\d+_[a-z0-9]+(_[a-z0-9]+)?(_[a-z0-9]+)?$/);
+      // Error should be handled and error message added to chat
+      // The implementation throws an error which is caught by handleSendMessageError
+      // Check the last call to addBotMessage (error message comes after normal response)
+      const addBotMessageCalls = mockChat.addBotMessage.mock.calls;
+      expect(addBotMessageCalls.length).toBeGreaterThan(0);
+      const lastCall = addBotMessageCalls[addBotMessageCalls.length - 1];
+      expect(lastCall[0]).toContain('Sorry, I encountered an error');
+      
+      // addExecutionMessage should NOT be called when executionId is missing
+      expect(mockChat.addExecutionMessage).not.toHaveBeenCalled();
     });
 
     it('should not add duplicate execution messages', async () => {
@@ -439,7 +410,12 @@ describe('App', () => {
             id: executionId,
             items: [],
             isExecuting: false,
+            isPaused: false,
             currentIndex: 0,
+            totalItems: 0,
+            completedItems: 0,
+            failedItems: 0,
+            cancelledItems: 0,
           },
         }),
         sessionId: 'test-session-id',
@@ -480,6 +456,7 @@ describe('App', () => {
           executionArray: expect.objectContaining({
             id: executionId,
           }),
+          executionPlan: expect.any(Object),
         })
       );
     });
