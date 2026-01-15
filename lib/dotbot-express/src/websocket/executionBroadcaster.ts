@@ -47,7 +47,8 @@ export function setupExecutionBroadcasting(
         wsManager.broadcastExecutionUpdate(executionId, state);
         
         // Check if execution is complete
-        const isComplete = state.items.every(item => 
+        // Empty array means no items executed yet, so not complete
+        const isComplete = state.items.length > 0 && state.items.every(item => 
           item.status === 'completed' || 
           item.status === 'finalized' || 
           item.status === 'failed' || 
@@ -55,7 +56,8 @@ export function setupExecutionBroadcasting(
         );
         
         if (isComplete) {
-          const success = state.items.every(item =>
+          // Empty array cannot be successful (nothing executed)
+          const success = state.items.length > 0 && state.items.every(item =>
             item.status === 'completed' || item.status === 'finalized'
           );
           
@@ -116,7 +118,8 @@ export function broadcastExecutionUpdates(
     wsManager.broadcastExecutionUpdate(executionId, state);
     
     // Check if execution is complete
-    const isComplete = state.items.every(item => 
+    // Empty array means no items executed yet, so not complete
+    const isComplete = state.items.length > 0 && state.items.every(item => 
       item.status === 'completed' || 
       item.status === 'finalized' || 
       item.status === 'failed' || 
@@ -124,7 +127,8 @@ export function broadcastExecutionUpdates(
     );
     
     if (isComplete) {
-      const success = state.items.every(item =>
+      // Empty array cannot be successful (nothing executed)
+      const success = state.items.length > 0 && state.items.every(item =>
         item.status === 'completed' || item.status === 'finalized'
       );
       
