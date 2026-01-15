@@ -73,6 +73,10 @@ export interface DotBotConfig {
   /** Simulation status callback for UI feedback */
   onSimulationStatus?: SimulationStatusCallback;
   
+  /** Callback called when execution is ready (after orchestration, before simulation) */
+  /** Use this to set up WebSocket broadcasting or other subscriptions before simulation starts */
+  onExecutionReady?: (executionId: string, chat: ChatInstance) => void;
+  
   /** Auto-approve transactions (NOT recommended for production!) */
   autoApprove?: boolean;
   
@@ -128,6 +132,7 @@ export type DotBotEvent =
   | { type: 'user-message-added'; message: string; timestamp: number }
   | { type: 'bot-message-added'; message: string; timestamp: number }
   | { type: 'execution-message-added'; executionId: string; plan?: ExecutionPlan; timestamp: number }
+  | { type: 'execution-message-updated'; executionId: string; timestamp: number }
   | { type: 'chat-complete'; result: ChatResult }
   | { type: 'chat-error'; error: Error };
 
@@ -180,7 +185,8 @@ export interface ChatOptions {
  * Everything you need in one simple class.
  */
 export class DotBot {
-  private api: ApiPromise;
+  private api: ApiPromise | null = null;
+  private executionSystemInitialized: boolean = false;
   private assetHubApi: ApiPromise | null = null;
   private executionSystem: ExecutionSystem;
   private wallet: WalletAccount;
@@ -224,7 +230,7 @@ export class DotBot {
   private chatLogger: ReturnType<typeof createSubsystemLogger>;
   
   private constructor(
-    api: ApiPromise, 
+    api: ApiPromise | null, 
     executionSystem: ExecutionSystem, 
     config: DotBotConfig,
     network: Network,
@@ -375,23 +381,12 @@ export class DotBot {
     }
     
     const rpcLogger = createSubsystemLogger(Subsystem.RPC);
-    rpcLogger.debug({ network: configuredNetwork }, 'DotBot.create: Connecting to Relay Chain...');
+    // LAZY LOADING: Don't connect to RPC endpoints during initialization
+    // Connections will be established when needed (e.g., in startExecution)
+    rpcLogger.debug({ network: configuredNetwork }, 'DotBot.create: RPC connections will be lazy-loaded when needed');
     
-    const api = await relayChainManager.getReadApi();
-    const relayChainEndpoint = relayChainManager.getCurrentEndpoint();
-    rpcLogger.info({ 
-      endpoint: relayChainEndpoint,
-      chain: 'relay'
-    }, `Connected to Relay Chain via: ${relayChainEndpoint}`);
-    
-    // Detect actual network from chain name (in case pre-initialized managers are for a different network)
-    let actualNetwork = configuredNetwork;
-    try {
-      const chainInfo = await api.rpc.system.chain();
-      actualNetwork = detectNetworkFromChainName(chainInfo.toString());
-    } catch {
-      // Skip network detection if it fails
-    }
+    // Use configured network (will be validated when connections are established)
+    const actualNetwork = configuredNetwork;
     
     const dotbotLogger = createSubsystemLogger(Subsystem.DOTBOT);
     dotbotLogger.info({ 
@@ -419,8 +414,9 @@ export class DotBot {
     // Create or use chat manager
     const chatManager = config.chatManager || new ChatInstanceManager();
     
+    // Create DotBot without connecting to RPC - connections will be lazy-loaded when needed
     const dotbot = new DotBot(
-      api, 
+      null, // API will be set lazily when RPC connections are established
       executionSystem, 
       config, 
       actualNetwork, 
@@ -435,26 +431,8 @@ export class DotBot {
       await dotbot.initializeChatInstance();
     }
     
-    rpcLogger.debug({ network: configuredNetwork }, 'DotBot.create: Connecting to Asset Hub...');
-    let assetHubApi: ApiPromise | null = null;
-    
-    try {
-      assetHubApi = await assetHubManager.getReadApi();
-      const assetHubEndpoint = assetHubManager.getCurrentEndpoint();
-      rpcLogger.info({ 
-        endpoint: assetHubEndpoint,
-        chain: 'asset-hub'
-      }, `Connected to Asset Hub via: ${assetHubEndpoint}`);
-      dotbot._setAssetHubApi(assetHubApi);
-    } catch (error) {
-      rpcLogger.warn({ 
-        error: error instanceof Error ? error.message : String(error),
-        configuredNetwork 
-      }, 'DotBot.create: Asset Hub connection failed, will retry when needed');
-    }
-    
-    // Initialize execution system with both APIs and RPC managers
-    executionSystem.initialize(api, config.wallet, signer, assetHubApi, relayChainManager, assetHubManager, config.onSimulationStatus);
+    // LAZY LOADING: Don't initialize execution system yet - will be done when RPC connections are ready
+    // executionSystem.initialize() will be called in ensureRpcConnectionsReady()
     
     return dotbot;
   }
@@ -684,6 +662,92 @@ export class DotBot {
   }
   
   /**
+   * Ensure RPC connections are ready (lazy loading)
+   * Connects to RPC endpoints if not already connected
+   * Initializes execution system if not already initialized
+   */
+  private async ensureRpcConnectionsReady(): Promise<void> {
+    // If already initialized, nothing to do
+    if (this.executionSystemInitialized && this.api) {
+      return;
+    }
+    
+    this.rpcLogger.debug({ network: this.network }, 'ensureRpcConnectionsReady: Connecting to RPC endpoints (lazy loading)');
+    
+    // Connect to Relay Chain
+    if (!this.api) {
+      this.api = await this.relayChainManager.getReadApi();
+      const relayChainEndpoint = this.relayChainManager.getCurrentEndpoint();
+      this.rpcLogger.info({ 
+        endpoint: relayChainEndpoint,
+        chain: 'relay'
+      }, `Connected to Relay Chain via: ${relayChainEndpoint}`);
+      
+      // Detect actual network from chain name
+      try {
+        const chainInfo = await this.api.rpc.system.chain();
+        const detectedNetwork = detectNetworkFromChainName(chainInfo.toString());
+        if (detectedNetwork !== this.network) {
+          this.rpcLogger.warn({ 
+            detected: detectedNetwork,
+            configured: this.network
+          }, 'Network mismatch detected');
+        }
+      } catch {
+        // Skip network detection if it fails
+      }
+    }
+    
+    // Connect to Asset Hub (optional)
+    let assetHubApi: ApiPromise | null = null;
+    if (!this.assetHubApi) {
+      try {
+        assetHubApi = await this.assetHubManager.getReadApi();
+        const assetHubEndpoint = this.assetHubManager.getCurrentEndpoint();
+        this.rpcLogger.info({ 
+          endpoint: assetHubEndpoint,
+          chain: 'asset-hub'
+        }, `Connected to Asset Hub via: ${assetHubEndpoint}`);
+        this._setAssetHubApi(assetHubApi);
+      } catch (error) {
+        this.rpcLogger.warn({ 
+          error: error instanceof Error ? error.message : String(error)
+        }, 'Asset Hub connection failed, will retry when needed');
+      }
+    } else {
+      assetHubApi = this.assetHubApi;
+    }
+    
+    // Initialize execution system if not already initialized
+    if (!this.executionSystemInitialized) {
+      const signer = new BrowserWalletSigner({ 
+        autoApprove: this.config.autoApprove || false 
+      });
+      
+      // Set up signing handlers
+      if (this.config.onSigningRequest) {
+        signer.setSigningRequestHandler(this.config.onSigningRequest);
+      }
+      if (this.config.onBatchSigningRequest) {
+        signer.setBatchSigningRequestHandler(this.config.onBatchSigningRequest);
+      }
+      
+      this.executionSystem.initialize(
+        this.api!,
+        this.wallet,
+        signer,
+        assetHubApi,
+        this.relayChainManager,
+        this.assetHubManager,
+        this.config.onSimulationStatus
+      );
+      
+      this.executionSystemInitialized = true;
+      this.rpcLogger.debug({}, 'Execution system initialized (lazy loading)');
+    }
+  }
+  
+  /**
    * Start execution of a specific execution array
    * 
    * This is called when user clicks "Accept & Start" in the UI.
@@ -696,6 +760,9 @@ export class DotBot {
    * @param options Execution options (autoApprove, etc.)
    */
   async startExecution(executionId: string, options?: ExecutionOptions): Promise<void> {
+    // GUARD: Ensure RPC connections are ready before execution (lazy loading)
+    await this.ensureRpcConnectionsReady();
+    
     // Handle stateless mode
     if (!this._stateful) {
       return this.startExecutionStateless(executionId, options);
@@ -1116,6 +1183,9 @@ export class DotBot {
     }
     
     try {
+      // GUARD: Ensure RPC connections are ready before preparing execution (lazy loading)
+      await this.ensureRpcConnectionsReady();
+      
       // Step 1: Initialize execution sessions for this chat (if not already initialized)
       this.dotbotLogger.debug({ 
         executionId: finalExecutionId 
@@ -1280,6 +1350,36 @@ export class DotBot {
         executionId,
         itemsCount: executionArray.getItems().length
       }, 'prepareExecutionStateless: Orchestration completed');
+      
+      // If chat instance exists (backend creates temporary chat), add ExecutionArray for WebSocket broadcasting
+      // This allows real-time updates during simulation to be broadcast via WebSocket
+      if (this.currentChat) {
+        // Add execution message early if it doesn't exist (allows UI to show "Preparing..." state)
+        await this.addExecutionMessageEarly(executionId, plan);
+        
+        // Update execution in chat with the ExecutionArray (sets up subscriptions for WebSocket)
+        // This must happen before simulation so simulation updates flow through WebSocket
+        await this.updateExecutionInChat(executionArray, plan);
+        
+        this.dotbotLogger.debug({ 
+          executionId 
+        }, 'prepareExecutionStateless: ExecutionArray added to chat for WebSocket broadcasting');
+        
+        // Call onExecutionReady callback if provided (allows setting up WebSocket broadcasting before simulation)
+        if (this.config?.onExecutionReady && this.currentChat) {
+          try {
+            this.config.onExecutionReady(executionId, this.currentChat);
+            this.dotbotLogger.debug({ 
+              executionId 
+            }, 'prepareExecutionStateless: onExecutionReady callback executed');
+          } catch (error) {
+            this.dotbotLogger.error({ 
+              executionId,
+              error: error instanceof Error ? error.message : String(error)
+            }, 'prepareExecutionStateless: Error in onExecutionReady callback');
+          }
+        }
+      }
       
       // Subscribe to progress updates to keep state current (for polling)
       const unsubscribeProgress = executionArray.onProgress(() => {
@@ -1468,6 +1568,13 @@ export class DotBot {
       if (this.currentChat) {
         this.currentChat.updateExecutionMessage(execMessage.id, {
           executionArray: executionArray.getState(),
+        }).then(() => {
+          // Emit event to notify UI of execution message update
+          this.emit({
+            type: 'execution-message-updated',
+            executionId: state.id,
+            timestamp: Date.now()
+          });
         }).catch(err => {
           this.dotbotLogger.error({ 
             error: err instanceof Error ? err.message : String(err),
@@ -1475,6 +1582,30 @@ export class DotBot {
           }, 'Failed to update execution message');
         });
       }
+    });
+  }
+
+  /**
+   * Update an execution message and emit event
+   * This should be used instead of calling currentChat.updateExecutionMessage directly
+   * to ensure events are properly emitted for UI updates
+   */
+  async updateExecutionMessage(
+    messageId: string, 
+    executionId: string,
+    updates: Partial<any>
+  ): Promise<void> {
+    if (!this.currentChat) {
+      throw new Error('No active chat session');
+    }
+    
+    await this.currentChat.updateExecutionMessage(messageId, updates);
+    
+    // Emit event to notify UI
+    this.emit({
+      type: 'execution-message-updated',
+      executionId,
+      timestamp: Date.now()
     });
   }
 
@@ -1520,9 +1651,11 @@ export class DotBot {
     } | null;
     total: string;
   }> {
+    // Ensure RPC connections are ready (lazy loading)
+    await this.ensureRpcConnectionsReady();
     
     // Get Relay Chain balance
-    const relayAccountInfo = await this.api.query.system.account(this.wallet.address);
+    const relayAccountInfo = await this.api!.query.system.account(this.wallet.address);
     const relayData = relayAccountInfo.toJSON() as any;
     
     const relayBalance = {
@@ -1569,9 +1702,12 @@ export class DotBot {
     chain: string;
     version: string;
   }> {
+    // Ensure RPC connections are ready (lazy loading)
+    await this.ensureRpcConnectionsReady();
+    
     const [chain, version] = await Promise.all([
-      this.api.rpc.system.chain(),
-      this.api.rpc.system.version()
+      this.api!.rpc.system.chain(),
+      this.api!.rpc.system.version()
     ]);
     
     return {
@@ -1582,9 +1718,11 @@ export class DotBot {
   
   /**
    * Get Polkadot API (for advanced usage)
+   * Note: This will trigger lazy loading if connections are not ready
    */
-  getApi(): ApiPromise {
-    return this.api;
+  async getApi(): Promise<ApiPromise> {
+    await this.ensureRpcConnectionsReady();
+    return this.api!;
   }
   
   /**
@@ -1612,7 +1750,9 @@ export class DotBot {
    * Disconnect and cleanup
    */
   async disconnect(): Promise<void> {
-    await this.api.disconnect();
+    if (this.api) {
+      await this.api.disconnect();
+    }
     if (this.assetHubApi) {
       await this.assetHubApi.disconnect();
     }
@@ -1658,6 +1798,9 @@ export class DotBot {
    * Build system prompt with current context
    */
   private async buildContextualSystemPrompt(): Promise<string> {
+    // Ensure RPC connections are ready (lazy loading)
+    await this.ensureRpcConnectionsReady();
+    
     try {
       const balance = await this.getBalance();
       const chainInfo = await this.getChainInfo();
@@ -1668,7 +1811,7 @@ export class DotBot {
                         : 'DOT';
       
       // Get decimals from API registry (environment) - more accurate than hardcoded values
-      const relayChainDecimals = this.api.registry.chainDecimals?.[0];
+      const relayChainDecimals = this.api!.registry.chainDecimals?.[0];
       const assetHubDecimals = this.assetHubApi?.registry.chainDecimals?.[0];
       
       const systemPrompt = await buildSystemPrompt({
