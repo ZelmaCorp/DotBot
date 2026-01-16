@@ -32,7 +32,6 @@ export interface ExecutionFlowProps {
   // New API: Pass ExecutionMessage + DotBot instance
   executionMessage?: ExecutionMessage;
   dotbot?: DotBot;
-  backendSessionId?: string | null; // Backend session ID for API calls (stateless mode)
   
   // Legacy API: Pass state directly
   state?: ExecutionArrayState | null;
@@ -44,16 +43,13 @@ export interface ExecutionFlowProps {
 const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   executionMessage,
   dotbot,
-  backendSessionId,
   state,
   onAcceptAndStart,
   onCancel,
   show = true
 }) => {
-  // Removed verbose logging - was causing console spam
-  
-  // Use custom hooks for state management (passes backendSessionId for polling)
-  const executionState = useExecutionFlowState(executionMessage, dotbot, state, backendSessionId);
+  // Use custom hooks for state management
+  const executionState = useExecutionFlowState(executionMessage, dotbot, state);
   const { isExpanded, toggleExpand } = useExpandedItems();
 
   // Determine if we should show the component
@@ -85,7 +81,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
 
   // Handle execution through DotBot if using new API
   const onAcceptAndStartHandler = () => {
-    handleAcceptAndStart(executionMessage, dotbot, backendSessionId, onAcceptAndStart);
+    handleAcceptAndStart(executionMessage, dotbot, onAcceptAndStart);
   };
 
   const handleCancel = () => {

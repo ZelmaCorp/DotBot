@@ -26,8 +26,6 @@ interface ChatProps {
   onPromptProcessed?: () => void;
   /** Auto-submit injected prompts (default: true) */
   autoSubmit?: boolean;
-  /** Backend session ID for API calls (stateless mode) */
-  backendSessionId?: string | null;
 }
 
 const Chat: React.FC<ChatProps> = ({
@@ -39,7 +37,6 @@ const Chat: React.FC<ChatProps> = ({
   injectedPrompt = null,
   onPromptProcessed,
   autoSubmit = true,
-  backendSessionId = null,
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
@@ -217,11 +214,10 @@ const Chat: React.FC<ChatProps> = ({
     <div className="chat-container">
       {/* Messages */}
       <MessageList>
-        <ConversationItems 
+        <ConversationItems
           key={refreshKey}
           items={conversationItems}
           dotbot={dotbot}
-          backendSessionId={backendSessionId}
         />
         
         {/* Typing indicator */}

@@ -92,10 +92,31 @@ export interface DotBotConfig {
   
   /** 
    * Stateful mode: If true (default), DotBot maintains chat instances and execution state.
-   * If false (stateless), DotBot processes requests and returns state without maintaining it.
-   * Use stateless mode for backend/API services where the client maintains state.
+   * If false (SESSION_SERVER_MODE), DotBot processes requests and returns state without maintaining it.
+   * Use SESSION_SERVER_MODE for backend/API services where the client maintains state.
+   * 
+   * Default: true
    */
   stateful?: boolean;
+  
+  /**
+   * Backend simulation: If true, backend runs transaction simulation before returning.
+   * If false, client is expected to run simulation (only works in stateful mode).
+   * 
+   * Default: !stateful (backend simulates in SESSION_SERVER_MODE, client in stateful mode)
+   * 
+   * Performance: Backend simulation is typically 0.5-2s faster due to better RPC connectivity.
+   * Client simulation works fine on decent connections.
+   * 
+   * Valid combinations:
+   * - stateful: true, backendSimulation: false (default) → client simulates, has ExecutionArray
+   * - stateful: false, backendSimulation: true (default) → SESSION_SERVER_MODE: server simulates, returns state
+   * - stateful: true, backendSimulation: true → server simulates even in stateful mode
+   * 
+   * Invalid:
+   * - stateful: false, backendSimulation: false → ERROR (client can't simulate without ExecutionArray)
+   */
+  backendSimulation?: boolean;
 }
 
 export interface ChatResult {
@@ -105,10 +126,10 @@ export interface ChatResult {
   /** Execution plan (if any) */
   plan?: ExecutionPlan;
   
-  /** Execution array state (in stateless mode, this is returned instead of being stored) */
+  /** Execution array state (in SESSION_SERVER_MODE, this is returned instead of being stored) */
   executionArrayState?: ExecutionArrayState;
   
-  /** Execution ID (for tracking execution in stateless mode) */
+  /** Execution ID (for tracking execution in SESSION_SERVER_MODE) */
   executionId?: string;
   
   /** Whether operations were executed */
@@ -122,6 +143,9 @@ export interface ChatResult {
   
   /** Number of operations failed */
   failed: number;
+  
+  /** Whether backend simulation was run (if false, client should simulate) */
+  backendSimulated?: boolean;
 }
 
 /**
@@ -206,6 +230,7 @@ export class DotBot {
   public currentChat: ChatInstance | null = null;
   private chatPersistenceEnabled: boolean;
   private _stateful: boolean;
+  private _backendSimulation: boolean;
   
   /**
    * Get whether DotBot is in stateful mode
@@ -263,6 +288,8 @@ export class DotBot {
     this.chatPersistenceEnabled = !config.disableChatPersistence;
     this.aiService = config.aiService;
     this._stateful = config.stateful !== false; // Default to true for backward compatibility
+    // Default: backend simulation enabled in SESSION_SERVER_MODE, disabled in stateful mode (client does it)
+    this._backendSimulation = config.backendSimulation ?? !this._stateful;
   }
   
   /**
@@ -770,8 +797,9 @@ export class DotBot {
     // GUARD: Ensure RPC connections are ready before execution (lazy loading)
     await this.ensureRpcConnectionsReady();
     
-    // Handle stateless mode
+    // Handle SESSION_SERVER_MODE
     if (!this._stateful) {
+      // Handle SESSION_SERVER_MODE
       return this.startExecutionStateless(executionId, options);
     }
     
@@ -835,7 +863,7 @@ export class DotBot {
   }
   
   /**
-   * Start execution in stateless mode
+   * Start execution in SESSION_SERVER_MODE
    * Rebuilds ExecutionArray from stored plan and sessions, then executes
    */
   private async startExecutionStateless(executionId: string, options?: ExecutionOptions): Promise<void> {
@@ -1079,22 +1107,46 @@ export class DotBot {
     // Prepare execution (orchestrate + add to chat)
     // Do NOT auto-execute - wait for user approval in UI!
     let executionArrayState: ExecutionArrayState | undefined;
+    let executionId: string | undefined;
+    
     try {
-      const result = await this.prepareExecution(plan);
-      if (result) {
-        // Stateless mode - result is ExecutionArrayState
-        executionArrayState = result;
+      // If backend simulation is disabled, skip orchestration - frontend will handle it
+      if (!this._stateful && !this._backendSimulation) {
+        // SESSION_SERVER_MODE with frontend simulation: Just generate executionId and return plan
+        executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         this.dotbotLogger.info({ 
           planId: plan.id,
-          stepsCount: plan.steps.length,
-          executionId: executionArrayState.id
-        }, 'Execution preparation completed successfully (stateless mode)');
-      } else {
-        // Stateful mode - execution was added to chat
-        this.dotbotLogger.info({ 
-          planId: plan.id,
+          executionId,
           stepsCount: plan.steps.length
-        }, 'Execution preparation completed successfully (stateful mode)');
+        }, 'Skipping backend orchestration - frontend will handle orchestration and simulation');
+      } else {
+        // Normal flow: orchestrate (and optionally simulate) on backend
+        const result = await this.prepareExecution(plan);
+        if (result) {
+          // SESSION_SERVER_MODE - result is ExecutionArrayState
+          executionArrayState = result;
+          executionId = executionArrayState.id;
+          this.dotbotLogger.info({ 
+            planId: plan.id,
+            stepsCount: plan.steps.length,
+            executionId: executionArrayState.id
+          }, 'Execution preparation completed successfully (SESSION_SERVER_MODE)');
+        } else {
+          // Stateful mode - execution was added to chat
+          // Extract executionId from the execution message
+          if (this.currentChat) {
+            const messages = this.currentChat.getDisplayMessages();
+            const execMsg = messages.find(
+              m => m.type === 'execution' && (m as any).executionPlan?.id === plan.id
+            ) as any;
+            executionId = execMsg?.executionId;
+          }
+          this.dotbotLogger.info({ 
+            planId: plan.id,
+            stepsCount: plan.steps.length,
+            executionId
+          }, 'Execution preparation completed successfully (stateful mode)');
+        }
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1168,8 +1220,8 @@ export class DotBot {
     return {
       response: friendlyMessage,
       plan,
-      executionArrayState, // Included in stateless mode
-      executionId: executionArrayState?.id, // Included in stateless mode
+      executionArrayState, // Included in SESSION_SERVER_MODE (when backend orchestrates)
+      executionId: executionId || executionArrayState?.id, // Always include executionId
       executed: false,  // Not executed yet!
       success: true,
       completed: 0,
@@ -1187,13 +1239,13 @@ export class DotBot {
    * IMPORTANT: 
    * - In stateful mode: Adds ExecutionMessage to chat IMMEDIATELY (before orchestration) so the UI
    *   can show "Preparing..." state, then orchestrates and updates the message with the executionArray.
-   * - In stateless mode: Creates sessions, orchestrates, simulates, and returns ExecutionArrayState
+   * - In SESSION_SERVER_MODE: Creates sessions, orchestrates, simulates, and returns ExecutionArrayState
    *   (sessions are stored temporarily for later execution)
    * 
    * @param plan ExecutionPlan from LLM
    * @param executionId Optional execution ID to preserve when rebuilding (prevents duplicate ExecutionMessages)
    * @param skipSimulation If true, skip simulation (used when rebuilding to prevent double simulation)
-   * @returns ExecutionArrayState in stateless mode, void in stateful mode
+   * @returns ExecutionArrayState in SESSION_SERVER_MODE, void in stateful mode
    */
   private async prepareExecution(plan: ExecutionPlan, executionId?: string, skipSimulation: boolean = false): Promise<ExecutionArrayState | void> {
     // Step 0: Generate executionId if not provided
@@ -1207,7 +1259,7 @@ export class DotBot {
       stateful: this._stateful
     }, 'prepareExecution: Starting execution preparation');
     
-    // Handle stateless mode
+    // Handle SESSION_SERVER_MODE
     if (!this._stateful) {
       return this.prepareExecutionStateless(plan, finalExecutionId, skipSimulation);
     }
@@ -1427,10 +1479,10 @@ export class DotBot {
       });
       
       // Step 3: Run simulation if enabled and not skipped
-      if (!skipSimulation) {
+      if (!skipSimulation && this._backendSimulation) {
         this.dotbotLogger.info({ 
           executionId 
-        }, 'prepareExecutionStateless: Starting simulation');
+        }, 'prepareExecutionStateless: Starting backend simulation');
         await this.executionSystem.runSimulation(
           executionArray,
           this.wallet.address,
@@ -1442,11 +1494,11 @@ export class DotBot {
         );
         this.dotbotLogger.info({ 
           executionId 
-        }, 'prepareExecutionStateless: Simulation completed');
+        }, 'prepareExecutionStateless: Backend simulation completed');
       } else {
         this.dotbotLogger.debug({ 
           executionId 
-        }, 'prepareExecutionStateless: Skipping simulation');
+        }, 'prepareExecutionStateless: Simulation skipped');
       }
       
       // Unsubscribe from progress updates (preparation complete)
@@ -1493,7 +1545,7 @@ export class DotBot {
   }
   
   /**
-   * Get execution sessions for a given executionId (stateless mode)
+   * Get execution sessions for a given executionId (SESSION_SERVER_MODE)
    * Used when executing a previously prepared execution
    */
   getExecutionSessions(executionId: string): { relayChain: ExecutionSession; assetHub: ExecutionSession | null } | null {
@@ -1509,7 +1561,7 @@ export class DotBot {
   }
   
   /**
-   * Clean up execution sessions, plan, and state for a given executionId (stateless mode)
+   * Clean up execution sessions, plan, and state for a given executionId (SESSION_SERVER_MODE)
    */
   cleanupExecutionSessions(executionId: string): void {
     const sessions = this.executionSessions.get(executionId);

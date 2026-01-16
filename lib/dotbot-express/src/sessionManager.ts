@@ -378,6 +378,7 @@ export class DotBotSessionManager {
       chatManager,
       autoApprove: false,
       stateful: false,
+      backendSimulation: false, // Frontend does simulation
     };
 
     const dotbot = await this.createDotBotWithTimeout(dotbotConfig, network, sessionId);

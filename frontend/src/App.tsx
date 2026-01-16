@@ -23,6 +23,7 @@ import LoadingOverlay from './components/common/LoadingOverlay';
 import { DotBot, Environment, ScenarioEngine } from '@dotbot/core';
 import type { ChatInstanceData } from '@dotbot/core/types/chatInstance';
 import type { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
+import type { ExecutionMessage } from '@dotbot/core/types/chatInstance';
 import { useWalletStore } from './stores/walletStore';
 import { SigningRequest, BatchSigningRequest } from '@dotbot/core';
 import { Settings } from 'lucide-react';
@@ -497,16 +498,34 @@ const AppContent: React.FC = () => {
           hasState: !!chatResult.executionArrayState,
           hasPlan: !!chatResult.plan 
         });
-        persistencePromises.push(
-          currentChat.addExecutionMessage(
-            executionId,
-            chatResult.plan,
-            chatResult.executionArrayState,
-            true // skipReload
-          )
-            .then(() => console.log('[App] Execution message persisted'))
-            .catch((err: unknown) => console.error('[App] Failed to persist execution message:', err))
-        );
+        
+        // Add execution message first (stores plan)
+        const addMessagePromise = currentChat.addExecutionMessage(
+          executionId,
+          chatResult.plan,
+          undefined, // Don't use backend's executionArrayState - frontend will rebuild and simulate
+          true // skipReload
+        )
+          .then(async (executionMessage: ExecutionMessage) => {
+            console.log('[App] Execution message persisted');
+            
+            // Frontend rebuilds ExecutionArray from plan and runs simulation
+            if (chatResult.plan && dotbot) {
+              console.log('[App] Rebuilding ExecutionArray from plan and running simulation on frontend');
+              try {
+                // prepareExecution is private, but we need to call it to rebuild and simulate
+                // Type assertion to access private method (prepareExecution will create ExecutionArray and run simulation)
+                await (dotbot as any).prepareExecution(chatResult.plan, executionId, false);
+                console.log('[App] Frontend simulation completed');
+              } catch (error) {
+                console.error('[App] Failed to prepare execution on frontend:', error);
+                // Don't throw - execution message is already added, user can retry
+              }
+            }
+          })
+          .catch((err: unknown) => console.error('[App] Failed to persist execution message:', err));
+        
+        persistencePromises.push(addMessagePromise);
       } else {
         // Update existing message with plan and/or state
         const updates: any = {};
@@ -816,7 +835,6 @@ const AppContent: React.FC = () => {
                   injectedPrompt={injectedPrompt?.prompt || null}
                   onPromptProcessed={notifyPromptProcessed}
                   autoSubmit={autoSubmitPrompts}
-                  backendSessionId={backendSessionId}
             />
           ) : (
             <div style={{ textAlign: 'center', padding: '2rem' }}>
