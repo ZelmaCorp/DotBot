@@ -64,7 +64,11 @@ export function handleApproveExecutionStep(
 
   const executionArray = session.dotbot.currentChat.getExecutionArray(executionId);
   if (!executionArray) {
-    sendNotFound(res, 'Execution', executionId);
+    res.status(404).json({
+      error: 'Execution not found',
+      message: `Execution ${executionId} not found. It may not have been prepared yet or may have expired.`,
+      timestamp: new Date().toISOString()
+    });
     return;
   }
 
@@ -102,7 +106,11 @@ export function handleRejectExecutionStep(
 
   const executionArray = session.dotbot.currentChat.getExecutionArray(executionId);
   if (!executionArray) {
-    sendNotFound(res, 'Execution', executionId);
+    res.status(404).json({
+      error: 'Execution not found',
+      message: `Execution ${executionId} not found. It may not have been prepared yet or may have expired.`,
+      timestamp: new Date().toISOString()
+    });
     return;
   }
 

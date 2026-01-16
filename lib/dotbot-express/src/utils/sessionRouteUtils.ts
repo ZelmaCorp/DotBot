@@ -31,7 +31,10 @@ export async function handleGetSession(
   sessionId: string
 ): Promise<void> {
   if (!session) {
-    sendNotFound(res, 'DotBot session', sessionId);
+    res.status(404).json({
+      error: 'Session not found',
+      message: `No DotBot session found for ID: ${sessionId}`,
+    });
     return;
   }
 
