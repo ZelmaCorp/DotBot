@@ -14,8 +14,8 @@ if (typeof process !== 'undefined') {
 // Import logger early to set up console filters (must be before other imports)
 import './utils/logger';
 
-export { default as chatRouter } from './routes/chat';
-export { default as dotbotRouter } from './routes/dotbot';
+export { default as chatRouter } from './routes/chatRoutes';
+export { default as dotbotRouter } from './routes/dotbotRoutes';
 export { errorHandler, notFoundHandler } from './middleware/errorHandler';
 export { requestLogger } from './middleware/requestLogger';
 export { 

@@ -3,7 +3,7 @@
  */
 
 import { Request, Response } from 'express';
-import chatRouter from '../../routes/chat';
+import chatRouter from '../../routes/chatRoutes';
 import { AIService, AIProviderType } from '@dotbot/core/services/ai';
 
 // Mock AIService

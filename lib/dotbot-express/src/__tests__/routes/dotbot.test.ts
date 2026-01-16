@@ -20,7 +20,7 @@ jest.mock('../../sessionManager', () => ({
 }));
 
 // Import router after mocks are set up
-import dotbotRouter from '../../routes/dotbot';
+import dotbotRouter from '../../routes/dotbotRoutes';
 import { DotBotSessionManager } from '../../sessionManager';
 
 // Mock logger
