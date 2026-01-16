@@ -217,9 +217,16 @@ export class DotBot {
   // Stateless mode: Temporary storage for execution sessions, plans, and states (keyed by executionId)
   // These are created during prepareExecution and reused for execution
   // executionStates stores current state during preparation (for polling)
-  private executionSessions: Map<string, { relayChain: ExecutionSession; assetHub: ExecutionSession | null }> = new Map();
+  private executionSessions: Map<string, { 
+    relayChain: ExecutionSession; 
+    assetHub: ExecutionSession | null;
+    createdAt: number; 
+  }> = new Map();
   private executionPlans: Map<string, ExecutionPlan> = new Map();
   private executionStates: Map<string, ExecutionArrayState> = new Map();
+  
+  // Session TTL: 15 minutes (900000ms) - after this time, sessions expire
+  private readonly SESSION_TTL_MS = 15 * 60 * 1000;
   
   // Event emitter for external observers (e.g., ScenarioEngine)
   private eventListeners: Set<DotBotEventListener> = new Set();
@@ -840,6 +847,22 @@ export class DotBot {
       throw new Error(`Execution ${executionId} not found. It may have expired or not been prepared yet.`);
     }
     
+    // Check TTL expiration
+    const age = Date.now() - sessions.createdAt;
+    if (age > this.SESSION_TTL_MS) {
+      this.cleanupExecutionSessions(executionId);
+      throw new Error(`Execution ${executionId} has expired (${Math.round(age / 60000)} minutes old). Maximum session lifetime is ${this.SESSION_TTL_MS / 60000} minutes. Please prepare the execution again.`);
+    }
+    
+    // Validate sessions are still active
+    const relayChainValid = await this.validateExecutionSession(sessions.relayChain);
+    const assetHubValid = !sessions.assetHub || await this.validateExecutionSession(sessions.assetHub);
+    
+    if (!relayChainValid || !assetHubValid) {
+      this.cleanupExecutionSessions(executionId);
+      throw new Error(`Execution ${executionId} has expired. Sessions are no longer valid. Please prepare the execution again.`);
+    }
+    
     this.dotbotLogger.info({ executionId }, 'startExecutionStateless: Rebuilding ExecutionArray from plan');
     
     // Rebuild ExecutionArray from plan using stored sessions
@@ -1333,10 +1356,11 @@ export class DotBot {
         this.dotbotLogger.debug({ executionId }, 'Asset Hub session creation failed (expected in some cases)');
       }
       
-      // Store sessions and plan for later execution
+      // Store sessions and plan for later execution (with TTL)
       this.executionSessions.set(executionId, {
         relayChain: relayChainSession,
-        assetHub: assetHubSession
+        assetHub: assetHubSession,
+        createdAt: Date.now()
       });
       this.executionPlans.set(executionId, plan);
       
@@ -1459,6 +1483,16 @@ export class DotBot {
   }
   
   /**
+   * Validate an execution session is still active
+   */
+  private async validateExecutionSession(session: ExecutionSession): Promise<boolean> {
+    if (!session.isActive) {
+      return false;
+    }
+    return await session.isConnected();
+  }
+  
+  /**
    * Get execution sessions for a given executionId (stateless mode)
    * Used when executing a previously prepared execution
    */
@@ -1486,6 +1520,29 @@ export class DotBot {
       this.executionStates.delete(executionId);
       this.dotbotLogger.debug({ executionId }, 'Cleaned up execution sessions, plan, and state');
     }
+  }
+  
+  /**
+   * Clean up expired execution sessions (call periodically to prevent memory leaks)
+   * Returns the number of executions cleaned up
+   */
+  cleanupExpiredExecutions(): number {
+    const now = Date.now();
+    let cleaned = 0;
+    
+    for (const [executionId, sessions] of this.executionSessions.entries()) {
+      const age = now - sessions.createdAt;
+      if (age > this.SESSION_TTL_MS) {
+        this.cleanupExecutionSessions(executionId);
+        cleaned++;
+        this.dotbotLogger.info({ 
+          executionId, 
+          ageMinutes: Math.round(age / 60000) 
+        }, 'Cleaned up expired execution session');
+      }
+    }
+    
+    return cleaned;
   }
   
   /**

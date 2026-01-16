@@ -300,8 +300,7 @@ export {
   validateAndReport 
 } from './utils/validateEnv';
 export type { 
-  ValidationError, 
-  ValidationResult 
+  ValidationError
 } from './utils/validateEnv';
 
 // ============================================================================
