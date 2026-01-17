@@ -65,16 +65,45 @@ export async function runSimulation(
     };
 
     // Create new context with item-specific callback
+    console.log('[SIMULATION] Creating simulation context...', {
+      itemId: item.id,
+      hasApi: !!context.api,
+      hasOnStatusUpdate: !!context.onStatusUpdate
+    });
     const itemContext: SimulationContext = {
       ...context,
       onStatusUpdate: itemSimulationCallback,
     };
+    console.log('[SIMULATION] Context created, checking Chopsticks availability...');
 
-    const chopsticksAvailable = await isChopsticksAvailable();
+    const checkStartTime = Date.now();
+    let chopsticksAvailable: boolean;
+    try {
+      console.log('[SIMULATION] Calling isChopsticksAvailable()...');
+      chopsticksAvailable = await isChopsticksAvailable();
+      const checkDuration = Date.now() - checkStartTime;
+      console.log('[SIMULATION] isChopsticksAvailable() completed', {
+        available: chopsticksAvailable,
+        duration: `${checkDuration}ms`
+      });
+    } catch (checkError) {
+      const errorMsg = checkError instanceof Error ? checkError.message : String(checkError);
+      console.error('[SIMULATION] isChopsticksAvailable() failed:', errorMsg, checkError);
+      simulationLogger.error({ 
+        error: errorMsg,
+        stack: checkError instanceof Error ? checkError.stack : undefined
+      }, 'Failed to check Chopsticks availability');
+      throw new Error(`Failed to check Chopsticks availability: ${errorMsg}`);
+    }
+    
     simulationLogger.debug({ 
       method: chopsticksAvailable ? 'Chopsticks' : 'paymentInfo',
       fullValidation: chopsticksAvailable
     }, chopsticksAvailable ? 'Simulation method: Chopsticks (full runtime validation)' : 'Simulation method: paymentInfo fallback (structure only)');
+    console.log('[SIMULATION] Simulation method determined:', {
+      method: chopsticksAvailable ? 'Chopsticks' : 'paymentInfo',
+      fullValidation: chopsticksAvailable
+    });
 
     if (chopsticksAvailable) {
       // Use Chopsticks for full runtime execution simulation
@@ -117,6 +146,64 @@ async function runChopsticksSimulation(
   simulateTransaction: any
 ): Promise<void> {
   const simulationLogger = createSubsystemLogger(Subsystem.SIMULATION);
+  console.log('[SIMULATION] runChopsticksSimulation: Starting...', {
+    itemId: item.id,
+    hasApi: !!context.api,
+    apiConnected: context.api?.isConnected,
+    hasSessionEndpoint: !!context.sessionEndpoint
+  });
+  
+  // CRITICAL: Validate API is available and connected
+  if (!context.api) {
+    console.error('[SIMULATION] runChopsticksSimulation: API not available');
+    const errorMsg = 'API instance is not available. This may happen after switching networks. Please try again.';
+    simulationLogger.error({ itemId: item.id }, errorMsg);
+    executionArray.updateSimulationStatus(item.id, {
+      phase: 'error',
+      message: errorMsg,
+      result: {
+        success: false,
+        error: errorMsg,
+        wouldSucceed: false,
+      },
+    });
+    markItemAsFailed(executionArray, item.id, errorMsg, 'API_NOT_AVAILABLE', errorMsg);
+    throw new Error(errorMsg);
+  }
+  
+  // Ensure API is ready before simulation
+  if (!context.api.isConnected) {
+    executionArray.updateSimulationStatus(item.id, {
+      phase: 'initializing',
+      message: 'Waiting for blockchain connection...',
+      progress: 5,
+    });
+    
+    try {
+      await Promise.race([
+        context.api.isReady,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 30000)
+        )
+      ]);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Connection timeout';
+      const userMsg = `Cannot connect to blockchain: ${errorMsg}. Please check your network connection.`;
+      simulationLogger.error({ itemId: item.id, error: errorMsg }, userMsg);
+      executionArray.updateSimulationStatus(item.id, {
+        phase: 'error',
+        message: userMsg,
+        result: {
+          success: false,
+          error: userMsg,
+          wouldSucceed: false,
+        },
+      });
+      markItemAsFailed(executionArray, item.id, userMsg, 'CONNECTION_FAILED', errorMsg);
+      throw new Error(userMsg);
+    }
+  }
+  
   const isAssetHub = context.api.registry.chainSS58 === 0;
   const manager = isAssetHub ? context.assetHubManager : context.relayChainManager;
 
@@ -131,6 +218,15 @@ async function runChopsticksSimulation(
     // Fallback to manager endpoints (legacy behavior)
     rpcEndpoints = getRpcEndpoints(manager, isAssetHub);
     simulationLogger.warn({}, 'No session endpoint provided, using manager endpoints (may cause metadata mismatch)');
+    // Update status to inform user about potential metadata mismatch
+    if (context.onStatusUpdate) {
+      context.onStatusUpdate({
+        phase: 'initializing',
+        message: 'Using fallback endpoints (may cause metadata mismatch)',
+        progress: 8,
+        details: 'Session endpoint not available, using manager endpoints'
+      });
+    }
   }
 
   const senderPublicKey = decodeAddress(context.accountAddress);

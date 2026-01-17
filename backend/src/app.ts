@@ -121,6 +121,15 @@ app.use('/api/chat', chatRouter);
 // Mount DotBot routes (full DotBot chat with AI on backend)
 app.use('/api/dotbot', dotbotRouter);
 
+// Mount simulation routes (Chopsticks server)
+import { simulationRouter } from '@dotbot/express';
+if (simulationRouter) {
+  app.use('/api/simulation', simulationRouter);
+  console.log('[App] Simulation routes mounted at /api/simulation');
+} else {
+  console.error('[App] ERROR: simulationRouter is undefined!');
+}
+
 /**
  * Error handling
  */

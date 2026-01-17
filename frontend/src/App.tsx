@@ -5,11 +5,10 @@
  * Component hierarchy ready for @dotbot/react package extraction.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { flushSync } from 'react-dom';
+import React, { useState, useEffect, useRef } from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { WebSocketProvider, useWebSocket } from './contexts/WebSocketContext';
+// WebSocket removed - frontend does all simulation locally
 import { useScenarioPrompt } from './hooks/useScenarioPrompt';
 import WalletButton from './components/wallet/WalletButton';
 import ThemeToggle from './components/ui/ThemeToggle';
@@ -22,7 +21,6 @@ import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOve
 import LoadingOverlay from './components/common/LoadingOverlay';
 import { DotBot, Environment, ScenarioEngine } from '@dotbot/core';
 import type { ChatInstanceData } from '@dotbot/core/types/chatInstance';
-import type { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
 import type { ExecutionMessage } from '@dotbot/core/types/chatInstance';
 import { useWalletStore } from './stores/walletStore';
 import { SigningRequest, BatchSigningRequest } from '@dotbot/core';
@@ -35,7 +33,6 @@ import {
 import {
   createDotBotSession,
   sendDotBotMessage,
-  getDotBotSession,
   type WalletAccount,
 } from './services/dotbotApi';
 import './styles/globals.css';
@@ -51,180 +48,7 @@ const queryClient = new QueryClient({
   },
 });
 
-// Create a context to share execution states between EarlyExecutionSubscriber and components
-interface ExecutionStateContextValue {
-  states: Map<string, ExecutionArrayState>;
-}
-
-const ExecutionStateContext = React.createContext<ExecutionStateContextValue>({
-  states: new Map(),
-});
-
-export const useExecutionState = (executionId: string | undefined) => {
-  const context = React.useContext(ExecutionStateContext);
-  return executionId ? context.states.get(executionId) : undefined;
-};
-
-/**
- * Component to subscribe to execution updates early (before ExecutionFlow renders)
- * 
- * STRATEGY: Subscribe to session-level execution updates when WebSocket connects.
- * This allows catching ALL execution updates for the session, including those that
- * happen before we know the executionId. When updates arrive, we filter by executionId
- * and store them in context for ExecutionFlow to consume.
- * 
- * This ensures we catch simulation progress updates that happen immediately after
- * execution starts, even before the executionId is known.
- */
-const EarlyExecutionSubscriber: React.FC<{
-  subscribeRef: React.MutableRefObject<((executionId: string) => void) | null>;
-  pendingExecutionId: string | null;
-  dotbot: DotBot | null;
-  onExecutionMessageCreated?: () => void; // Callback to trigger UI refresh
-  children: React.ReactNode;
-}> = ({ subscribeRef, pendingExecutionId, dotbot, onExecutionMessageCreated, children }) => {
-  const { subscribeToSessionExecutions, isConnected } = useWebSocket();
-  const subscribedRef = useRef<Set<string>>(new Set());
-  const unsubscribeRef = useRef<Map<string, () => void>>(new Map());
-  const sessionUnsubscribeRef = useRef<(() => void) | null>(null);
-  
-  // Store execution states in state (shared via context)
-  const [executionStates, setExecutionStates] = useState<Map<string, ExecutionArrayState>>(new Map());
-  
-  // Subscribe to session-level execution updates when WebSocket connects
-  // This catches ALL execution updates for the session, including early simulation progress
-  useEffect(() => {
-    if (!isConnected || typeof subscribeToSessionExecutions !== 'function') {
-      return;
-    }
-    
-    console.log('[EarlyExecutionSubscriber] Subscribing to session-level execution updates');
-    
-    // Subscribe to all execution updates for this session
-    const unsubscribe = subscribeToSessionExecutions((executionId, state) => {
-      console.log('[EarlyExecutionSubscriber] Session-level execution update received:', {
-        executionId,
-        itemsCount: state.items.length,
-        hasSimulationStatus: state.items.some(item => item.simulationStatus),
-        simulationPhases: state.items.map(item => item.simulationStatus?.phase).filter(Boolean),
-      });
-      
-      // Update shared state so useExecutionFlowState can access it
-      setExecutionStates(prev => {
-        const next = new Map(prev);
-        next.set(executionId, state);
-        return next;
-      });
-      
-      // Update the execution message in the chat instance
-      // This ensures the message exists and is updated even if it wasn't created yet
-      if (dotbot?.currentChat) {
-        const messages = dotbot.currentChat.getDisplayMessages();
-        let executionMsg = messages.find(
-          (m: any) => m.type === 'execution' && m.executionId === executionId
-        ) as any;
-        
-        // If execution message doesn't exist yet, create it from the state
-        // This can happen if WebSocket update arrives before addExecutionMessage completes
-        if (!executionMsg && state) {
-          console.log('[EarlyExecutionSubscriber] Execution message not found, creating from WebSocket state:', executionId);
-          try {
-            // Create execution message with minimal data (plan will be added later)
-            // We need at least the executionId and state to render ExecutionFlow
-            dotbot.currentChat.addExecutionMessage(
-              executionId,
-              undefined, // plan - will be added when backend response arrives
-              state,
-              true // skipReload
-            ).then(() => {
-              // Notify parent to trigger UI refresh
-              onExecutionMessageCreated?.();
-            }).catch((err: unknown) => {
-              console.error('[EarlyExecutionSubscriber] Failed to create execution message:', err);
-            });
-          } catch (error) {
-            console.error('[EarlyExecutionSubscriber] Error creating execution message:', error);
-          }
-        } else if (executionMsg) {
-          // Update existing message using DotBot method (fires events)
-          dotbot.updateExecutionMessage(executionMsg.id, executionId, {
-            executionArray: state,
-          }).then(() => {
-            // Notify parent to trigger UI refresh
-            onExecutionMessageCreated?.();
-          }).catch((err: unknown) => {
-            console.error('[EarlyExecutionSubscriber] Failed to update execution message:', err);
-          });
-        }
-      }
-    });
-    
-    sessionUnsubscribeRef.current = unsubscribe;
-    
-    return () => {
-      if (sessionUnsubscribeRef.current) {
-        sessionUnsubscribeRef.current();
-        sessionUnsubscribeRef.current = null;
-      }
-    };
-  }, [isConnected, subscribeToSessionExecutions, dotbot, onExecutionMessageCreated]);
-  
-  // Internal subscription function - kept for backwards compatibility
-  // Now it just marks the executionId as tracked (session subscription handles updates)
-  const doSubscribe = useCallback((executionId: string) => {
-    // Skip if already tracked
-    if (subscribedRef.current.has(executionId)) {
-      console.log('[EarlyExecutionSubscriber] Already tracking execution:', executionId);
-      return;
-    }
-    
-    console.log('[EarlyExecutionSubscriber] Tracking execution (session subscription active):', executionId);
-    subscribedRef.current.add(executionId);
-    
-    // Session-level subscription is already active, so updates will be received automatically
-    // No need to create individual subscription
-  }, []);
-  
-  // Set ref immediately (synchronously) during render, not in useEffect
-  // This ensures the ref is available when parent calls it
-  subscribeRef.current = doSubscribe;
-  
-  // Handle pending executionId from state (fallback mechanism)
-  useEffect(() => {
-    if (pendingExecutionId) {
-      doSubscribe(pendingExecutionId);
-    }
-  }, [pendingExecutionId, doSubscribe]);
-  
-  // Cleanup subscriptions on unmount
-  useEffect(() => {
-    return () => {
-      // Cleanup session-level subscription
-      if (sessionUnsubscribeRef.current) {
-        sessionUnsubscribeRef.current();
-        sessionUnsubscribeRef.current = null;
-      }
-      
-      // Cleanup individual subscriptions (if any)
-      unsubscribeRef.current.forEach((unsubscribe) => {
-        unsubscribe();
-      });
-      unsubscribeRef.current.clear();
-      subscribedRef.current.clear();
-      subscribeRef.current = null;
-    };
-  }, [subscribeRef]);
-  
-  const contextValue = React.useMemo(() => ({
-    states: executionStates,
-  }), [executionStates]);
-  
-  return (
-    <ExecutionStateContext.Provider value={contextValue}>
-      {children}
-    </ExecutionStateContext.Provider>
-  );
-};
+// WebSocket removed - frontend does all simulation locally via ExecutionArray subscriptions
 
 const AppContent: React.FC = () => {
   // UI State
@@ -265,15 +89,7 @@ const AppContent: React.FC = () => {
   
   const { isConnected, selectedAccount } = useWalletStore();
   
-  // Note: WebSocket connection status is checked inside WebSocketProvider context
-  // We can't access it here because AppContent renders before WebSocketProvider
-  // The check is moved to components that are inside the provider
-
-  // Ref to store early subscription function (populated by EarlyExecutionSubscriber)
-  // This allows immediate subscription without waiting for React state updates
-  const earlySubscribeRef = useRef<((executionId: string) => void) | null>(null);
-  // State to force re-render and trigger subscription (backup mechanism)
-  const [pendingExecutionId, setPendingExecutionId] = useState<string | null>(null);
+  // WebSocket removed - execution updates come from local ExecutionArray subscriptions
   
   // Note: useChatInput is called in AppWithChatInput component (inside provider)
 
@@ -287,6 +103,32 @@ const AppContent: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, selectedAccount]);
+
+  // Initialize ScenarioEngine dependencies when enabled and DotBot is ready
+  useEffect(() => {
+    if (scenarioEngineEnabled && dotbot && selectedAccount && !isScenarioEngineReady && !isScenarioEngineInitializing) {
+      setIsScenarioEngineInitializing(true);
+      
+      const walletAccount: WalletAccount = {
+        address: selectedAccount.address,
+        name: selectedAccount.name,
+        source: selectedAccount.source,
+      };
+      
+      setupScenarioEngineDependencies(scenarioEngine, dotbot, walletAccount)
+        .then(() => {
+          setIsScenarioEngineReady(true);
+          setIsScenarioEngineInitializing(false);
+          console.log('[App] ScenarioEngine dependencies initialized');
+        })
+        .catch((error) => {
+          console.error('[App] Failed to initialize ScenarioEngine dependencies:', error);
+          setIsScenarioEngineInitializing(false);
+          // Don't set ready state on error - user can retry by toggling
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarioEngineEnabled, dotbot, selectedAccount, isScenarioEngineReady, isScenarioEngineInitializing]);
 
   // Sync current chat ID when dotbot changes
   useEffect(() => {
@@ -312,12 +154,13 @@ const AppContent: React.FC = () => {
     }
   }, [signingRequest]);
 
+
   // Preload function removed - not needed, DotBot handles connections directly
 
   const initializeDotBot = async () => {
     setIsInitializing(true);
     setInitializingMessage('Initializing DotBot');
-    setInitializingSubMessage('Connecting to backend...');
+    setInitializingSubMessage('Connecting...');
     
     try {
       // Create backend session first (this creates DotBot instance on backend)
@@ -327,7 +170,6 @@ const AppContent: React.FC = () => {
         source: selectedAccount!.source,
       };
       
-      setInitializingSubMessage('Creating backend session...');
       const network = getNetworkFromEnvironment(preferredEnvironment);
       const sessionResponse = await createDotBotSession(
         walletAccount,
@@ -339,9 +181,9 @@ const AppContent: React.FC = () => {
       setBackendSessionId(sessionResponse.sessionId);
       console.log('[App] Backend session created:', sessionResponse.sessionId);
       
-      // Create frontend DotBot instance for UI state management only
-      // This is a "frontend helper" - it doesn't do AI calls
-      setInitializingSubMessage('Setting up frontend UI...');
+      // Create frontend DotBot instance - DotBot handles RPC connections directly
+      // When preloadedManagers is null, DotBot creates its own RPC managers internally
+      // RPC connections are lazy-loaded (created but not connected during initialization)
       const dotbotInstance = await createDotBotInstance(
         selectedAccount!,
         preferredEnvironment,
@@ -350,6 +192,7 @@ const AppContent: React.FC = () => {
       );
       
       setDotbot(dotbotInstance);
+      console.groupEnd();
       
       // LAZY LOADING: ScenarioEngine will be initialized when overlay is opened
       // No initialization here - faster DotBot startup
@@ -424,34 +267,7 @@ const AppContent: React.FC = () => {
   // Helper: Track executionId for session-level subscription
   // 
   // NOTE: With session-level subscription, we don't need to subscribe per executionId.
-  // EarlyExecutionSubscriber already subscribes to ALL execution updates for the session
-  // when WebSocket connects. This function just tracks the executionId so we can
-  // filter updates when they arrive.
-  const subscribeToExecutionUpdates = (chatResult: any) => {
-    if (chatResult.plan && backendSessionId) {
-      const executionId = chatResult.executionId || chatResult.executionArrayState?.id;
-      if (executionId) {
-        console.log('[App] Tracking executionId for session-level subscription:', executionId);
-        
-        // Track executionId - session-level subscription will automatically receive updates
-        if (earlySubscribeRef.current) {
-          try {
-            earlySubscribeRef.current(executionId);
-            console.log('[App] ExecutionId tracked successfully:', executionId);
-            setPendingExecutionId(null);
-          } catch (error) {
-            console.error('[App] Error tracking executionId:', error);
-            setPendingExecutionId(executionId);
-          }
-        } else {
-          // Fallback: Set pending state (will be processed when ref is available)
-          setPendingExecutionId(executionId);
-        }
-      } else {
-        console.warn('[App] Execution plan found but no executionId - backend may not have provided it yet');
-      }
-    }
-  };
+  // WebSocket removed - no subscription needed, ExecutionFlow subscribes directly to ExecutionArray
 
   // Helper: Add messages to chat (user, bot, execution)
   const addMessagesToChat = (
@@ -500,23 +316,35 @@ const AppContent: React.FC = () => {
         });
         
         // Add execution message first (stores plan)
+        // Don't skip reload - we want UI to update when execution message is added
         const addMessagePromise = currentChat.addExecutionMessage(
           executionId,
           chatResult.plan,
           undefined, // Don't use backend's executionArrayState - frontend will rebuild and simulate
-          true // skipReload
+          false // Don't skip reload - trigger UI update
         )
           .then(async (executionMessage: ExecutionMessage) => {
             console.log('[App] Execution message persisted');
             
+            // Trigger UI refresh to show execution message
+            setConversationRefresh(prev => prev + 1);
+            
             // Frontend rebuilds ExecutionArray from plan and runs simulation
+            // NOTE: This will create RPC connections directly from the frontend to blockchain nodes
+            // This is expected when frontend simulation is enabled (backendSimulation: false)
+            // The frontend DotBot instance uses its own RPC managers to connect to public endpoints
             if (chatResult.plan && dotbot) {
               console.log('[App] Rebuilding ExecutionArray from plan and running simulation on frontend');
+              console.log('[App] NOTE: Frontend will create direct RPC connections for simulation');
               try {
                 // prepareExecution is private, but we need to call it to rebuild and simulate
                 // Type assertion to access private method (prepareExecution will create ExecutionArray and run simulation)
+                // This will trigger RPC connections via dotbot's relayChainManager and assetHubManager
                 await (dotbot as any).prepareExecution(chatResult.plan, executionId, false);
                 console.log('[App] Frontend simulation completed');
+                
+                // Trigger UI refresh after ExecutionArray is set
+                setConversationRefresh(prev => prev + 1);
               } catch (error) {
                 console.error('[App] Failed to prepare execution on frontend:', error);
                 // Don't throw - execution message is already added, user can retry
@@ -606,18 +434,8 @@ const AppContent: React.FC = () => {
       // Step 1: Validate prerequisites
       const { currentChat } = validateSendMessagePrerequisites();
 
-      // Step 1.5: Warn if WebSocket not connected (subscription may happen late)
-      // CRITICAL: Backend starts simulation immediately, so we need WebSocket ready
-      // WebSocket connection check is handled inside EarlyExecutionSubscriber
-      // which has access to WebSocketProvider context
-
-      // Step 2: Send message to backend
+      // Step 2: Send message to backend (returns plan only, no simulation)
       const chatResult = await sendMessageToBackend(message, currentChat);
-      
-      // Step 3: Subscribe to WebSocket IMMEDIATELY (CRITICAL - must happen synchronously)
-      // Backend starts simulation right after creating execution, so we need to subscribe
-      // in the same call stack as receiving the response, before any React state updates
-      subscribeToExecutionUpdates(chatResult);
 
       // Step 4: Add messages to chat
       const persistencePromises = addMessagesToChat(message, chatResult, currentChat);
@@ -764,14 +582,7 @@ const AppContent: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <WebSocketProvider sessionId={backendSessionId} autoConnect={true}>
-          <EarlyExecutionSubscriber 
-            subscribeRef={earlySubscribeRef} 
-            pendingExecutionId={pendingExecutionId} 
-            dotbot={dotbot}
-            onExecutionMessageCreated={() => setConversationRefresh(prev => prev + 1)}
-          >
-          <div className={`app-container ${isSidebarExpanded ? '' : 'sidebar-collapsed'}`}>
+        <div className={`app-container ${isSidebarExpanded ? '' : 'sidebar-collapsed'}`}>
       <CollapsibleSidebar
             onNewChat={handleNewChat}
             onSearchChat={handleSearchChat}
@@ -880,8 +691,6 @@ const AppContent: React.FC = () => {
         />
       )}
         </div>
-          </EarlyExecutionSubscriber>
-        </WebSocketProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

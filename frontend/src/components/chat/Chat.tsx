@@ -137,7 +137,9 @@ const Chat: React.FC<ChatProps> = ({
   useEffect(() => {
     const handleDotBotEvent = (event: DotBotEvent) => {
       // When execution message is added or updated, force re-render
-      if (event.type === 'execution-message-added' || event.type === 'execution-message-updated') {
+      if (event.type === 'execution-message-added' || 
+          event.type === 'execution-message-updated' ||
+          event.type === 'chat-loaded') {
         setRefreshKey(prev => prev + 1);
       }
     };

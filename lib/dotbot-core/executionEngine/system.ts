@@ -619,6 +619,39 @@ export class ExecutionSystem {
       return;
     }
     
+    // CRITICAL: Validate API is connected before simulation
+    // This prevents errors when RPC connections are lazy-loaded or after environment switches
+    if (!apiForExtrinsic.isConnected) {
+      executionArray.updateSimulationStatus(item.id, {
+        phase: 'initializing',
+        message: 'Waiting for blockchain connection...',
+        progress: 5,
+      });
+      
+      try {
+        await Promise.race([
+          apiForExtrinsic.isReady,
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Connection timeout')), 30000)
+          )
+        ]);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Connection timeout';
+        const userMsg = `Cannot connect to blockchain for simulation: ${errorMsg}. Please check your network connection.`;
+        this.executionLogger.error({ itemId: item.id, error: errorMsg }, userMsg);
+        executionArray.updateSimulationStatus(item.id, {
+          phase: 'error',
+          message: userMsg,
+          result: {
+            success: false,
+            error: userMsg,
+            wouldSucceed: false,
+          },
+        });
+        return;
+      }
+    }
+    
     // Log warning if registries don't match (shouldn't happen if orchestration used session APIs)
     if (apiForExtrinsic.registry !== extrinsic.registry) {
       console.warn(

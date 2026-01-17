@@ -887,13 +887,40 @@ export class ChatInstance {
   }
   
   /**
-   * Validate that execution sessions are still active
+   * Validate that execution sessions are still active and connected
+   * 
+   * CRITICAL: This ensures sessions are valid before simulation/execution.
+   * With lazy-loaded RPC connections, sessions may be created but APIs may not be connected yet.
    */
   async validateExecutionSessions(): Promise<boolean> {
     if (!this.sessionsInitialized || !this.relayChainSession) {
+      this.chatLogger.debug({ chatId: this.data.id }, 'Execution sessions not initialized');
       return false;
     }
-    return await this.relayChainSession.isConnected();
+    
+    // Check if session API is connected
+    const isConnected = await this.relayChainSession.isConnected();
+    if (!isConnected) {
+      this.chatLogger.warn({ 
+        chatId: this.data.id,
+        endpoint: this.relayChainSession.endpoint
+      }, 'Execution session API is not connected');
+      return false;
+    }
+    
+    // Also check if the API instance itself is connected (double-check)
+    const api = this.relayChainSession.api;
+    if (!api || !api.isConnected) {
+      this.chatLogger.warn({ 
+        chatId: this.data.id,
+        endpoint: this.relayChainSession.endpoint,
+        hasApi: !!api,
+        apiConnected: api?.isConnected
+      }, 'Execution session API instance is not connected');
+      return false;
+    }
+    
+    return true;
   }
   
   /**

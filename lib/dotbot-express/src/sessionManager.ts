@@ -383,6 +383,10 @@ export class DotBotSessionManager {
 
     const dotbot = await this.createDotBotWithTimeout(dotbotConfig, network, sessionId);
     
+    // No ChatInstance needed for SESSION_SERVER_MODE!
+    // WebSocket broadcasting subscribes directly to ExecutionArray.onProgress()
+    // This is simpler and more efficient
+    
     const session: DotBotSession = {
       sessionId,
       dotbot,

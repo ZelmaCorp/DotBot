@@ -51,3 +51,6 @@ export {
   setupExecutionBroadcasting,
   broadcastExecutionUpdates
 } from './websocket/executionBroadcaster';
+
+// Simulation Routes (Chopsticks server)
+export { default as simulationRouter } from './routes/simulationRoutes';

@@ -33,6 +33,8 @@ export const useScenarioEngine = ({
 }: UseScenarioEngineProps) => {
   const [entities, setEntities] = useState<any[]>([]);
   const [runningScenario, setRunningScenario] = useState<string | null>(null);
+  // executionPhase state is used to track phase updates and pass to onPhaseChange callback
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [executionPhase, setExecutionPhase] = useState<ExecutionPhase>({
     phase: null,
     messages: [],

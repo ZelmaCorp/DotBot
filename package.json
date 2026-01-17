@@ -20,6 +20,11 @@
     "test:frontend": "npm run test --workspace=frontend",
     "install:all": "npm install && npm run install --workspaces"
   },
+  "overrides": {
+    "@polkadot/util": "^13.5.9",
+    "@polkadot/util-crypto": "^13.5.9",
+    "@polkadot/keyring": "^13.5.9"
+  },
   "devDependencies": {
     "@stoplight/prism-cli": "^5.14.2",
     "lerna": "^8.0.0"

@@ -61,9 +61,9 @@ export class ExecutionArray {
     
     this.items.push(item);
     
-    // Notify both progress and status so UI updates immediately
-    this.notifyStatus(item);
-    this.notifyProgress();
+    // Notify both progress and status so UI updates (deferred to prevent blocking)
+    this.notifyStatusDeferred(item);
+    this.notifyProgressDeferred();
     
     return id;
   }
@@ -229,9 +229,9 @@ export class ExecutionArray {
     
     item.simulationStatus = simulationStatus;
     
-    // Notify callbacks so UI updates
-    this.notifyStatus(item);
-    this.notifyProgress();
+    // Defer notifications to prevent UI blocking during rapid updates
+    this.notifyStatusDeferred(item);
+    this.notifyProgressDeferred();
   }
   
   /**
@@ -244,8 +244,8 @@ export class ExecutionArray {
     }
     
     item.result = result;
-    this.notifyStatus(item);
-    this.notifyProgress();
+    this.notifyStatusDeferred(item);
+    this.notifyProgressDeferred();
   }
   
   /**
@@ -253,7 +253,7 @@ export class ExecutionArray {
    */
   setCurrentIndex(index: number): void {
     this.currentIndex = index;
-    this.notifyProgress();
+    this.notifyProgressDeferred();
   }
   
   /**
@@ -261,7 +261,7 @@ export class ExecutionArray {
    */
   setExecuting(executing: boolean): void {
     this.isExecuting = executing;
-    this.notifyProgress();
+    this.notifyProgressDeferred();
   }
   
   /**
@@ -269,7 +269,7 @@ export class ExecutionArray {
    */
   pause(): void {
     this.isPaused = true;
-    this.notifyProgress();
+    this.notifyProgressDeferred();
   }
   
   /**
@@ -277,7 +277,7 @@ export class ExecutionArray {
    */
   resume(): void {
     this.isPaused = false;
-    this.notifyProgress();
+    this.notifyProgressDeferred();
   }
   
   /**
@@ -288,7 +288,7 @@ export class ExecutionArray {
     this.currentIndex = -1;
     this.isExecuting = false;
     this.isPaused = false;
-    this.notifyProgress();
+    this.notifyProgressDeferred();
   }
   
   /**
@@ -306,7 +306,7 @@ export class ExecutionArray {
       item.index = idx;
     });
     
-    this.notifyProgress();
+    this.notifyProgressDeferred();
     return true;
   }
   
@@ -395,6 +395,71 @@ export class ExecutionArray {
   /**
    * Notify status callbacks
    */
+  // Batch notifications to prevent UI blocking
+  private pendingStatusNotifications: Set<ExecutionItem> = new Set();
+  private pendingProgressNotification: boolean = false;
+  private notificationTimeout: NodeJS.Timeout | null = null;
+
+  private notifyStatusDeferred(item: ExecutionItem): void {
+    this.pendingStatusNotifications.add(item);
+    this.scheduleNotification();
+  }
+
+  private notifyProgressDeferred(): void {
+    this.pendingProgressNotification = true;
+    this.scheduleNotification();
+  }
+
+  private scheduleNotification(): void {
+    // Clear existing timeout
+    if (this.notificationTimeout) {
+      clearTimeout(this.notificationTimeout);
+    }
+
+    // Schedule notification in next event loop tick to batch updates
+    this.notificationTimeout = setTimeout(() => {
+      this.flushNotifications();
+    }, 0);
+  }
+
+  private flushNotifications(): void {
+    // Flush status notifications
+    if (this.pendingStatusNotifications.size > 0) {
+      const items = Array.from(this.pendingStatusNotifications);
+      this.pendingStatusNotifications.clear();
+      
+      // Use requestIdleCallback if available, otherwise setTimeout
+      const notify = () => {
+        items.forEach((item) => {
+          this.notifyStatusDeferred(item);
+        });
+      };
+
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(notify, { timeout: 50 });
+      } else {
+        setTimeout(notify, 0);
+      }
+    }
+
+    // Flush progress notification
+    if (this.pendingProgressNotification) {
+      this.pendingProgressNotification = false;
+      
+      const notify = () => {
+        this.notifyProgress();
+      };
+
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(notify, { timeout: 50 });
+      } else {
+        setTimeout(notify, 0);
+      }
+    }
+
+    this.notificationTimeout = null;
+  }
+
   private notifyStatus(item: ExecutionItem): void {
     this.statusCallbacks.forEach((callback) => {
       try {
@@ -404,7 +469,7 @@ export class ExecutionArray {
       }
     });
   }
-  
+
   /**
    * Notify progress callbacks
    */

@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
 import { ExecutionMessage, DotBot } from '@dotbot/core';
+import { hasStateChanged, updateStateDeferred } from '../stateUtils';
 
 /**
  * Hook to manage execution flow state with local subscription
@@ -16,6 +17,7 @@ import { ExecutionMessage, DotBot } from '@dotbot/core';
  * - Subscribes to local ExecutionArray updates
  * - No WebSocket polling
  * - No backend session tracking
+ * - Uses debounced updates to prevent UI freezing
  */
 export function useExecutionFlowState(
   executionMessage: ExecutionMessage | undefined,
@@ -24,6 +26,7 @@ export function useExecutionFlowState(
 ): ExecutionArrayState | null {
   const [liveExecutionState, setLiveExecutionState] = useState<ExecutionArrayState | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const lastStateRef = useRef<ExecutionArrayState | null>(null);
 
   // Subscribe to local ExecutionArray updates
   useEffect(() => {
@@ -43,18 +46,28 @@ export function useExecutionFlowState(
       // No ExecutionArray yet, use snapshot from message if available
       if (executionMessage.executionArray) {
         setLiveExecutionState(executionMessage.executionArray);
+        lastStateRef.current = executionMessage.executionArray;
       }
       return;
     }
 
     // Set initial state from ExecutionArray
-    setLiveExecutionState(executionArray.getState());
+    const initialState = executionArray.getState();
+    setLiveExecutionState(initialState);
+    lastStateRef.current = initialState;
     
-    // Subscribe to updates
+    // Subscribe to updates with change detection and deferred updates to prevent UI freezing
     const unsubscribe = dotbot.currentChat.onExecutionUpdate(
       executionMessage.executionId,
       (state) => {
-        setLiveExecutionState(state);
+        // Only update if state actually changed (prevent unnecessary re-renders)
+        if (hasStateChanged(state, lastStateRef.current)) {
+          lastStateRef.current = state;
+          // Use deferred update to prevent UI blocking during rapid simulation updates
+          updateStateDeferred(() => {
+            setLiveExecutionState(state);
+          }, 50);
+        }
       }
     );
 
@@ -66,7 +79,7 @@ export function useExecutionFlowState(
         unsubscribeRef.current = null;
       }
     };
-  }, [executionMessage?.executionId, dotbot]);
+  }, [executionMessage, dotbot]);
 
   // Return live state (if available) or fallback to snapshot or legacy state
   return liveExecutionState || executionMessage?.executionArray || legacyState || null;

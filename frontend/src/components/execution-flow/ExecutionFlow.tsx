@@ -7,7 +7,7 @@
 
 import React from 'react';
 import type { ExecutionMessage, DotBot } from '@dotbot/core';
-import { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
+import type { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
 import { isSimulationEnabled } from '@dotbot/core/executionEngine/simulation/simulationConfig';
 import { useExecutionFlowState, useExpandedItems } from './hooks';
 import { LoadingState, ApprovalMessage } from './components';
@@ -119,15 +119,19 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
       )}
 
       <div className="execution-flow-items">
-        {executionState.items.map((item, index) => (
-          <ExecutionFlowItem
-            key={item.id}
-            item={item}
-            index={index}
-            isExpanded={isExpanded(item.id)}
-            onToggleExpand={toggleExpand}
-          />
-        ))}
+        {executionState.items.map((item, index) => {
+          // Memoize expanded state to prevent unnecessary re-renders
+          const itemIsExpanded = isExpanded(item.id);
+          return (
+            <ExecutionFlowItem
+              key={item.id}
+              item={item}
+              index={index}
+              isExpanded={itemIsExpanded}
+              onToggleExpand={toggleExpand}
+            />
+          );
+        })}
       </div>
 
       <ExecutionFlowFooter

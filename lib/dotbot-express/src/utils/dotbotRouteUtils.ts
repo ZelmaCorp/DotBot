@@ -5,7 +5,7 @@
  */
 
 import { Request, Response } from 'express';
-import { ChatOptions, ChatResult, Environment, Network, AIProviderType, ChatInstance } from '@dotbot/core';
+import { ChatOptions, ChatResult, Environment, Network, AIProviderType, ChatInstance, ExecutionItem, ExecutionArrayState } from '@dotbot/core';
 import { DotBotSession } from '../sessionManager';
 import { broadcastExecutionUpdates } from '../websocket/executionBroadcaster';
 import { WebSocketManager } from '../websocket/WebSocketManager';
@@ -65,13 +65,15 @@ export function generateSessionId(
 
 /**
  * Setup WebSocket broadcasting for execution
+ * 
+ * SIMPLIFIED: Subscribe directly to ExecutionArray.onProgress() - no ChatInstance needed!
  */
 export function setupWebSocketBroadcasting(
   dotbot: any,
   wsManager: WebSocketManager | undefined,
   effectiveSessionId: string
 ): void {
-  if (!wsManager || !dotbot.currentChat) {
+  if (!wsManager) {
     return;
   }
 
@@ -82,53 +84,52 @@ export function setupWebSocketBroadcasting(
 
   const originalOnExecutionReady = dotbotInternal.config.onExecutionReady;
   
-  dotbotInternal.config.onExecutionReady = (executionId: string, chat: ChatInstance) => {
+  // Subscribe directly to ExecutionArray when it's ready (no ChatInstance needed)
+  dotbotInternal.config.onExecutionReady = (executionId: string, chat: ChatInstance | null) => {
     if (originalOnExecutionReady) {
       originalOnExecutionReady(executionId, chat);
     }
     
-    broadcastExecutionUpdates(chat, executionId, wsManager, effectiveSessionId);
-    
-    dotbotLogger.debug({
-      executionId,
-      sessionId: effectiveSessionId
-    }, 'WebSocket broadcasting enabled for execution (before simulation)');
+    // Get ExecutionArray directly from DotBot (no ChatInstance needed)
+    const executionArray = dotbot.getExecutionArray(executionId);
+    if (executionArray) {
+      // Subscribe directly to ExecutionArray.onProgress() for WebSocket broadcasting
+      const unsubscribe = executionArray.onProgress((state: ExecutionArrayState) => {
+        wsManager.broadcastExecutionUpdate(executionId, state, effectiveSessionId);
+        
+        // Check if execution is complete
+        const isComplete = state.items.length > 0 && state.items.every((item: ExecutionItem) => 
+          item.status === 'completed' || 
+          item.status === 'finalized' || 
+          item.status === 'failed' || 
+          item.status === 'cancelled'
+        );
+        
+        if (isComplete) {
+          const success = state.items.length > 0 && state.items.every((item: ExecutionItem) =>
+            item.status === 'completed' || item.status === 'finalized'
+          );
+          wsManager.broadcastExecutionComplete(executionId, success);
+        }
+      });
+      
+      // Store unsubscribe function (could be stored in dotbot for cleanup, but for now just let it run)
+      dotbotLogger.debug({
+        executionId,
+        sessionId: effectiveSessionId
+      }, 'WebSocket broadcasting enabled for execution (direct ExecutionArray subscription)');
+    } else {
+      dotbotLogger.warn({
+        executionId
+      }, 'ExecutionArray not found for WebSocket broadcasting');
+    }
   };
 }
 
 /**
- * Create chat instance if needed
- */
-export async function ensureChatInstance(
-  dotbot: any,
-  walletAddress: string
-): Promise<void> {
-  if (dotbot.currentChat) {
-    return;
-  }
-
-  const chatManager = dotbot.getChatManager();
-  const chatData = await chatManager.createInstance({
-    environment: dotbot.getEnvironment(),
-    network: dotbot.getNetwork(),
-    walletAddress,
-    title: `Chat - ${dotbot.getNetwork()}`,
-  });
-
-  dotbot.currentChat = new ChatInstance(
-    chatData,
-    chatManager,
-    dotbot.stateful
-  );
-
-  dotbotLogger.debug({
-    chatId: dotbot.currentChat.id,
-    stateful: dotbot.stateful
-  }, 'Created temporary chat instance for stateless mode');
-}
-
-/**
- * Prepare chat request (setup WebSocket, ensure chat instance)
+ * Prepare chat request (setup WebSocket broadcasting)
+ * 
+ * SIMPLIFIED: No ChatInstance needed - WebSocket subscribes directly to ExecutionArray
  */
 async function prepareChatRequest(
   dotbot: any,
@@ -137,7 +138,7 @@ async function prepareChatRequest(
   walletAddress: string
 ): Promise<void> {
   setupWebSocketBroadcasting(dotbot, wsManager, effectiveSessionId);
-  await ensureChatInstance(dotbot, walletAddress);
+  // No need to create ChatInstance - WebSocket subscribes directly to ExecutionArray
 }
 
 /**

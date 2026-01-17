@@ -41,6 +41,9 @@ const wsManager = new WebSocketManager({
 
 app.locals.wsManager = wsManager;
 
+// NOTE: Simulation routes are now mounted on the main Express app at /api/simulation
+// No separate server needed - it's part of the main backend server
+
 /**
  * Find process ID using the specified port
  */

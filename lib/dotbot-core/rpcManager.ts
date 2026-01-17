@@ -175,6 +175,7 @@ export class RpcManager {
       this.startHealthMonitoring();
       // Don't run initial health check immediately - let endpoints be tried on first use
       // This prevents marking endpoints as failed before we even try them
+      // Note: setInterval in startHealthMonitoring() already defers first check to healthCheckInterval
     }
   }
   
