@@ -431,7 +431,7 @@ export class ExecutionArray {
       // Use requestIdleCallback if available, otherwise setTimeout
       const notify = () => {
         items.forEach((item) => {
-          this.notifyStatusDeferred(item);
+          this.notifyStatus(item);
         });
       };
 

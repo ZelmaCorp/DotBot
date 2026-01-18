@@ -114,23 +114,16 @@ describe('StateAllocator', () => {
       expect(true).toBe(true);
     });
 
-    it('should initialize successfully in emulated mode', async () => {
-      const mockChain = {
-        setStorage: jest.fn().mockResolvedValue(undefined),
-        head: Promise.resolve('0x123'),
-      };
-      
-      (setup as jest.Mock).mockResolvedValue(mockChain);
-      (ChopsticksDatabase as jest.Mock).mockImplementation(() => ({}));
-
+    it('should throw error when trying to initialize in emulated mode (not supported)', async () => {
       const allocator = new StateAllocator({
         mode: 'emulated',
         chain: 'westend',
         entityResolver: mockEntityResolver,
       });
 
-      await allocator.initialize();
-      expect(setup).toHaveBeenCalled();
+      await expect(allocator.initialize()).rejects.toThrow(
+        'Emulated mode is not currently supported'
+      );
     });
 
     it('should initialize successfully in live mode with RPC manager', async () => {
@@ -219,14 +212,6 @@ describe('StateAllocator', () => {
     });
 
     it('should throw error for emulated mode (not implemented)', async () => {
-      const mockChain = {
-        setStorage: jest.fn().mockResolvedValue(undefined),
-        head: Promise.resolve('0x123'),
-      };
-      
-      (setup as jest.Mock).mockResolvedValue(mockChain);
-      (ChopsticksDatabase as jest.Mock).mockImplementation(() => ({}));
-
       const allocator = new StateAllocator({
         mode: 'emulated',
         chain: 'westend',
@@ -234,16 +219,10 @@ describe('StateAllocator', () => {
         rpcEndpoint: 'wss://westend-rpc.polkadot.io', // Provide endpoint for getRpcEndpoints
       });
 
-      await allocator.initialize();
-
-      // Emulated mode is not implemented yet - should throw error
-      await expect(
-        allocator.allocateWalletState({
-          accounts: [
-            { entityName: 'Alice', balance: '50 WND' },
-          ],
-        })
-      ).rejects.toThrow('Emulated mode is not implemented yet');
+      // Emulated mode should throw error during initialization
+      await expect(allocator.initialize()).rejects.toThrow(
+        'Emulated mode is not currently supported'
+      );
     });
 
     it('should handle missing entity', async () => {

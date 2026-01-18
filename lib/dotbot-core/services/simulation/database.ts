@@ -3,15 +3,52 @@
  * Supports both browser (IndexedDB) and Node.js (in-memory) environments
  */
 
-import type {
-  BlockEntry,
-  Database,
-  KeyValueEntry,
-} from '@acala-network/chopsticks-core';
 import { isBrowser } from '../../env';
 
-// Re-export Database type for use in other modules
-export type { Database } from '@acala-network/chopsticks-core';
+/**
+ * Block entry stored in the database
+ * This matches the BlockEntry interface from @acala-network/chopsticks-core
+ */
+export interface BlockEntry {
+  hash: `0x${string}`;
+  number: number;
+  header: `0x${string}`;
+  parentHash: `0x${string}` | null;
+  extrinsics: `0x${string}`[];
+  storageDiff: Record<`0x${string}`, `0x${string}` | null> | null;
+}
+
+/**
+ * Key-value storage entry
+ */
+export interface KeyValueEntry {
+  blockHash: `0x${string}`;
+  key: `0x${string}`;
+  value: `0x${string}` | null;
+}
+
+/**
+ * Database interface for Chopsticks storage
+ * This matches the interface expected by @acala-network/chopsticks-core
+ */
+export interface Database {
+  close(): Promise<void>;
+  saveBlock(block: BlockEntry): Promise<void>;
+  queryBlock(hash: `0x${string}`): Promise<BlockEntry | null>;
+  queryBlockByNumber(number: number): Promise<BlockEntry | null>;
+  queryHighestBlock(): Promise<BlockEntry | null>;
+  deleteBlock(hash: `0x${string}`): Promise<void>;
+  blocksCount(): Promise<number>;
+  saveStorage(
+    blockHash: `0x${string}`,
+    key: `0x${string}`,
+    value: `0x${string}` | null
+  ): Promise<void>;
+  queryStorage(
+    blockHash: `0x${string}`,
+    key: `0x${string}`
+  ): Promise<KeyValueEntry | null>;
+}
 
 // Conditional import - only load idb types, actual import happens lazily
 let idbModule: any = null;
@@ -102,7 +139,7 @@ export class InMemoryChopsticksDatabase implements Database {
     const val = this.keyValue.get(compositeKey);
     
     if (val !== undefined) {
-      return { blockHash, key, value: val };
+      return { blockHash, key, value: val as `0x${string}` | null };
     }
     
     return null;

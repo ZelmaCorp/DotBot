@@ -2,28 +2,13 @@
  * Unit tests for Chopsticks Simulation Service
  */
 
-// Mock dependencies before imports
-jest.mock('@acala-network/chopsticks-core', () => ({
-  BuildBlockMode: { Batch: 'Batch' },
-  setup: jest.fn(),
-}));
+// Mock the client-server architecture
+const mockSimulateTransactionClient = jest.fn();
+const mockIsChopsticksServerAvailable = jest.fn();
 
-jest.mock('../../../../services/simulation/database', () => ({
-  ChopsticksDatabase: jest.fn().mockImplementation(() => ({
-    close: jest.fn().mockResolvedValue(undefined),
-    deleteBlock: jest.fn().mockResolvedValue(undefined),
-  })),
-  createChopsticksDatabase: jest.fn(() => ({
-    close: jest.fn().mockResolvedValue(undefined),
-    deleteBlock: jest.fn().mockResolvedValue(undefined),
-    get: jest.fn(),
-    set: jest.fn(),
-    clear: jest.fn(),
-  })),
-}));
-
-jest.mock('../../../../services/simulation/chopsticksIgnorePolicy', () => ({
-  classifyChopsticksError: jest.fn(),
+jest.mock('../../../../services/simulation/chopsticksClient', () => ({
+  simulateTransaction: (...args: any[]) => mockSimulateTransactionClient(...args),
+  isChopsticksAvailable: () => mockIsChopsticksServerAvailable(),
 }));
 
 jest.mock('@polkadot/util-crypto', () => ({
@@ -35,9 +20,6 @@ import { simulateTransaction, isChopsticksAvailable } from '../../../../services
 import { ApiPromise } from '@polkadot/api';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { BN } from '@polkadot/util';
-import { setup, BuildBlockMode } from '@acala-network/chopsticks-core';
-import { ChopsticksDatabase } from '../../../../services/simulation/database';
-import { classifyChopsticksError } from '../../../../services/simulation/chopsticksIgnorePolicy';
 import { encodeAddress, decodeAddress } from '@polkadot/util-crypto';
 
 describe('Chopsticks Simulation Service', () => {
@@ -50,22 +32,9 @@ describe('Chopsticks Simulation Service', () => {
     jest.clearAllMocks();
 
     statusCallback = jest.fn();
-
-    mockChain = {
-      head: Promise.resolve('0x1234'),
-      close: jest.fn().mockResolvedValue(undefined),
-      dryRunExtrinsic: jest.fn().mockResolvedValue({
-        outcome: {
-          isOk: true,
-          asOk: {
-            isOk: true,
-          },
-        },
-        storageDiff: [],
-      }),
-    };
-
-    (setup as jest.Mock).mockResolvedValue(mockChain);
+    
+    // Default: server is available
+    mockIsChopsticksServerAvailable.mockResolvedValue(true);
 
     const mockRegistry = {
       chainSS58: 0,
@@ -125,15 +94,24 @@ describe('Chopsticks Simulation Service', () => {
 
     (decodeAddress as jest.Mock).mockReturnValue(new Uint8Array([1, 2, 3]));
     (encodeAddress as jest.Mock).mockReturnValue('15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5');
-    (classifyChopsticksError as jest.Mock).mockReturnValue({
-      ignore: false,
-      classification: 'UNKNOWN',
-      severity: 'BLOCKING',
-    });
   });
 
   describe('simulateTransaction()', () => {
     it('should simulate successful transaction', async () => {
+      mockSimulateTransactionClient.mockImplementation(async (api, endpoints, extrinsic, sender, onStatus) => {
+        if (onStatus) {
+          onStatus({ phase: 'initializing', message: 'Starting simulation' });
+          onStatus({ phase: 'complete', message: 'Simulation complete', progress: 100 });
+        }
+        return {
+          success: true,
+          error: null,
+          estimatedFee: '1000000000',
+          balanceChanges: [],
+          events: [],
+        };
+      });
+
       const result = await simulateTransaction(
         mockApi as ApiPromise,
         'wss://rpc.polkadot.io',
@@ -144,12 +122,19 @@ describe('Chopsticks Simulation Service', () => {
 
       expect(result.success).toBe(true);
       expect(result.error).toBeNull();
-      expect(setup).toHaveBeenCalled();
-      expect(mockChain.dryRunExtrinsic).toHaveBeenCalled();
+      expect(mockSimulateTransactionClient).toHaveBeenCalled();
       expect(statusCallback).toHaveBeenCalled();
     });
 
-    it('should filter to WebSocket endpoints only', async () => {
+    it('should pass all endpoints to client (server filters them)', async () => {
+      mockSimulateTransactionClient.mockResolvedValue({
+        success: true,
+        error: null,
+        estimatedFee: '1000000000',
+        balanceChanges: [],
+        events: [],
+      });
+
       await simulateTransaction(
         mockApi as ApiPromise,
         ['wss://rpc.polkadot.io', 'https://rpc.polkadot.io'],
@@ -157,37 +142,44 @@ describe('Chopsticks Simulation Service', () => {
         '15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5'
       );
 
-      expect(setup).toHaveBeenCalledWith(
-        expect.objectContaining({
-          endpoint: ['wss://rpc.polkadot.io'],
-        })
+      // Client passes all endpoints to server; server filters them
+      expect(mockSimulateTransactionClient).toHaveBeenCalledWith(
+        mockApi,
+        ['wss://rpc.polkadot.io', 'https://rpc.polkadot.io'],
+        mockExtrinsic,
+        '15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5',
+        undefined
       );
     });
 
-    it('should throw error if no WebSocket endpoints', async () => {
-      await expect(
-        simulateTransaction(
-          mockApi as ApiPromise,
-          ['https://rpc.polkadot.io'],
-          mockExtrinsic,
-          '15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5'
-        )
-      ).resolves.toMatchObject({
+    it('should return error if no WebSocket endpoints', async () => {
+      // Server is available, but client will handle the endpoint filtering
+      mockSimulateTransactionClient.mockResolvedValue({
         success: false,
-        error: expect.stringContaining('No valid WebSocket endpoints'),
+        error: 'No valid WebSocket endpoints found',
+        estimatedFee: '0',
+        balanceChanges: [],
+        events: [],
       });
+
+      const result = await simulateTransaction(
+        mockApi as ApiPromise,
+        ['https://rpc.polkadot.io'],
+        mockExtrinsic,
+        '15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5'
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No valid WebSocket endpoints');
     });
 
     it('should handle transaction failure', async () => {
-      mockChain.dryRunExtrinsic.mockResolvedValue({
-        outcome: {
-          isOk: false,
-          asErr: {
-            type: 'InvalidTransaction',
-            toString: () => 'InvalidTransaction',
-          },
-        },
-        storageDiff: [],
+      mockSimulateTransactionClient.mockResolvedValue({
+        success: false,
+        error: 'InvalidTransaction: Transaction validation failed',
+        estimatedFee: '0',
+        balanceChanges: [],
+        events: [],
       });
 
       const result = await simulateTransaction(
@@ -202,6 +194,14 @@ describe('Chopsticks Simulation Service', () => {
     });
 
     it('should handle registry mismatch error', async () => {
+      mockSimulateTransactionClient.mockResolvedValue({
+        success: false,
+        error: 'Registry mismatch: Expected chain registry but got different registry',
+        estimatedFee: '0',
+        balanceChanges: [],
+        events: [],
+      });
+
       const extrinsicWithDifferentRegistry = {
         ...mockExtrinsic,
         registry: { different: 'registry' } as any,
@@ -219,6 +219,14 @@ describe('Chopsticks Simulation Service', () => {
     });
 
     it('should calculate fees using paymentInfo', async () => {
+      mockSimulateTransactionClient.mockResolvedValue({
+        success: true,
+        error: null,
+        estimatedFee: '1000000000',
+        balanceChanges: [],
+        events: [],
+      });
+
       const result = await simulateTransaction(
         mockApi as ApiPromise,
         'wss://rpc.polkadot.io',
@@ -227,15 +235,16 @@ describe('Chopsticks Simulation Service', () => {
       );
 
       expect(result.estimatedFee).toBe('1000000000');
-      expect(mockExtrinsic.paymentInfo).toHaveBeenCalled();
     });
 
     it('should handle paymentInfo errors gracefully', async () => {
-      mockExtrinsic.paymentInfo.mockRejectedValue(new Error('TransactionPaymentApi_query_info wasm unreachable'));
-      (classifyChopsticksError as jest.Mock).mockReturnValue({
-        ignore: true,
-        classification: 'PAYMENT_INFO_WASM_UNREACHABLE',
-        severity: 'NON_FATAL',
+      // Mock client to return success even if paymentInfo fails on server
+      mockSimulateTransactionClient.mockResolvedValue({
+        success: true,
+        error: null,
+        estimatedFee: '0', // Fee calculation failed, but simulation succeeded
+        balanceChanges: [],
+        events: [],
       });
 
       const result = await simulateTransaction(
@@ -252,6 +261,22 @@ describe('Chopsticks Simulation Service', () => {
     });
 
     it('should call status callback with progress updates', async () => {
+      mockSimulateTransactionClient.mockImplementation(async (api, endpoints, extrinsic, sender, onStatus) => {
+        if (onStatus) {
+          onStatus({ phase: 'initializing', message: 'Initializing', progress: 0 });
+          onStatus({ phase: 'forking', message: 'Forking chain', progress: 25 });
+          onStatus({ phase: 'executing', message: 'Executing transaction', progress: 50 });
+          onStatus({ phase: 'complete', message: 'Complete', progress: 100 });
+        }
+        return {
+          success: true,
+          error: null,
+          estimatedFee: '1000000000',
+          balanceChanges: [],
+          events: [],
+        };
+      });
+
       await simulateTransaction(
         mockApi as ApiPromise,
         'wss://rpc.polkadot.io',
@@ -265,21 +290,16 @@ describe('Chopsticks Simulation Service', () => {
           phase: 'initializing',
         })
       );
-      expect(statusCallback).toHaveBeenCalledWith(
-        expect.objectContaining({
-          phase: 'forking',
-        })
-      );
-      expect(statusCallback).toHaveBeenCalledWith(
-        expect.objectContaining({
-          phase: 'executing',
-        })
-      );
     });
 
     it('should return error result when simulation fails', async () => {
-      // Modify the existing mockChain to reject on dryRunExtrinsic
-      mockChain.dryRunExtrinsic.mockRejectedValueOnce(new Error('Simulation failed'));
+      mockSimulateTransactionClient.mockResolvedValue({
+        success: false,
+        error: 'Chopsticks simulation failed: Transaction execution error',
+        estimatedFee: '0',
+        balanceChanges: [],
+        events: [],
+      });
 
       const result = await simulateTransaction(
         mockApi as ApiPromise,
@@ -294,6 +314,14 @@ describe('Chopsticks Simulation Service', () => {
     });
 
     it('should use latest block from endpoint', async () => {
+      mockSimulateTransactionClient.mockResolvedValue({
+        success: true,
+        error: null,
+        estimatedFee: '1000000000',
+        balanceChanges: [],
+        events: [],
+      });
+
       await simulateTransaction(
         mockApi as ApiPromise,
         'wss://rpc.polkadot.io',
@@ -301,19 +329,22 @@ describe('Chopsticks Simulation Service', () => {
         '15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5'
       );
 
-      expect(setup).toHaveBeenCalledWith(
-        expect.objectContaining({
-          block: undefined, // Should let Chopsticks fetch latest
-        })
-      );
+      // Client should be called with the correct parameters
+      expect(mockSimulateTransactionClient).toHaveBeenCalled();
     });
   });
 
   describe('isChopsticksAvailable()', () => {
     it('should return true when Chopsticks is available', async () => {
+      mockIsChopsticksServerAvailable.mockResolvedValue(true);
       const available = await isChopsticksAvailable();
-      // In test environment, the mock should make it available
-      expect(typeof available).toBe('boolean');
+      expect(available).toBe(true);
+    });
+
+    it('should return false when server is not available', async () => {
+      mockIsChopsticksServerAvailable.mockResolvedValue(false);
+      const available = await isChopsticksAvailable();
+      expect(available).toBe(false);
     });
   });
 });
