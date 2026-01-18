@@ -31,7 +31,7 @@ COPY frontend/public ./frontend/public
 # Use npm install instead of npm ci to handle file: dependencies in monorepo
 # Use --legacy-peer-deps to handle TypeScript version conflict with react-scripts
 WORKDIR /app/frontend
-RUN npm install --legacy-peer-deps
+RUN npm install
 
 # Copy frontend source code
 COPY frontend/src ./src
