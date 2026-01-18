@@ -163,15 +163,15 @@ export class ChatInstanceManager {
     // Update the queue
     this.messageAddQueues.set(instanceId, queuePromise);
     
-    // Clean up queue when done
-    queuePromise.finally(() => {
+    // Clean up queue when done (attach finally before returning to ensure it's part of the chain)
+    const promiseWithCleanup = queuePromise.finally(() => {
       // Only remove if this is still the current queue (in case a new one started)
       if (this.messageAddQueues.get(instanceId) === queuePromise) {
         this.messageAddQueues.delete(instanceId);
       }
     });
     
-    return queuePromise;
+    return promiseWithCleanup;
   }
   
   /**

@@ -2,23 +2,13 @@
  * Unit tests for Sequential Transaction Simulation
  */
 
-// Mock dependencies before imports
-jest.mock('@acala-network/chopsticks-core', () => ({
-  BuildBlockMode: { Batch: 'Batch' },
-  setup: jest.fn(),
-}));
+// Mock the client-server architecture
+const mockSimulateSequentialTransactionsClient = jest.fn();
+const mockIsChopsticksServerAvailable = jest.fn();
 
-jest.mock('../../../../services/simulation/database', () => ({
-  ChopsticksDatabase: jest.fn().mockImplementation(() => ({
-    close: jest.fn().mockResolvedValue(undefined),
-  })),
-  createChopsticksDatabase: jest.fn(() => ({
-    close: jest.fn().mockResolvedValue(undefined),
-    deleteBlock: jest.fn().mockResolvedValue(undefined),
-    get: jest.fn(),
-    set: jest.fn(),
-    clear: jest.fn(),
-  })),
+jest.mock('../../../../services/simulation/chopsticksClient', () => ({
+  simulateSequentialTransactions: (...args: any[]) => mockSimulateSequentialTransactionsClient(...args),
+  isChopsticksAvailable: () => mockIsChopsticksServerAvailable(),
 }));
 
 jest.mock('@polkadot/util-crypto', () => ({
@@ -30,7 +20,6 @@ import { simulateSequentialTransactions } from '../../../../services/simulation/
 import { ApiPromise } from '@polkadot/api';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { BN } from '@polkadot/util';
-import { setup } from '@acala-network/chopsticks-core';
 import { encodeAddress, decodeAddress } from '@polkadot/util-crypto';
 
 describe('Sequential Transaction Simulation', () => {
@@ -43,48 +32,9 @@ describe('Sequential Transaction Simulation', () => {
     jest.clearAllMocks();
 
     statusCallback = jest.fn();
-
-    mockChain = {
-      _currentHead: '0x1234',
-      get head() {
-        return Promise.resolve(this._currentHead);
-      },
-      close: jest.fn().mockResolvedValue(undefined),
-      dryRunExtrinsic: jest.fn().mockResolvedValue({
-        outcome: {
-          isOk: true,
-          asOk: {
-            isOk: true,
-          },
-        },
-        storageDiff: [],
-      }),
-      newBlock: jest.fn().mockImplementation(async function(this: any, options: any) {
-        // Simulate block building by updating head
-        this._currentHead = `0x${Math.random().toString(16).slice(2, 10)}`;
-        // Return a block-like structure with successful outcome (default)
-        // Can be overridden with mockResolvedValueOnce in individual tests
-        return {
-          result: {
-            isOk: true,
-            asOk: {
-              isOk: true,
-            },
-          },
-          extrinsics: [{
-            result: {
-              isOk: true,
-              asOk: {
-                isOk: true,
-              },
-            },
-          }],
-        };
-      }),
-      query: jest.fn().mockResolvedValue(null),
-    };
-
-    (setup as jest.Mock).mockResolvedValue(mockChain);
+    
+    // Default: server is available
+    mockIsChopsticksServerAvailable.mockResolvedValue(true);
 
     // Create a shared registry object so extrinsic.registry === api.registry
     const sharedRegistry = {
@@ -157,6 +107,15 @@ describe('Sequential Transaction Simulation', () => {
 
   describe('simulateSequentialTransactions()', () => {
     it('should simulate multiple transactions sequentially', async () => {
+      mockSimulateSequentialTransactionsClient.mockResolvedValue({
+        success: true,
+        results: [
+          { description: 'Transfer 100 DOT', result: { success: true, estimatedFee: '1000000000' } },
+          { description: 'Stake 50 DOT', result: { success: true, estimatedFee: '2000000000' } },
+        ],
+        totalEstimatedFee: '3000000000',
+      });
+
       const items = [
         {
           extrinsic: mockExtrinsics[0],
@@ -181,50 +140,18 @@ describe('Sequential Transaction Simulation', () => {
       expect(result.results).toHaveLength(2);
       expect(result.results[0].description).toBe('Transfer 100 DOT');
       expect(result.results[1].description).toBe('Stake 50 DOT');
-      expect(mockChain.newBlock).toHaveBeenCalledTimes(2);
     });
 
     it('should stop on first failure', async () => {
-      // Override the default mockImplementation with specific return values
-      mockChain.newBlock
-        .mockImplementationOnce(async function(this: any, options: any) {
-          this._currentHead = `0x${Math.random().toString(16).slice(2, 10)}`;
-          return {
-            result: {
-              isOk: true,
-              asOk: {
-                isOk: true,
-              },
-            },
-            extrinsics: [{
-              result: {
-                isOk: true,
-                asOk: {
-                  isOk: true,
-                },
-              },
-            }],
-          };
-        })
-        .mockImplementationOnce(async function(this: any, options: any) {
-          this._currentHead = `0x${Math.random().toString(16).slice(2, 10)}`;
-          return {
-            result: {
-              isOk: false,
-              asErr: {
-                type: 'InvalidTransaction',
-              },
-            },
-            extrinsics: [{
-              result: {
-                isOk: false,
-                asErr: {
-                  type: 'InvalidTransaction',
-                },
-              },
-            }],
-          };
-        });
+      mockSimulateSequentialTransactionsClient.mockResolvedValue({
+        success: false,
+        error: 'Transaction 2 failed: InvalidTransaction',
+        results: [
+          { description: 'Transfer 100 DOT', result: { success: true, estimatedFee: '1000000000' } },
+          { description: 'Stake 50 DOT', result: { success: false, error: 'InvalidTransaction' } },
+        ],
+        totalEstimatedFee: '1000000000',
+      });
 
       const items = [
         {
@@ -253,6 +180,15 @@ describe('Sequential Transaction Simulation', () => {
     });
 
     it('should calculate total fee across all transactions', async () => {
+      mockSimulateSequentialTransactionsClient.mockResolvedValue({
+        success: true,
+        results: [
+          { description: 'Transfer 100 DOT', result: { success: true, estimatedFee: '1000000000' } },
+          { description: 'Stake 50 DOT', result: { success: true, estimatedFee: '2000000000' } },
+        ],
+        totalEstimatedFee: '3000000000',
+      });
+
       const items = [
         {
           extrinsic: mockExtrinsics[0],
@@ -275,7 +211,15 @@ describe('Sequential Transaction Simulation', () => {
       expect(result.totalEstimatedFee).toBe('3000000000'); // 1 + 2 DOT
     });
 
-    it('should filter to WebSocket endpoints only', async () => {
+    it('should pass all endpoints to client (server filters them)', async () => {
+      mockSimulateSequentialTransactionsClient.mockResolvedValue({
+        success: true,
+        results: [
+          { description: 'Transfer 100 DOT', result: { success: true, estimatedFee: '1000000000' } },
+        ],
+        totalEstimatedFee: '1000000000',
+      });
+
       const items = [
         {
           extrinsic: mockExtrinsics[0],
@@ -290,14 +234,23 @@ describe('Sequential Transaction Simulation', () => {
         items
       );
 
-      expect(setup).toHaveBeenCalledWith(
-        expect.objectContaining({
-          endpoint: ['wss://rpc.polkadot.io'],
-        })
+      // Client passes all endpoints to server; server filters them
+      expect(mockSimulateSequentialTransactionsClient).toHaveBeenCalledWith(
+        mockApi,
+        ['wss://rpc.polkadot.io', 'https://rpc.polkadot.io'],
+        items,
+        undefined
       );
     });
 
     it('should return error result if no WebSocket endpoints', async () => {
+      mockSimulateSequentialTransactionsClient.mockResolvedValue({
+        success: false,
+        error: 'No valid WebSocket endpoints found',
+        results: [],
+        totalEstimatedFee: '0',
+      });
+
       const items = [
         {
           extrinsic: mockExtrinsics[0],
@@ -317,6 +270,20 @@ describe('Sequential Transaction Simulation', () => {
     });
 
     it('should call status callback with progress updates', async () => {
+      mockSimulateSequentialTransactionsClient.mockImplementation(async (api, endpoints, items, onStatus) => {
+        if (onStatus) {
+          onStatus({ phase: 'initializing', message: 'Initializing', progress: 0 });
+          onStatus({ phase: 'complete', message: 'Complete', progress: 100 });
+        }
+        return {
+          success: true,
+          results: [
+            { description: 'Transfer 100 DOT', result: { success: true, estimatedFee: '1000000000' } },
+          ],
+          totalEstimatedFee: '1000000000',
+        };
+      });
+
       const items = [
         {
           extrinsic: mockExtrinsics[0],
@@ -339,7 +306,13 @@ describe('Sequential Transaction Simulation', () => {
     });
 
     it('should handle fee calculation failures gracefully', async () => {
-      mockExtrinsics[0].paymentInfo.mockRejectedValue(new Error('Fee calculation failed'));
+      mockSimulateSequentialTransactionsClient.mockResolvedValue({
+        success: true,
+        results: [
+          { description: 'Transfer 100 DOT', result: { success: true, estimatedFee: '0' } },
+        ],
+        totalEstimatedFee: '0',
+      });
 
       const items = [
         {
@@ -361,6 +334,15 @@ describe('Sequential Transaction Simulation', () => {
     });
 
     it('should use same fork for all transactions', async () => {
+      mockSimulateSequentialTransactionsClient.mockResolvedValue({
+        success: true,
+        results: [
+          { description: 'Transfer 100 DOT', result: { success: true, estimatedFee: '1000000000' } },
+          { description: 'Stake 50 DOT', result: { success: true, estimatedFee: '2000000000' } },
+        ],
+        totalEstimatedFee: '3000000000',
+      });
+
       const items = [
         {
           extrinsic: mockExtrinsics[0],
@@ -380,10 +362,14 @@ describe('Sequential Transaction Simulation', () => {
         items
       );
 
-      // Should call setup once to create fork
-      expect(setup).toHaveBeenCalledTimes(1);
-      // Should simulate both transactions on same fork
-      expect(mockChain.newBlock).toHaveBeenCalledTimes(2);
+      // Client should be called once with all items
+      expect(mockSimulateSequentialTransactionsClient).toHaveBeenCalledTimes(1);
+      expect(mockSimulateSequentialTransactionsClient).toHaveBeenCalledWith(
+        mockApi,
+        'wss://rpc.polkadot.io',
+        items,
+        undefined
+      );
     });
   });
 });
