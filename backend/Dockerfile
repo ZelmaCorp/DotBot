@@ -43,23 +43,24 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 # Copy shared libraries (needed at runtime)
 COPY lib/ ./lib/
 
+# Copy backend package files first (needed for dependency resolution)
+WORKDIR /app
+COPY backend/package*.json ./backend/
+
+# Install backend production dependencies first
+# This ensures @polkadot/api and other dependencies are available for dotbot-express
+WORKDIR /app/backend
+RUN npm install --omit=dev
+
 # Build dotbot-core library (must be built for production stage too)
 # Install all deps (including dev) needed for TypeScript build, then build
 WORKDIR /app/lib/dotbot-core
 RUN npm install && npm run build
 
 # Build dotbot-express library (must be built for production stage too)
+# @polkadot/api is now in dotbot-express dependencies, so it will be installed here
 WORKDIR /app/lib/dotbot-express
 RUN npm install && npm run build || echo "No build script, skipping"
-
-# Copy backend package files (reset WORKDIR first)
-WORKDIR /app
-COPY backend/package*.json ./backend/
-
-# Install production dependencies only
-# Use npm install since we're in a Docker context without root package-lock.json
-WORKDIR /app/backend
-RUN npm install --omit=dev
 
 # Copy built application from builder
 COPY --from=builder /app/backend/dist ./dist
