@@ -594,13 +594,17 @@ export class ScenarioEngine {
   
   /**
    * Clear report and reset tracking
+   * @param silent - If true, clears internal state without emitting report-clear event
+   *                 Use this when immediately replacing content to avoid unnecessary renders
    */
-  private clearReport(): void {
+  private clearReport(silent: boolean = false): void {
     this.reportContent = '';
     this.capturedEvents = [];
     this.capturedErrors = [];
     this.scenarioEndReason = null;
-    this.emit({ type: 'report-clear' });
+    if (!silent) {
+      this.emit({ type: 'report-clear' });
+    }
   }
   
   /**
@@ -966,64 +970,81 @@ export class ScenarioEngine {
     this.scenarioStartTime = startTime;
 
     try {
-      // Validate
-      this.validateScenario(scenario);
-      this.ensureDependencies();
-      
-      // This prevents missing events that fire early (e.g., execution-message-added)
-      if (this.dotbot && !this.dotbotEventListener) {
-        this.log('info', 'DotBot subscription not active, subscribing now before scenario execution');
-        this.subscribeToDotBot(this.dotbot);
-      }
+      // CRITICAL: Defer ALL synchronous work to prevent UI freeze
+      // This includes validation, setup, state updates, and initial event emissions
+      // All of these operations can block the UI thread if done synchronously
+      await new Promise<void>((resolve) => {
+        queueMicrotask(() => {
+          // Validate (synchronous but lightweight - still defer to be safe)
+          this.validateScenario(scenario);
+          this.ensureDependencies();
+          
+          // This prevents missing events that fire early (e.g., execution-message-added)
+          if (this.dotbot && !this.dotbotEventListener) {
+            this.log('info', 'DotBot subscription not active, subscribing now before scenario execution');
+            this.subscribeToDotBot(this.dotbot);
+          }
 
-      // Ensure executor has wallet address resolver and Asset Hub API
-      // Priority: walletAccount > dotbot wallet > undefined (will throw helpful error)
-      if (this.executor && this.executorDeps) {
-        // Try to get Asset Hub API from DotBot if not already in deps
-        let assetHubApi = this.executorDeps.assetHubApi;
-        if (!assetHubApi && this.dotbot) {
-          const dotbotAny = this.dotbot as any;
-          assetHubApi = dotbotAny.assetHubApi || null;
-        }
-        
-        const enhancedDeps = {
-          ...this.executorDeps,
-          assetHubApi: assetHubApi || this.executorDeps.assetHubApi, // Preserve or add Asset Hub API
-          getWalletAddress: () => {
-            // Priority 1: Use wallet account set for live mode
-            if (this.walletAccount?.address) {
-              return this.walletAccount.address;
-            }
-            // Priority 2: Try to get from DotBot's wallet
-            if (this.dotbot) {
+          // Ensure executor has wallet address resolver and Asset Hub API
+          // Priority: walletAccount > dotbot wallet > undefined (will throw helpful error)
+          if (this.executor && this.executorDeps) {
+            // Try to get Asset Hub API from DotBot if not already in deps
+            let assetHubApi = this.executorDeps.assetHubApi;
+            if (!assetHubApi && this.dotbot) {
               const dotbotAny = this.dotbot as any;
-              const wallet = dotbotAny.wallet;
-              if (wallet?.address) {
-                return wallet.address;
-              }
+              assetHubApi = dotbotAny.assetHubApi || null;
             }
-            // Return undefined - will trigger helpful error message
-            return undefined;
-          },
-        };
-        this.executor.setDependencies(enhancedDeps);
-      }
+            
+            const enhancedDeps = {
+              ...this.executorDeps,
+              assetHubApi: assetHubApi || this.executorDeps.assetHubApi, // Preserve or add Asset Hub API
+              getWalletAddress: () => {
+                // Priority 1: Use wallet account set for live mode
+                if (this.walletAccount?.address) {
+                  return this.walletAccount.address;
+                }
+                // Priority 2: Try to get from DotBot's wallet
+                if (this.dotbot) {
+                  const dotbotAny = this.dotbot as any;
+                  const wallet = dotbotAny.wallet;
+                  if (wallet?.address) {
+                    return wallet.address;
+                  }
+                }
+                // Return undefined - will trigger helpful error message
+                return undefined;
+              },
+            };
+            this.executor.setDependencies(enhancedDeps);
+          }
 
-      this.updateState({
-        status: 'preparing',
-        currentScenario: scenario,
-        currentStepIndex: 0,
+          this.updateState({
+            status: 'preparing',
+            currentScenario: scenario,
+            currentStepIndex: 0,
+          });
+
+          // Clear previous report and tracking silently (no event)
+          // We're immediately replacing with new content, so no need to emit clear event
+          // This avoids unnecessary "empty state" render cycle
+          this.clearReport(true); // silent = true
+          
+          // Phase 1: BEGINNING - Setup
+          this.emit({ type: 'phase-start', phase: 'beginning', details: 'Setting up scenario environment' });
+          
+          // Batch initial report updates to prevent multiple rapid events
+          const initialReportContent = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+            '[PHASE] BEGINNING - Setup\n' +
+            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+            'Setting up scenario environment\n\n';
+          
+          // Append as single batch instead of multiple calls
+          this.reportContent += initialReportContent;
+          this.emit({ type: 'report-update', content: initialReportContent });
+          
+          resolve();
+        });
       });
-
-      // Clear previous report and tracking
-      this.clearReport();
-      
-      // Phase 1: BEGINNING - Setup
-      this.emit({ type: 'phase-start', phase: 'beginning', details: 'Setting up scenario environment' });
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-      this.appendToReport('[PHASE] BEGINNING - Setup\n');
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-      this.appendToReport('Setting up scenario environment\n\n');
       
       this.emit({ type: 'phase-update', phase: 'beginning', message: 'Creating test entities...' });
       this.appendToReport('  → Creating test entities...\n');
@@ -1037,10 +1058,15 @@ export class ScenarioEngine {
 
       // Phase 2: CYCLE - Execute steps (unknown number of rounds)
       this.emit({ type: 'phase-start', phase: 'cycle', details: 'Executing scenario steps' });
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-      this.appendToReport('[PHASE] CYCLE - Execution\n');
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-      this.appendToReport('Executing scenario steps\n\n');
+      
+      // Batch report updates to prevent multiple rapid events
+      const cycleReportContent = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '[PHASE] CYCLE - Execution\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        'Executing scenario steps\n\n';
+      
+      this.reportContent += cycleReportContent;
+      this.emit({ type: 'report-update', content: cycleReportContent });
       this.updateState({ status: 'running' });
       const stepResults = await this.executor!.executeScenario(scenario);
       
@@ -1048,18 +1074,76 @@ export class ScenarioEngine {
       this.log('info', `Execution phase completed with ${stepResults.length} step result(s)`);
 
       // Phase 3: FINAL REPORT - Evaluate
-      this.emit({ type: 'phase-start', phase: 'final-report', details: 'Evaluating results' });
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-      this.appendToReport('[PHASE] FINAL REPORT - Evaluation\n');
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-      this.appendToReport('Evaluating results\n\n');
-      
-      this.emit({ type: 'phase-update', phase: 'final-report', message: 'Analyzing scenario results...' });
-      this.appendToReport('  → Analyzing scenario results...\n');
-      const evaluation = this.evaluator!.evaluate(scenario, stepResults);
+      // CRITICAL: Defer evaluation and summary generation to prevent UI freeze
+      // evaluator.evaluate() and generateSummary() do heavy synchronous work
+      const evaluation = await new Promise<EvaluationResult>((resolve) => {
+        queueMicrotask(() => {
+          this.emit({ type: 'phase-start', phase: 'final-report', details: 'Evaluating results' });
+          
+          // Batch report updates to prevent multiple rapid events
+          const finalReportContent = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+            '[PHASE] FINAL REPORT - Evaluation\n' +
+            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+            'Evaluating results\n\n';
+          
+          this.reportContent += finalReportContent;
+          this.emit({ type: 'report-update', content: finalReportContent });
+          
+          this.emit({ type: 'phase-update', phase: 'final-report', message: 'Analyzing scenario results...' });
+          this.appendToReport('  → Analyzing scenario results...\n');
+          
+          // This is heavy synchronous work - now deferred
+          const evalResult = this.evaluator!.evaluate(scenario, stepResults);
+          resolve(evalResult);
+        });
+      });
 
       const endTime = Date.now();
 
+      // Defer result creation and final report updates
+      await new Promise<void>((resolve) => {
+        queueMicrotask(() => {
+          const result: ScenarioResult = {
+            scenarioId: scenario.id,
+            success: evaluation.passed,
+            startTime,
+            endTime,
+            duration: endTime - startTime,
+            stepResults,
+            evaluation,
+          };
+
+          // Auto-save if enabled
+          if (this.config.autoSaveResults) {
+            this.saveResult(result);
+          }
+
+          // Mark scenario as completed
+          this.scenarioEndReason = ScenarioEndReason.COMPLETED;
+          
+          // Generate and append summary (heavy synchronous work - now deferred)
+          const summary = this.generateSummary(result, evaluation);
+          this.appendToReport(`\n${summary}\n`);
+          
+          // Add final result to report
+          this.appendToReport(`\n[COMPLETE] ${evaluation.passed ? '✅ PASSED' : '❌ FAILED'}\n`);
+          this.appendToReport(`[SCORE] ${evaluation.score}/100\n`);
+          this.appendToReport(`[DURATION] ${endTime - startTime}ms\n`);
+
+          this.updateState({ status: 'completed' });
+          this.emit({ type: 'scenario-complete', result });
+
+          this.log('info', `Scenario completed: ${evaluation.passed ? 'PASSED' : 'FAILED'} (${evaluation.score}/100)`);
+          
+          // Clear running scenario reference
+          this.runningScenario = null;
+          this.scenarioStartTime = 0;
+
+          resolve();
+        });
+      });
+
+      // Return result after all deferred work completes
       const result: ScenarioResult = {
         scenarioId: scenario.id,
         success: evaluation.passed,
@@ -1069,32 +1153,6 @@ export class ScenarioEngine {
         stepResults,
         evaluation,
       };
-
-      // Auto-save if enabled
-      if (this.config.autoSaveResults) {
-        this.saveResult(result);
-      }
-
-      // Mark scenario as completed
-      this.scenarioEndReason = ScenarioEndReason.COMPLETED;
-      
-      // Generate and append summary
-      const summary = this.generateSummary(result, evaluation);
-      this.appendToReport(`\n${summary}\n`);
-      
-      // Add final result to report
-      this.appendToReport(`\n[COMPLETE] ${evaluation.passed ? '✅ PASSED' : '❌ FAILED'}\n`);
-      this.appendToReport(`[SCORE] ${evaluation.score}/100\n`);
-      this.appendToReport(`[DURATION] ${endTime - startTime}ms\n`);
-
-      this.updateState({ status: 'completed' });
-      this.emit({ type: 'scenario-complete', result });
-
-      this.log('info', `Scenario completed: ${evaluation.passed ? 'PASSED' : 'FAILED'} (${evaluation.score}/100)`);
-      
-      // Clear running scenario reference
-      this.runningScenario = null;
-      this.scenarioStartTime = 0;
 
       return result;
     } catch (error) {

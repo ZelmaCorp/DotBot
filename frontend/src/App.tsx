@@ -18,6 +18,7 @@ import WelcomeScreen from './components/chat/WelcomeScreen';
 import Chat from './components/chat/Chat';
 import ChatHistory from './components/history/ChatHistory';
 import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOverlay';
+import { ScenarioEngineProvider } from './components/scenarioEngine/context/ScenarioEngineContext';
 import LoadingOverlay from './components/common/LoadingOverlay';
 import { DotBot, Environment, ScenarioEngine, SigningRequest, BatchSigningRequest, DotBotEventType } from '@dotbot/core';
 import type { ChatInstanceData } from '@dotbot/core/types/chatInstance';
@@ -700,20 +701,22 @@ const AppContent: React.FC = () => {
           {scenarioEngineEnabled && 
            dotbot && 
            dotbot.getEnvironment() === 'testnet' && (
-        <ScenarioEngineOverlay 
-              engine={scenarioEngine}
-              dotbot={dotbot}
-              onClose={() => {
-                setScenarioEngineEnabled(false);
-                // Reset ready state when closed (will re-initialize on next open)
-                setIsScenarioEngineReady(false);
-              }}
-              onSendMessage={handleSendMessageWithScenario}
-              autoSubmit={autoSubmitPrompts}
-              onAutoSubmitChange={setAutoSubmitPrompts}
-              isInitializing={isScenarioEngineInitializing}
-              isReady={isScenarioEngineReady}
-        />
+        <ScenarioEngineProvider>
+          <ScenarioEngineOverlay 
+                engine={scenarioEngine}
+                dotbot={dotbot}
+                onClose={() => {
+                  setScenarioEngineEnabled(false);
+                  // Reset ready state when closed (will re-initialize on next open)
+                  setIsScenarioEngineReady(false);
+                }}
+                onSendMessage={handleSendMessageWithScenario}
+                autoSubmit={autoSubmitPrompts}
+                onAutoSubmitChange={setAutoSubmitPrompts}
+                isInitializing={isScenarioEngineInitializing}
+                isReady={isScenarioEngineReady}
+          />
+        </ScenarioEngineProvider>
       )}
         </div>
       </ThemeProvider>

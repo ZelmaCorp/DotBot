@@ -77,17 +77,22 @@ export const ReportTab: React.FC<ReportTabProps> = ({
   }, [onEndScenario]);
 
   // Render status message component
+  // Extract specific values to avoid re-renders when object reference changes but values don't
+  const executionPhasePhase = executionPhase?.phase;
+  const executionPhaseStepCount = executionPhase?.stepCount;
+  const executionPhaseDotbotActivity = executionPhase?.dotbotActivity;
+  
   const statusMessageComponent = useMemo(() => {
     if (!isRunning) return null;
 
     if (executionPhase) {
-      if (executionPhase.phase === 'beginning') {
+      if (executionPhasePhase === 'beginning') {
         return <span className="scenario-status-message">Setting up...</span>;
       }
-      if (executionPhase.phase === 'cycle') {
-        if (executionPhase.dotbotActivity) {
-          const preview = executionPhase.dotbotActivity.substring(0, 50);
-          const truncated = executionPhase.dotbotActivity.length > 50 ? '...' : '';
+      if (executionPhasePhase === 'cycle') {
+        if (executionPhaseDotbotActivity) {
+          const preview = executionPhaseDotbotActivity.substring(0, 50);
+          const truncated = executionPhaseDotbotActivity.length > 50 ? '...' : '';
           return (
             <span className="scenario-status-message">
               DotBot: {preview}{truncated}
@@ -96,11 +101,11 @@ export const ReportTab: React.FC<ReportTabProps> = ({
         }
         return (
           <span className="scenario-status-message">
-            Executing step {executionPhase.stepCount}...
+            Executing step {executionPhaseStepCount}...
           </span>
         );
       }
-      if (executionPhase.phase === 'final-report') {
+      if (executionPhasePhase === 'final-report') {
         return <span className="scenario-status-message">Generating final report...</span>;
       }
     }
@@ -110,7 +115,14 @@ export const ReportTab: React.FC<ReportTabProps> = ({
     }
 
     return <span className="scenario-loading-dots">...</span>;
-  }, [isRunning, executionPhase, statusMessage]);
+  }, [
+    isRunning, 
+    executionPhase, // Required by ESLint - but we use extracted values above
+    executionPhasePhase,
+    executionPhaseStepCount,
+    executionPhaseDotbotActivity,
+    statusMessage
+  ]);
 
   const hasMessages = messages.length > 0;
   
@@ -123,7 +135,10 @@ export const ReportTab: React.FC<ReportTabProps> = ({
         console.log('[ReportTab] Last message:', messages[messages.length - 1].id, messages[messages.length - 1].content.substring(0, 50));
       }
     }
-  }, [messages.length]); // Only depend on length, not the array itself
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Intentionally only depend on length to avoid render loops when array reference changes
+    // messages array is intentionally excluded - we only care about length changes
+  }, [messages.length]);
 
   return (
     <div className="scenario-panel">

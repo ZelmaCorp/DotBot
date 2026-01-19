@@ -4,7 +4,7 @@
  * Manages scenario engine event handling and state
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ScenarioEngine, DotBot, TestEntity } from '@dotbot/core';
 import type { ReportMessageData } from '../components/ReportMessage';
 
@@ -22,7 +22,10 @@ interface UseScenarioEngineProps {
   onAddMessage: (message: ReportMessageData) => void;
   onClearReport?: () => void;
   onStatusChange?: (message: string) => void;
-  onPhaseChange?: (phase: ExecutionPhase) => void;
+  onPhaseChange?: (phase: ExecutionPhase | null) => void;
+  onUpdatePhase?: (updater: (prev: ExecutionPhase) => ExecutionPhase) => void; // For batched updates
+  onSetEntities?: (entities: any[]) => void;
+  onSetRunningScenario?: (scenario: string | null) => void;
 }
 
 export const useScenarioEngine = ({
@@ -33,20 +36,17 @@ export const useScenarioEngine = ({
   onClearReport,
   onStatusChange,
   onPhaseChange,
+  onUpdatePhase,
+  onSetEntities,
+  onSetRunningScenario,
 }: UseScenarioEngineProps) => {
-  const [entities, setEntities] = useState<any[]>([]);
-  const [runningScenario, setRunningScenario] = useState<string | null>(null);
-  // executionPhase state is used to track phase updates and pass to onPhaseChange callback
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [executionPhase, setExecutionPhase] = useState<ExecutionPhase>({
-    phase: null,
-    messages: [],
-    stepCount: 0,
-  });
+  // NOTE: State is now managed by ScenarioEngineContext
+  // This hook only handles event subscriptions and calls context methods via callbacks
+  // No local state - all state updates go through callbacks to context
 
   // Query balance for an entity address
   // For Westend/Polkadot, balances are typically on Asset Hub after migration
-  const queryEntityBalance = async (address: string): Promise<string> => {
+  const queryEntityBalance = useCallback(async (address: string): Promise<string> => {
     if (!dotbot || !engine) {
       return '0 DOT';
     }
@@ -115,13 +115,16 @@ export const useScenarioEngine = ({
       console.warn(`Failed to query balance for ${address}:`, error);
       return '—';
     }
-  };
+  }, [dotbot, engine]);
 
   // Use refs for callbacks to prevent re-subscription on every render
   const onAddMessageRef = useRef(onAddMessage);
   const onClearReportRef = useRef(onClearReport);
   const onStatusChangeRef = useRef(onStatusChange);
   const onPhaseChangeRef = useRef(onPhaseChange);
+  const onUpdatePhaseRef = useRef(onUpdatePhase);
+  const onSetEntitiesRef = useRef(onSetEntities);
+  const onSetRunningScenarioRef = useRef(onSetRunningScenario);
   
   // Update refs when callbacks change
   useEffect(() => {
@@ -129,7 +132,10 @@ export const useScenarioEngine = ({
     onClearReportRef.current = onClearReport;
     onStatusChangeRef.current = onStatusChange;
     onPhaseChangeRef.current = onPhaseChange;
-  }, [onAddMessage, onClearReport, onStatusChange, onPhaseChange]);
+    onUpdatePhaseRef.current = onUpdatePhase;
+    onSetEntitiesRef.current = onSetEntities;
+    onSetRunningScenarioRef.current = onSetRunningScenario;
+  }, [onAddMessage, onClearReport, onStatusChange, onPhaseChange, onUpdatePhase, onSetEntities, onSetRunningScenario]);
   
   // Message ID counter (persists across renders)
   const messageIdCounterRef = useRef(0);
@@ -146,6 +152,23 @@ export const useScenarioEngine = ({
     // Subscribe to DotBot events for automatic response capture
     // This should only happen once when engine/dotbot change, not on every callback change
     engine.subscribeToDotBot(dotbot);
+    
+    // Helper function to batch executionPhase updates
+    // Uses context's updateExecutionPhase which already has batching via requestAnimationFrame
+    const applyPhaseUpdate = (updater: (prev: ExecutionPhase) => ExecutionPhase) => {
+      // Use context's batched update method if available, otherwise fall back to direct callback
+      if (onUpdatePhaseRef.current) {
+        onUpdatePhaseRef.current(updater);
+      } else if (onPhaseChangeRef.current) {
+        // Fallback: get current phase from context (would need to be passed, but for now use callback)
+        // This is not ideal but maintains backward compatibility
+        onPhaseChangeRef.current({
+          phase: null,
+          messages: [],
+          stepCount: 0,
+        });
+      }
+    };
     
     const handleEvent = (event: any) => {
       console.log('[useScenarioEngine] Event received:', event.type);
@@ -198,28 +221,19 @@ export const useScenarioEngine = ({
           messages: [],
           stepCount: 0,
         };
-        setExecutionPhase(newPhase);
         onPhaseChangeRef.current?.(newPhase);
         // Report content is handled by ScenarioEngine - no need to append here
       } else if (event.type === 'phase-update') {
-        setExecutionPhase(prev => {
-          const updated = {
-            ...prev,
-            messages: [...prev.messages, event.message],
-          };
-          onPhaseChangeRef.current?.(updated);
-          return updated;
-        });
+        applyPhaseUpdate(prev => ({
+          ...prev,
+          messages: [...prev.messages, event.message],
+        }));
         // Report content is handled by ScenarioEngine - no need to append here
       } else if (event.type === 'dotbot-activity') {
-        setExecutionPhase(prev => {
-          const updated = {
-            ...prev,
-            dotbotActivity: event.activity,
-          };
-          onPhaseChangeRef.current?.(updated);
-          return updated;
-        });
+        applyPhaseUpdate(prev => ({
+          ...prev,
+          dotbotActivity: event.activity,
+        }));
         // Update status when execution completes
         if (event.activity.includes('Execution completed') || event.activity.includes('completed')) {
           onStatusChangeRef.current?.('');
@@ -230,14 +244,10 @@ export const useScenarioEngine = ({
         // This hook no longer needs to handle prompt injection
         onStatusChangeRef.current?.('Waiting for user to submit prompt...');
         // Track DotBot activity (just for UI status, not report)
-        setExecutionPhase(prev => {
-          const updated = {
-            ...prev,
-            dotbotActivity: `Waiting for user to submit prompt...`,
-          };
-          onPhaseChangeRef.current?.(updated);
-          return updated;
-        });
+        applyPhaseUpdate(prev => ({
+          ...prev,
+          dotbotActivity: `Waiting for user to submit prompt...`,
+        }));
         // Report content is handled by ScenarioEngine - no need to append here
         // The "Prompt injected" message should NOT appear in the report
       } else if (event.type === 'log') {
@@ -270,33 +280,27 @@ export const useScenarioEngine = ({
               balance,
             };
           })
-        ).then(setEntities);
+        ).then((entities) => {
+          onSetEntitiesRef.current?.(entities);
+        });
       } else if (event.type === 'scenario-complete') {
-        setRunningScenario(null);
+        onSetRunningScenarioRef.current?.(null);
         onStatusChangeRef.current?.('');
         // Report content is handled by ScenarioEngine - no need to append here
       } else if (event.type === 'step-start') {
         const stepNum = (event.index || 0) + 1;
-        setExecutionPhase(prev => {
-          const updated = {
-            ...prev,
-            stepCount: stepNum,
-            messages: [...prev.messages, `Step ${stepNum} started`],
-          };
-          onPhaseChangeRef.current?.(updated);
-          return updated;
-        });
+        applyPhaseUpdate(prev => ({
+          ...prev,
+          stepCount: stepNum,
+          messages: [...prev.messages, `Step ${stepNum} started`],
+        }));
         // Report content is handled by ScenarioEngine - no need to append here
         onStatusChangeRef.current?.(`Executing step ${stepNum}...`);
       } else if (event.type === 'step-complete') {
-        setExecutionPhase(prev => {
-          const updated = {
-            ...prev,
-            messages: [...prev.messages, `Step completed`],
-          };
-          onPhaseChangeRef.current?.(updated);
-          return updated;
-        });
+        applyPhaseUpdate(prev => ({
+          ...prev,
+          messages: [...prev.messages, `Step completed`],
+        }));
         
         // Track DotBot's response for status display
         if (event.result.response) {
@@ -304,14 +308,10 @@ export const useScenarioEngine = ({
           const responseContent = event.result.response.content || '';
           const responsePreview = responseContent.substring(0, 150);
           
-          setExecutionPhase(prev => {
-            const updated = {
-              ...prev,
-              dotbotActivity: `Responded with ${responseType}: ${responsePreview}${responseContent.length > 150 ? '...' : ''}`,
-            };
-            onPhaseChangeRef.current?.(updated);
-            return updated;
-          });
+          applyPhaseUpdate(prev => ({
+            ...prev,
+            dotbotActivity: `Responded with ${responseType}: ${responsePreview}${responseContent.length > 150 ? '...' : ''}`,
+          }));
         }
         
         // Report content is handled by ScenarioEngine - no need to append here
@@ -360,12 +360,11 @@ export const useScenarioEngine = ({
       // Unsubscribe from DotBot when component unmounts
       engine.unsubscribeFromDotBot();
     };
-  }, [engine, dotbot]); // Only depend on engine and dotbot, not callbacks
+    // queryEntityBalance is included because it's used inside handleEvent (line 274)
+    // It's wrapped in useCallback with [dotbot, engine] deps, so it's stable when those don't change
+  }, [engine, dotbot, queryEntityBalance]);
 
-  return {
-    entities,
-    runningScenario,
-    setRunningScenario,
-  };
+  // Hook no longer returns state - all state is managed by context
+  // This is a side-effect only hook (event subscriptions)
 };
 

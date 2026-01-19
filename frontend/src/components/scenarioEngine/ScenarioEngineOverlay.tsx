@@ -5,14 +5,21 @@
  * Appears as an overlay on the right side of the screen.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ScenarioEngine, DotBot, Scenario } from '@dotbot/core';
 import { X } from 'lucide-react';
 import { EntitiesTab } from './components/EntitiesTab';
 import { ScenariosTab } from './components/ScenariosTab';
 import { ReportTab } from './components/ReportTab';
 import { useScenarioEngine } from './hooks/useScenarioEngine';
-import type { ReportMessageData } from './components/ReportMessage';
+import { 
+  useScenarioEngineState, 
+  useReportMessages, 
+  useExecutionPhase, 
+  useStatusMessage, 
+  useRunningScenario,
+  useEntities 
+} from './context/ScenarioEngineContext';
 import { verifyEntities } from './utils/entityUtils';
 import { 
   getScenarioChain, 
@@ -55,57 +62,56 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
   }, [onClose]);
+  // Use centralized state from context
+  const { 
+    state, 
+    addMessage, 
+    clearReport, 
+    setExecutionPhase, 
+    updateExecutionPhase,
+    setStatusMessage, 
+    setRunningScenario,
+    setEntities,
+    setActiveTab: setActiveTabContext,
+    setExecutionMode: setExecutionModeContext,
+    setAutoSubmit: setAutoSubmitContext
+  } = useScenarioEngineState();
+  
+  const reportMessages = useReportMessages();
+  const executionPhase = useExecutionPhase();
+  const statusMessage = useStatusMessage();
+  const [runningScenario, isRunning] = useRunningScenario();
+  const entities = useEntities();
+  
+  // Local UI state (not part of scenario engine state)
   const [activeTab, setActiveTab] = useState<TabType>('entities');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['state-allocation', 'happy-path']));
-  const [reportMessages, setReportMessages] = useState<ReportMessageData[]>([]);
   const [isCreatingEntities, setIsCreatingEntities] = useState(false);
   
-  // Debug: Log when reportMessages state changes (only on length change to avoid loops)
-  const prevReportMessagesLengthRef = useRef(0);
+  // Sync activeTab with context
   useEffect(() => {
-    if (prevReportMessagesLengthRef.current !== reportMessages.length) {
-      console.log('[ScenarioEngineOverlay] reportMessages state changed, count:', prevReportMessagesLengthRef.current, '->', reportMessages.length);
-      prevReportMessagesLengthRef.current = reportMessages.length;
-    }
-  }, [reportMessages.length]);
-  const [statusMessage, setStatusMessage] = useState<string>('');
-  const [executionPhase, setExecutionPhase] = useState<{ phase: 'beginning' | 'cycle' | 'final-report' | null; messages: string[]; stepCount: number; dotbotActivity?: string } | null>(null);
-  // Only LIVE mode is implemented - synthetic/emulated are TODO
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>('live');
-  // Auto-submit toggle: true = auto-submit injected prompts, false = manual submit
-  const [autoSubmit, setAutoSubmit] = useState<boolean>(propAutoSubmit ?? true);
+    setActiveTabContext(activeTab);
+  }, [activeTab, setActiveTabContext]);
   
-  // Sync with prop if provided
+  // Sync executionMode with context
+  useEffect(() => {
+    setExecutionModeContext(state.executionMode);
+  }, [state.executionMode, setExecutionModeContext]);
+  
+  // Sync autoSubmit with context and prop
+  const [autoSubmit, setAutoSubmit] = useState<boolean>(propAutoSubmit ?? true);
   useEffect(() => {
     if (propAutoSubmit !== undefined) {
       setAutoSubmit(propAutoSubmit);
+      setAutoSubmitContext(propAutoSubmit);
     }
-  }, [propAutoSubmit]);
+  }, [propAutoSubmit, setAutoSubmitContext]);
   
   const handleAutoSubmitToggle = (value: boolean) => {
     setAutoSubmit(value);
+    setAutoSubmitContext(value);
     onAutoSubmitChange?.(value);
   };
-
-  const addMessage = useCallback((message: ReportMessageData) => {
-    console.log('[ScenarioEngineOverlay] addMessage called:', message.id, 'content preview:', message.content.substring(0, 50));
-    setReportMessages(prev => {
-      // Use functional update to ensure we're working with latest state
-      // Check if message already exists (shouldn't happen, but safety check)
-      const exists = prev.some(m => m.id === message.id);
-      if (exists) {
-        console.warn('[ScenarioEngineOverlay] Duplicate message id:', message.id);
-        return prev;
-      }
-      const newMessages = [...prev, message];
-      console.log('[ScenarioEngineOverlay] State update - prev count:', prev.length, 'new count:', newMessages.length);
-      return newMessages;
-    });
-  }, []);
-
-  const clearReport = useCallback(() => {
-    setReportMessages([]);
-  }, []);
 
   const clearEntities = () => {
     engine.clearEntities();
@@ -114,7 +120,8 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
   };
 
   // Only initialize hook when engine is ready
-  const { entities, runningScenario, setRunningScenario } = useScenarioEngine({
+  // Hook now uses context methods instead of local state
+  useScenarioEngine({
     engine: isReady ? engine : null,
     dotbot: isReady ? dotbot : null,
     onSendMessage,
@@ -122,6 +129,9 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
     onClearReport: clearReport,
     onStatusChange: setStatusMessage,
     onPhaseChange: setExecutionPhase,
+    onUpdatePhase: updateExecutionPhase, // Context method with built-in batching
+    onSetEntities: setEntities,
+    onSetRunningScenario: setRunningScenario,
   });
   
   const handleEndScenario = async () => {
@@ -161,7 +171,7 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
           { name: 'Bob', type: 'keypair' },
           { name: 'Charlie', type: 'keypair' },
         ],
-        { chain: chain as 'westend' | 'polkadot', mode: executionMode }
+        { chain: chain as 'westend' | 'polkadot', mode: state.executionMode }
       );
       
       const engineEntities = Array.from(engine.getEntities().values());
@@ -174,7 +184,7 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
       }));
       
       // Entity creation messages will be handled by report-update events
-      verifyEntities(entityData, executionMode, (text: string) => {
+      verifyEntities(entityData, state.executionMode, (text: string) => {
         // This callback is for legacy verifyEntities, but messages will come via events
       });
       
@@ -187,22 +197,23 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
   };
 
   const runScenario = (scenario: Scenario) => {
+    // Update UI state first (wrapped in startTransition, so non-blocking)
     setActiveTab('report');
     setRunningScenario(scenario.name);
     
-    // Defer execution to next tick to prevent UI blocking
-    // This ensures the UI updates (tab switch, running state) happen before heavy computation
+    // Defer scenario execution to let UI render first
+    // engine.runScenario() does a lot of synchronous work before first await
+    // (validation, setup, event emissions) which can block the UI
     setTimeout(() => {
       (async () => {
         try {
-          const state = engine.getState();
-          const engineEntities = Array.from(engine.getEntities().values());
-          
           // All report messages will be handled by report-update events from ScenarioEngine
           const chain = getScenarioChain(scenario, dotbot);
           const chainType = getChainTypeDescription(chain);
-          const modifiedScenario = createModifiedScenario(scenario, chain, executionMode);
+          const modifiedScenario = createModifiedScenario(scenario, chain, state.executionMode);
           
+          // Run scenario - this does synchronous work at start, but we've deferred it
+          // The events it emits will be handled by batched/transitioned updates
           await engine.runScenario(modifiedScenario);
           
         } catch (error) {
@@ -212,7 +223,7 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
           setRunningScenario(null);
         }
       })();
-    }, 0);
+    }, 100); // Delay to let UI render before heavy synchronous work
   };
 
   return (
@@ -288,8 +299,8 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
               <EntitiesTab
                 engine={engine}
                 dotbot={dotbot}
-                mode={executionMode}
-                onModeChange={setExecutionMode}
+                mode={state.executionMode}
+                onModeChange={(mode) => setExecutionModeContext(mode)}
                 entities={entities}
                 isCreating={isCreatingEntities}
                 onAppendReport={(text: string) => {
@@ -305,8 +316,8 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
                 categories={TEST_CATEGORIES}
                 expandedCategories={expandedCategories}
                 onToggleCategory={toggleCategory}
-                mode={executionMode}
-                onModeChange={setExecutionMode}
+                mode={state.executionMode}
+                onModeChange={(mode) => setExecutionModeContext(mode)}
                 onRunScenario={runScenario}
                 runningScenario={runningScenario}
               />
@@ -315,7 +326,7 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
             {activeTab === 'report' && (
               <ReportTab
                 messages={reportMessages}
-                isRunning={!!runningScenario}
+                isRunning={isRunning}
                 statusMessage={statusMessage}
                 executionPhase={executionPhase}
                 onClear={clearReport}
