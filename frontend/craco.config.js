@@ -54,27 +54,6 @@ module.exports = {
         zlib: false,
       };
       
-      // Fix ajv/dist/compile/context module resolution for ajv-formats compatibility
-      // This resolves the "Cannot find module 'ajv/dist/compile/context'" error
-      // by ensuring webpack can find the module even when ajv versions are mixed
-      // Use alias instead of fallback since this is a Node.js module path, not a browser polyfill
-      try {
-        const ajvContextPath = require.resolve('ajv/dist/compile/context');
-        webpackConfig.resolve.alias = webpackConfig.resolve.alias || {};
-        webpackConfig.resolve.alias['ajv/dist/compile/context'] = ajvContextPath;
-      } catch (e) {
-        // If direct resolution fails, try resolving from ajv package root
-        try {
-          const ajvPath = require.resolve('ajv/package.json');
-          const ajvRoot = require('path').dirname(ajvPath);
-          webpackConfig.resolve.alias = webpackConfig.resolve.alias || {};
-          webpackConfig.resolve.alias['ajv/dist/compile/context'] = require('path').join(ajvRoot, 'dist/compile/context.js');
-        } catch (err) {
-          // Silently fail - webpack will handle it or error will surface during build
-          console.warn('Could not resolve ajv/dist/compile/context:', err.message);
-        }
-      }
-      
       return webpackConfig;
     },
   },
