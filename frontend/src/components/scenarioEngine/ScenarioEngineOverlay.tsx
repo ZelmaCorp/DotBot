@@ -5,13 +5,14 @@
  * Appears as an overlay on the right side of the screen.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ScenarioEngine, DotBot, Scenario } from '@dotbot/core';
 import { X } from 'lucide-react';
 import { EntitiesTab } from './components/EntitiesTab';
 import { ScenariosTab } from './components/ScenariosTab';
 import { ReportTab } from './components/ReportTab';
 import { useScenarioEngine } from './hooks/useScenarioEngine';
+import type { ReportMessageData } from './components/ReportMessage';
 import { verifyEntities } from './utils/entityUtils';
 import { 
   getScenarioChain, 
@@ -56,8 +57,17 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
   }, [onClose]);
   const [activeTab, setActiveTab] = useState<TabType>('entities');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['state-allocation', 'happy-path']));
-  const [report, setReport] = useState<string>('');
+  const [reportMessages, setReportMessages] = useState<ReportMessageData[]>([]);
   const [isCreatingEntities, setIsCreatingEntities] = useState(false);
+  
+  // Debug: Log when reportMessages state changes (only on length change to avoid loops)
+  const prevReportMessagesLengthRef = useRef(0);
+  useEffect(() => {
+    if (prevReportMessagesLengthRef.current !== reportMessages.length) {
+      console.log('[ScenarioEngineOverlay] reportMessages state changed, count:', prevReportMessagesLengthRef.current, '->', reportMessages.length);
+      prevReportMessagesLengthRef.current = reportMessages.length;
+    }
+  }, [reportMessages.length]);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [executionPhase, setExecutionPhase] = useState<{ phase: 'beginning' | 'cycle' | 'final-report' | null; messages: string[]; stepCount: number; dotbotActivity?: string } | null>(null);
   // Only LIVE mode is implemented - synthetic/emulated are TODO
@@ -77,17 +87,30 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
     onAutoSubmitChange?.(value);
   };
 
-  const appendToReport = (text: string) => {
-    setReport(prev => prev + text);
-  };
+  const addMessage = useCallback((message: ReportMessageData) => {
+    console.log('[ScenarioEngineOverlay] addMessage called:', message.id, 'content preview:', message.content.substring(0, 50));
+    setReportMessages(prev => {
+      // Use functional update to ensure we're working with latest state
+      // Check if message already exists (shouldn't happen, but safety check)
+      const exists = prev.some(m => m.id === message.id);
+      if (exists) {
+        console.warn('[ScenarioEngineOverlay] Duplicate message id:', message.id);
+        return prev;
+      }
+      const newMessages = [...prev, message];
+      console.log('[ScenarioEngineOverlay] State update - prev count:', prev.length, 'new count:', newMessages.length);
+      return newMessages;
+    });
+  }, []);
 
-  const clearReport = () => {
-    setReport('');
-  };
+  const clearReport = useCallback(() => {
+    setReportMessages([]);
+  }, []);
 
   const clearEntities = () => {
     engine.clearEntities();
-    appendToReport(`[NUKE] All entities cleared\n`);
+    // Note: This will be handled by the hook via report-update events
+    // But we can add a direct message if needed for immediate feedback
   };
 
   // Only initialize hook when engine is ready
@@ -95,7 +118,7 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
     engine: isReady ? engine : null,
     dotbot: isReady ? dotbot : null,
     onSendMessage,
-    onAppendReport: appendToReport,
+    onAddMessage: addMessage,
     onClearReport: clearReport,
     onStatusChange: setStatusMessage,
     onPhaseChange: setExecutionPhase,
@@ -112,7 +135,7 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
       setStatusMessage('');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      appendToReport(`[ERROR] Failed to end scenario: ${errorMessage}\n`);
+          // Error will be handled by report-update events
       console.error('Failed to end scenario:', error);
     }
   };
@@ -150,16 +173,13 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
         balance: '0 DOT'
       }));
       
-      appendToReport(`[CREATE] ${engineEntities.length} entities created (${executionMode} mode)\n`);
-      engineEntities.forEach(e => {
-        const uriInfo = executionMode === 'live' ? ' (no URI - security)' : (e.uri ? ` (${e.uri})` : '');
-        appendToReport(`  ${e.name}: ${e.address}${uriInfo}\n`);
+      // Entity creation messages will be handled by report-update events
+      verifyEntities(entityData, executionMode, (text: string) => {
+        // This callback is for legacy verifyEntities, but messages will come via events
       });
       
-      verifyEntities(entityData, executionMode, appendToReport);
-      
     } catch (error) {
-      appendToReport(`[ERROR] ${error}\n`);
+      // Error will be handled by report-update events
       console.error('Entity creation failed:', error);
     } finally {
       setIsCreatingEntities(false);
@@ -178,22 +198,15 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
           const state = engine.getState();
           const engineEntities = Array.from(engine.getEntities().values());
           
-          if (engineEntities.length > 0 && state.entityMode !== executionMode) {
-            appendToReport(`[WARN] Entity mode mismatch: ${state.entityMode} → ${executionMode}\n`);
-          }
-          
+          // All report messages will be handled by report-update events from ScenarioEngine
           const chain = getScenarioChain(scenario, dotbot);
           const chainType = getChainTypeDescription(chain);
           const modifiedScenario = createModifiedScenario(scenario, chain, executionMode);
           
-          appendToReport(`[INFO] Using chain: ${chain} (${chainType})\n`);
-          appendToReport(`[SCENARIO] ${scenario.name} (${executionMode})\n\n`);
-          
           await engine.runScenario(modifiedScenario);
           
         } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          appendToReport(`[ERROR] Scenario failed: ${errorMessage}\n`);
+          // Error will be handled by report-update events
           console.error('Scenario execution failed:', error);
         } finally {
           setRunningScenario(null);
@@ -279,7 +292,9 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
                 onModeChange={setExecutionMode}
                 entities={entities}
                 isCreating={isCreatingEntities}
-                onAppendReport={appendToReport}
+                onAppendReport={(text: string) => {
+                  // Legacy callback for EntitiesTab - messages will come via events
+                }}
                 onCreateEntities={createEntities}
                 onClearEntities={clearEntities}
               />
@@ -299,8 +314,7 @@ const ScenarioEngineOverlay: React.FC<ScenarioEngineOverlayProps> = ({
 
             {activeTab === 'report' && (
               <ReportTab
-                report={report}
-                isTyping={!!runningScenario}
+                messages={reportMessages}
                 isRunning={!!runningScenario}
                 statusMessage={statusMessage}
                 executionPhase={executionPhase}

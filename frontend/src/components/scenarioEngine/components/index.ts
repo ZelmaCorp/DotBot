@@ -16,4 +16,6 @@ export { ScenarioCategory } from './ScenarioCategory';
 export { ScenariosTab } from './ScenariosTab';
 
 export { ReportTab } from './ReportTab';
+export { ReportMessage } from './ReportMessage';
+export type { ReportMessageData } from './ReportMessage';
 

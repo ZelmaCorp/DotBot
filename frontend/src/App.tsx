@@ -294,6 +294,12 @@ const AppContent: React.FC = () => {
 
     // If there's an execution plan, add execution message
     if (chatResult.plan) {
+      console.log('[App] ExecutionPlan received from backend:', {
+        planId: chatResult.plan.id,
+        stepsCount: chatResult.plan.steps.length,
+        originalRequest: chatResult.plan.originalRequest
+      });
+      
       const executionId = chatResult.executionId || chatResult.executionArrayState?.id;
       
       if (!executionId) {
@@ -308,8 +314,10 @@ const AppContent: React.FC = () => {
         .find((m: any) => m.type === 'execution' && m.executionId === executionId);
       
       if (!existingMessage) {
-        console.log('[App] Adding execution message:', { 
+        console.log('[App] ExecutionPlan sent to frontend - adding execution message:', { 
           executionId, 
+          planId: chatResult.plan.id,
+          stepsCount: chatResult.plan.steps.length,
           hasState: !!chatResult.executionArrayState,
           hasPlan: !!chatResult.plan 
         });

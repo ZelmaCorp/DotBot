@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { ScenarioEngine, DotBot, TestEntity } from '@dotbot/core';
+import type { ReportMessageData } from '../components/ReportMessage';
 
 interface ExecutionPhase {
   phase: 'beginning' | 'cycle' | 'final-report' | null;
@@ -18,7 +19,7 @@ interface UseScenarioEngineProps {
   engine: ScenarioEngine | null;
   dotbot: DotBot | null;
   onSendMessage: (message: string) => Promise<void>;
-  onAppendReport: (text: string) => void;
+  onAddMessage: (message: ReportMessageData) => void;
   onClearReport?: () => void;
   onStatusChange?: (message: string) => void;
   onPhaseChange?: (phase: ExecutionPhase) => void;
@@ -28,7 +29,7 @@ export const useScenarioEngine = ({
   engine,
   dotbot,
   onSendMessage,
-  onAppendReport,
+  onAddMessage,
   onClearReport,
   onStatusChange,
   onPhaseChange,
@@ -117,39 +118,77 @@ export const useScenarioEngine = ({
   };
 
   // Use refs for callbacks to prevent re-subscription on every render
-  const onAppendReportRef = useRef(onAppendReport);
+  const onAddMessageRef = useRef(onAddMessage);
   const onClearReportRef = useRef(onClearReport);
   const onStatusChangeRef = useRef(onStatusChange);
   const onPhaseChangeRef = useRef(onPhaseChange);
   
   // Update refs when callbacks change
   useEffect(() => {
-    onAppendReportRef.current = onAppendReport;
+    onAddMessageRef.current = onAddMessage;
     onClearReportRef.current = onClearReport;
     onStatusChangeRef.current = onStatusChange;
     onPhaseChangeRef.current = onPhaseChange;
-  }, [onAppendReport, onClearReport, onStatusChange, onPhaseChange]);
+  }, [onAddMessage, onClearReport, onStatusChange, onPhaseChange]);
+  
+  // Message ID counter (persists across renders)
+  const messageIdCounterRef = useRef(0);
+  const getNextMessageId = () => `msg-${++messageIdCounterRef.current}`;
   
   useEffect(() => {
     if (!engine || !dotbot) {
+      console.log('[useScenarioEngine] Skipping subscription - engine:', !!engine, 'dotbot:', !!dotbot);
       return;
     }
+    
+    console.log('[useScenarioEngine] Setting up event listener');
     
     // Subscribe to DotBot events for automatic response capture
     // This should only happen once when engine/dotbot change, not on every callback change
     engine.subscribeToDotBot(dotbot);
     
     const handleEvent = (event: any) => {
-      // Report is now built inside ScenarioEngine - just pass through updates
+      console.log('[useScenarioEngine] Event received:', event.type);
+      if (event.type === 'report-update' || event.type === 'inject-prompt' || event.type === 'phase-start') {
+        console.log('[useScenarioEngine] Important event details:', event);
+      }
+      
       if (event.type === 'report-update') {
-        onAppendReportRef.current(event.content);
+        // Create a single message object for the content chunk
+        // This is more efficient than splitting into individual lines
+        const content = event.content || '';
+        console.log('[useScenarioEngine] report-update content:', content.substring(0, 100), 'length:', content.length);
+        if (content) {
+          // Determine message type based on content
+          let messageType: ReportMessageData['type'] = 'default';
+          if (content.includes('[ERROR]') || content.includes('✗')) {
+            messageType = 'error';
+          } else if (content.includes('[WARN]') || content.includes('⚠️')) {
+            messageType = 'warning';
+          } else if (content.includes('[PHASE]') || content.includes('━━━')) {
+            messageType = 'phase';
+          } else if (content.includes('[INFO]') || content.includes('✓') || content.includes('✅')) {
+            messageType = 'info';
+          }
+          
+          const message: ReportMessageData = {
+            id: getNextMessageId(),
+            content: content,
+            timestamp: Date.now(),
+            type: messageType,
+          };
+          console.log('[useScenarioEngine] Calling onAddMessageRef with message:', message.id, message.content.substring(0, 50));
+          onAddMessageRef.current(message);
+        } else {
+          console.warn('[useScenarioEngine] report-update event has empty content');
+        }
         return;
       }
       
       if (event.type === 'report-clear') {
         // Report cleared - UI should clear its display
-        // Clear the report state in the frontend
         onClearReportRef.current?.();
+        messageIdCounterRef.current = 0; // Reset counter
         return;
       }
       
@@ -281,8 +320,42 @@ export const useScenarioEngine = ({
     };
     
     engine.addEventListener(handleEvent);
+    console.log('[useScenarioEngine] Event listener registered');
+    
+    // Sync existing report content if scenario is already running
+    // This handles the case where we subscribe after the scenario started
+    try {
+      const currentReport = engine.getReport();
+      if (currentReport && currentReport.trim()) {
+        console.log('[useScenarioEngine] Syncing existing report content, length:', currentReport.length);
+        // Determine message type based on content
+        let messageType: ReportMessageData['type'] = 'default';
+        if (currentReport.includes('[ERROR]') || currentReport.includes('✗')) {
+          messageType = 'error';
+        } else if (currentReport.includes('[WARN]') || currentReport.includes('⚠️')) {
+          messageType = 'warning';
+        } else if (currentReport.includes('[PHASE]') || currentReport.includes('━━━')) {
+          messageType = 'phase';
+        } else if (currentReport.includes('[INFO]') || currentReport.includes('✓') || currentReport.includes('✅')) {
+          messageType = 'info';
+        }
+        
+        // Create a single message for the existing content
+        const syncMessage: ReportMessageData = {
+          id: getNextMessageId(),
+          content: currentReport,
+          timestamp: Date.now(),
+          type: messageType,
+        };
+        onAddMessageRef.current(syncMessage);
+        console.log('[useScenarioEngine] Synced existing report as message:', syncMessage.id);
+      }
+    } catch (error) {
+      console.warn('[useScenarioEngine] Failed to sync report:', error);
+    }
     
     return () => {
+      console.log('[useScenarioEngine] Cleaning up event listener');
       engine.removeEventListener(handleEvent);
       // Unsubscribe from DotBot when component unmounts
       engine.unsubscribeFromDotBot();

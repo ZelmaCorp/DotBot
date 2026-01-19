@@ -1067,14 +1067,49 @@ export class DotBot {
       }, 'chat: LLM response received');
       
       // Extract execution plan
+      // Log that we expect a plan for transfer/action commands
+      const messageLower = message.toLowerCase();
+      const shouldHavePlan = messageLower.includes('send') || 
+                            messageLower.includes('transfer') || 
+                            messageLower.includes('execute') ||
+                            messageLower.includes('create') ||
+                            messageLower.includes('stake') ||
+                            messageLower.includes('unstake');
+      
+      if (shouldHavePlan) {
+        console.log('[DotBot] ExecutionPlan should be created for message:', message.substring(0, 100));
+        this.dotbotLogger.info({ 
+          messagePreview: message.substring(0, 100)
+        }, 'ExecutionPlan should be created');
+      }
+      
       const plan = this.extractExecutionPlan(llmResponse);
       
-      this.dotbotLogger.info({ 
-        hasPlan: !!plan,
-        planId: plan?.id || null,
-        stepsCount: plan?.steps.length || 0,
-        originalRequest: plan?.originalRequest || null
-      }, 'chat: Execution plan extraction result');
+      if (plan) {
+        console.log('[DotBot] ExecutionPlan was created:', {
+          planId: plan.id,
+          stepsCount: plan.steps.length,
+          originalRequest: plan.originalRequest
+        });
+        this.dotbotLogger.info({ 
+          planId: plan.id,
+          stepsCount: plan.steps.length,
+          originalRequest: plan.originalRequest
+        }, 'ExecutionPlan was created');
+      } else {
+        if (shouldHavePlan) {
+          console.warn('[DotBot] ExecutionPlan was not created (expected for this message)');
+          this.dotbotLogger.warn({ 
+            messagePreview: message.substring(0, 100)
+          }, 'ExecutionPlan was not created (expected for this message)');
+        }
+        this.dotbotLogger.info({ 
+          hasPlan: false,
+          planId: null,
+          stepsCount: 0,
+          originalRequest: null
+        }, 'chat: Execution plan extraction result (no plan)');
+      }
       
       let result: ChatResult;
       
@@ -1244,11 +1279,16 @@ export class DotBot {
     plan: ExecutionPlan,
     options?: ChatOptions
   ): Promise<ChatResult> {
+    console.log('[DotBot] ExecutionPlan was created, preparing execution:', {
+      planId: plan.id,
+      stepsCount: plan.steps.length,
+      originalRequest: plan.originalRequest
+    });
     this.dotbotLogger.info({ 
       planId: plan.id,
       stepsCount: plan.steps.length,
       originalRequest: plan.originalRequest
-    }, 'Handling execution response - preparing execution');
+    }, 'ExecutionPlan was created, preparing execution');
     
     // Prepare execution (orchestrate + add to chat)
     // Do NOT auto-execute - wait for user approval in UI!
@@ -1296,13 +1336,18 @@ export class DotBot {
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('[DotBot] ExecutionPlan was not created - preparation failed:', {
+        error: errorMsg,
+        planId: plan.id,
+        originalRequest: plan.originalRequest
+      });
       this.dotbotLogger.error({ 
         error: errorMsg,
         stack: error instanceof Error ? error.stack : undefined,
         planId: plan.id,
         originalRequest: plan.originalRequest,
         stepsCount: plan.steps.length
-      }, 'Execution preparation failed');
+      }, 'ExecutionPlan was not created - preparation failed');
       
       // Clean up any partial execution message that might have been added
       if (this.currentChat) {
@@ -1768,6 +1813,16 @@ export class DotBot {
     if (!existingMessage) {
       // Create new message with just the plan (no executionArray yet)
       await this.currentChat.addExecutionMessage(executionId, plan);
+      console.log('[DotBot] ExecutionPlan sent to frontend:', {
+        executionId,
+        planId: plan.id,
+        stepsCount: plan.steps.length
+      });
+      this.dotbotLogger.info({ 
+        executionId,
+        planId: plan.id,
+        stepsCount: plan.steps.length
+      }, 'ExecutionPlan sent to frontend');
       this.emit({ 
         type: DotBotEventType.EXECUTION_MESSAGE_ADDED, 
         executionId, 
@@ -2214,12 +2269,14 @@ export class DotBot {
         // Not plain JSON
       }
 
+      // No plan found in response
       return null;
     } catch (error) {
+      console.error('[DotBot] ExecutionPlan was not created - extraction error:', error instanceof Error ? error.message : String(error));
       this.dotbotLogger.error({ 
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined
-      }, 'Error extracting ExecutionPlan');
+      }, 'ExecutionPlan was not created - extraction error');
       return null;
     }
   }

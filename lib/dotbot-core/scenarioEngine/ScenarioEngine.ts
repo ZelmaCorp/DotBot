@@ -636,9 +636,9 @@ export class ScenarioEngine {
    */
   private generateSummary(result: ScenarioResult, evaluation: EvaluationResult): string {
     const lines: string[] = [];
-    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     lines.push('📊 SCENARIO SUMMARY');
-    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     // Basic info
     lines.push(`Scenario: ${result.scenarioId}`);
@@ -699,10 +699,10 @@ export class ScenarioEngine {
       });
     }
     
-    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     lines.push(''); // Empty line for separation
-    lines.push('═══════════════════════════════════════════════════════════════════════════════════');
-    lines.push('═══════════════════════════════════════════════════════════════════════════════════');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     lines.push(''); // Empty line for separation
     
     return lines.join('\n');
@@ -1020,9 +1020,9 @@ export class ScenarioEngine {
       
       // Phase 1: BEGINNING - Setup
       this.emit({ type: 'phase-start', phase: 'beginning', details: 'Setting up scenario environment' });
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       this.appendToReport('[PHASE] BEGINNING - Setup\n');
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       this.appendToReport('Setting up scenario environment\n\n');
       
       this.emit({ type: 'phase-update', phase: 'beginning', message: 'Creating test entities...' });
@@ -1037,9 +1037,9 @@ export class ScenarioEngine {
 
       // Phase 2: CYCLE - Execute steps (unknown number of rounds)
       this.emit({ type: 'phase-start', phase: 'cycle', details: 'Executing scenario steps' });
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       this.appendToReport('[PHASE] CYCLE - Execution\n');
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       this.appendToReport('Executing scenario steps\n\n');
       this.updateState({ status: 'running' });
       const stepResults = await this.executor!.executeScenario(scenario);
@@ -1049,9 +1049,9 @@ export class ScenarioEngine {
 
       // Phase 3: FINAL REPORT - Evaluate
       this.emit({ type: 'phase-start', phase: 'final-report', details: 'Evaluating results' });
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       this.appendToReport('[PHASE] FINAL REPORT - Evaluation\n');
-      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
       this.appendToReport('Evaluating results\n\n');
       
       this.emit({ type: 'phase-update', phase: 'final-report', message: 'Analyzing scenario results...' });
@@ -1286,9 +1286,9 @@ export class ScenarioEngine {
     
     // Jump to evaluation phase
     this.emit({ type: 'phase-start', phase: 'final-report', details: 'Evaluating results (ended early)' });
-    this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     this.appendToReport('[PHASE] FINAL REPORT - Evaluation (Ended Early)\n');
-    this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    this.appendToReport('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     this.appendToReport('Evaluating results\n\n');
     
     this.emit({ type: 'phase-update', phase: 'final-report', message: 'Analyzing scenario results...' });
@@ -1607,11 +1607,17 @@ export class ScenarioEngine {
       });
     }
     
+    // Debug logging
+    if (event.type === 'report-update' || event.type === 'inject-prompt' || event.type === 'phase-start') {
+      this.log('info', `[emit] ${event.type}, listeners: ${this.eventListeners.size}`);
+    }
+    
     for (const listener of this.eventListeners) {
       try {
         listener(event);
       } catch (error) {
         console.error('Event listener error:', error);
+        this.log('error', `Event listener threw error: ${error}`);
       }
     }
   }
