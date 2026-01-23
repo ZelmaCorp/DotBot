@@ -384,8 +384,22 @@ export class ExecutionSystem {
     }
     
     // Check if Chopsticks is available
-    const { isChopsticksAvailable, simulateSequentialTransactions } = await import('../services/simulation');
-    const chopsticksAvailable = await isChopsticksAvailable();
+    // NEVER import simulation in browser - prevents blocking HTTP availability check
+    let isChopsticksAvailable: (() => Promise<boolean>) | null = null;
+    let simulateSequentialTransactions: any = null;
+    let chopsticksAvailable = false;
+    
+    if (typeof window === 'undefined') {
+      // Server-only: import simulation services
+      const simulationModule = await import('../services/simulation');
+      isChopsticksAvailable = simulationModule.isChopsticksAvailable;
+      simulateSequentialTransactions = simulationModule.simulateSequentialTransactions;
+      chopsticksAvailable = await isChopsticksAvailable();
+    } else {
+      // Browser: simulation unavailable (prevents blocking import)
+      this.executionLogger.debug({}, 'Skipping simulation import in browser - prevents blocking availability check');
+      chopsticksAvailable = false;
+    }
     
     if (!chopsticksAvailable) {
       this.executionLogger.warn({}, 'Chopsticks not available, falling back to individual simulations');
@@ -450,6 +464,25 @@ export class ExecutionSystem {
       }
     };
     
+    if (!simulateSequentialTransactions) {
+      this.executionLogger.warn({}, 'Sequential simulation not available, falling back to individual simulations');
+      for (const item of items) {
+        await this.simulateItem(
+          item,
+          relayApi,
+          assetHubApi,
+          executionArray,
+          accountAddress,
+          relayChainManager,
+          assetHubManager,
+          relayChainSession,
+          assetHubSession,
+          onSimulationStatus
+        );
+      }
+      return;
+    }
+    
     try {
       // Run sequential simulation
       const result = await simulateSequentialTransactions(
@@ -470,7 +503,7 @@ export class ExecutionSystem {
             success: itemResult.result.success,
             estimatedFee: itemResult.result.estimatedFee,
             validationMethod: 'chopsticks' as const,
-            balanceChanges: itemResult.result.balanceChanges.map(bc => ({
+            balanceChanges: itemResult.result.balanceChanges.map((bc: any) => ({
               value: bc.value.toString(),
               change: bc.change,
             })),

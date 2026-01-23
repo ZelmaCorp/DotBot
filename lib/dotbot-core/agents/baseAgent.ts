@@ -261,66 +261,73 @@ export abstract class BaseAgent {
     let chopsticksError: any = null;
     
     // Try Chopsticks simulation first (real runtime execution)
-    try {
-      const { simulateTransaction, isChopsticksAvailable } = await import(
-        '../services/simulation'
-      );
-      
-      if (await isChopsticksAvailable()) {
-        // Use RPC manager endpoints if available, otherwise fallback
-        const chain = api === this.assetHubApi ? 'assetHub' : 'relay';
-        const endpoints = rpcEndpoint 
-          ? (Array.isArray(rpcEndpoint) ? rpcEndpoint : [rpcEndpoint])
-          : this.getRpcEndpointsForChain(chain);
-
-        // Pass status callback to simulation for user feedback
-        const result = await simulateTransaction(api, endpoints, extrinsic, address, this.onStatusUpdate || undefined);
+    // NEVER import simulation in browser - prevents blocking HTTP availability check
+    if (typeof window === 'undefined') {
+      // Server-only: import simulation services
+      try {
+        const { simulateTransaction, isChopsticksAvailable } = await import(
+          '../services/simulation'
+        );
         
-        const dryRunResult: DryRunResult = result.success ? {
-          success: true,
-          estimatedFee: result.estimatedFee,
-          wouldSucceed: true,
-          validationMethod: 'chopsticks',
-          balanceChanges: result.balanceChanges.map((bc: any) => ({
-            value: bc.value.toString(),
-            change: bc.change,
-          })),
-          runtimeInfo: {
-            validated: true,
-            events: result.events.length,
-          },
-        } : {
-          success: false,
-          error: result.error || 'Simulation failed',
-          estimatedFee: result.estimatedFee,
-          wouldSucceed: false,
-          validationMethod: 'chopsticks',
-        };
+        if (await isChopsticksAvailable()) {
+          // Use RPC manager endpoints if available, otherwise fallback
+          const chain = api === this.assetHubApi ? 'assetHub' : 'relay';
+          const endpoints = rpcEndpoint 
+            ? (Array.isArray(rpcEndpoint) ? rpcEndpoint : [rpcEndpoint])
+            : this.getRpcEndpointsForChain(chain);
 
-        // Send result to status callback
-        if (this.onStatusUpdate && (dryRunResult.success || dryRunResult.error)) {
-          this.onStatusUpdate({
-            phase: dryRunResult.success ? 'complete' : 'error',
-            message: dryRunResult.success 
-              ? `✓ Simulation successful!` 
-              : `✗ Simulation failed: ${dryRunResult.error}`,
-            progress: 100,
-            result: {
-              success: dryRunResult.success,
-              estimatedFee: dryRunResult.estimatedFee,
-              validationMethod: dryRunResult.validationMethod,
-              balanceChanges: dryRunResult.balanceChanges,
-              runtimeInfo: dryRunResult.runtimeInfo,
-              error: dryRunResult.error,
-              wouldSucceed: dryRunResult.wouldSucceed,
+          // Pass status callback to simulation for user feedback
+          const result = await simulateTransaction(api, endpoints, extrinsic, address, this.onStatusUpdate || undefined);
+          
+          const dryRunResult: DryRunResult = result.success ? {
+            success: true,
+            estimatedFee: result.estimatedFee,
+            wouldSucceed: true,
+            validationMethod: 'chopsticks',
+            balanceChanges: result.balanceChanges.map((bc: any) => ({
+              value: bc.value.toString(),
+              change: bc.change,
+            })),
+            runtimeInfo: {
+              validated: true,
+              events: result.events.length,
             },
-          });
-        }
+          } : {
+            success: false,
+            error: result.error || 'Simulation failed',
+            estimatedFee: result.estimatedFee,
+            wouldSucceed: false,
+            validationMethod: 'chopsticks',
+          };
 
-        return dryRunResult;
+          // Send result to status callback
+          if (this.onStatusUpdate && (dryRunResult.success || dryRunResult.error)) {
+            this.onStatusUpdate({
+              phase: dryRunResult.success ? 'complete' : 'error',
+              message: dryRunResult.success 
+                ? `✓ Simulation successful!` 
+                : `✗ Simulation failed: ${dryRunResult.error}`,
+              progress: 100,
+              result: {
+                success: dryRunResult.success,
+                estimatedFee: dryRunResult.estimatedFee,
+                validationMethod: dryRunResult.validationMethod,
+                balanceChanges: dryRunResult.balanceChanges,
+                runtimeInfo: dryRunResult.runtimeInfo,
+                error: dryRunResult.error,
+                wouldSucceed: dryRunResult.wouldSucceed,
+              },
+            });
+          }
+
+          return dryRunResult;
+        }
+      } catch (error) {
+        chopsticksError = error;
       }
-    } catch (error) {
-      chopsticksError = error;
+    } else {
+      // Browser: simulation unavailable (prevents blocking import)
+      // Skip simulation to prevent blocking HTTP availability check
     }
     
     try {
