@@ -35,16 +35,27 @@ import { createSubsystemLogger, Subsystem } from '../services/logger';
  * 
  * @example
  * ```typescript
- * const system = new ExecutionSystem();
- * system.initialize(api, account);
- * 
- * // Set up signing handler
- * system.setSigningHandler((request) => {
+ * // Modern approach: Use Signer
+ * const signer = new BrowserWalletSigner();
+ * signer.setSigningRequestHandler((request) => {
  *   showSigningModal(request);
  * });
  * 
+ * const system = new ExecutionSystem();
+ * system.initialize(api, account, signer);
+ * 
  * // Execute LLM plan - that's it!
  * await system.execute(llmPlan);
+ * ```
+ * 
+ * @example
+ * ```typescript
+ * // Legacy approach (deprecated)
+ * const system = new ExecutionSystem();
+ * system.initialize(api, account);
+ * system.setSigningHandler((request) => {
+ *   showSigningModal(request);
+ * });
  * ```
  */
 export class ExecutionSystem {
@@ -92,14 +103,34 @@ export class ExecutionSystem {
   }
   
   /**
-   * Set signing handler (REQUIRED)
+   * Set signing handler (legacy - for backwards compatibility)
+   * 
+   * @deprecated Use initialize() with a Signer (e.g., BrowserWalletSigner) instead.
+   * Pass the signer to initialize() and set handlers on the signer directly.
+   * 
+   * @example
+   * ```typescript
+   * const signer = new BrowserWalletSigner();
+   * signer.setSigningRequestHandler(handler);
+   * system.initialize(api, account, signer);
+   * ```
    */
   setSigningHandler(handler: (request: SigningRequest) => void): void {
     this.executioner.setSigningRequestHandler(handler);
   }
   
   /**
-   * Set batch signing handler (optional)
+   * Set batch signing handler (legacy - for backwards compatibility)
+   * 
+   * @deprecated Use initialize() with a Signer (e.g., BrowserWalletSigner) instead.
+   * Pass the signer to initialize() and set handlers on the signer directly.
+   * 
+   * @example
+   * ```typescript
+   * const signer = new BrowserWalletSigner();
+   * signer.setBatchSigningRequestHandler(handler);
+   * system.initialize(api, account, signer);
+   * ```
    */
   setBatchSigningHandler(handler: (request: BatchSigningRequest) => void): void {
     this.executioner.setBatchSigningRequestHandler(handler);
@@ -240,7 +271,7 @@ export class ExecutionSystem {
   /**
    * Initialize orchestrator and executioner with session APIs
    * 
-   * CRITICAL: Clears agent cache to ensure agents use the new session APIs.
+   * Clears agent cache to ensure agents use the new session APIs.
    * Cached agents would use old API instances, causing registry mismatches.
    */
   private initializeWithSessions(
@@ -251,7 +282,7 @@ export class ExecutionSystem {
       throw new Error('System not initialized - call initialize() first');
     }
     
-    // CRITICAL: Clear agent cache before re-initializing
+    // Clear agent cache before re-initializing
     // Cached agents would use old API instances, causing registry mismatches
     this.orchestrator.clearCache();
     
@@ -347,7 +378,7 @@ export class ExecutionSystem {
   /**
    * Simulate multiple items sequentially on a single fork
    * 
-   * CRITICAL: All transactions are simulated on the same fork, so each sees state changes from previous ones.
+   * All transactions are simulated on the same fork, so each sees state changes from previous ones.
    * This is essential for multi-transaction flows (e.g., transfer → stake → vote).
    */
   private async simulateMultipleItemsSequentially(
@@ -362,68 +393,119 @@ export class ExecutionSystem {
     assetHubSession: ExecutionSession | null,
     onSimulationStatus?: SimulationStatusCallback
   ): Promise<void> {
-    this.executionLogger.info({ 
-      itemsCount: items.length
-    }, 'Starting sequential simulation for transactions on single fork');
+    this.executionLogger.info({ itemsCount: items.length }, 'Starting sequential simulation for transactions on single fork');
     
-    // Group items by chain (all should be on same chain for now)
+    const apiForExtrinsics = this.validateApiForSequentialSimulation(items, executionArray, relayApi, assetHubApi);
+    if (!apiForExtrinsics) return;
+    
+    const simulateSequentialTransactions = await this.checkChopsticksAvailability();
+    if (!simulateSequentialTransactions) {
+      await this.fallbackToIndividualSimulations(items, relayApi, assetHubApi, executionArray, accountAddress, relayChainManager, assetHubManager, relayChainSession, assetHubSession, onSimulationStatus);
+      return;
+    }
+    
+    const rpcEndpoints = this.prepareSequentialSimulationEndpoints(apiForExtrinsics, relayChainManager, assetHubManager, relayChainSession, assetHubSession);
+    this.setInitialSimulationStatus(items, executionArray);
+    const sequentialItems = this.createSequentialSimulationItems(items, accountAddress);
+    const itemStatusCallback = this.createItemStatusCallback(items, executionArray, onSimulationStatus);
+    
+    try {
+      const result = await simulateSequentialTransactions(apiForExtrinsics, rpcEndpoints, sequentialItems, itemStatusCallback);
+      this.processSequentialSimulationResults(items, executionArray, result);
+      this.executionLogger.info({ totalItems: items.length, success: result.success }, 'Sequential simulation completed');
+    } catch (error) {
+      this.handleSequentialSimulationError(error, items, executionArray);
+    }
+  }
+  
+  /**
+   * Validate API for sequential simulation
+   */
+  private validateApiForSequentialSimulation(
+    items: ExecutionItem[],
+    executionArray: ExecutionArray,
+    relayApi: ApiPromise,
+    assetHubApi: ApiPromise | null
+  ): ApiPromise | null {
     const firstExtrinsic = items[0].agentResult.extrinsic!;
     const apiForExtrinsics = findMatchingApi(firstExtrinsic, relayApi, assetHubApi);
     
     if (!apiForExtrinsics) {
       this.executionLogger.error({}, 'Cannot determine API for sequential simulation');
-      for (const item of items) {
-        executionArray.updateSimulationStatus(item.id, {
-          phase: 'error',
-          message: 'Cannot determine chain for simulation',
-          result: { success: false, error: 'Cannot determine chain', wouldSucceed: false },
-        });
-        executionArray.updateStatus(item.id, 'failed', 'Cannot determine chain for simulation');
-      }
-      return;
+      this.markItemsAsFailed(items, executionArray, 'Cannot determine chain for simulation');
+      return null;
     }
     
-    // Check if Chopsticks is available
-    const { isChopsticksAvailable, simulateSequentialTransactions } = await import('../services/simulation');
-    const chopsticksAvailable = await isChopsticksAvailable();
-    
-    if (!chopsticksAvailable) {
-      this.executionLogger.warn({}, 'Chopsticks not available, falling back to individual simulations');
-      // Fall back to individual simulations (won't see each other's state changes)
-      for (const item of items) {
-        await this.simulateItem(
-          item,
-          relayApi,
-          assetHubApi,
-          executionArray,
-          accountAddress,
-          relayChainManager,
-          assetHubManager,
-          relayChainSession,
-          assetHubSession,
-          onSimulationStatus
-        );
-      }
-      return;
+    return apiForExtrinsics;
+  }
+  
+  /**
+   * Check if Chopsticks is available (server-only)
+   */
+  private async checkChopsticksAvailability(): Promise<any> {
+    if (typeof window === 'undefined') {
+      const simulationModule = await import('../services/simulation');
+      const isChopsticksAvailable = simulationModule.isChopsticksAvailable;
+      const simulateSequentialTransactions = simulationModule.simulateSequentialTransactions;
+      const available = await isChopsticksAvailable();
+      return available ? simulateSequentialTransactions : null;
     }
     
-    // Get RPC endpoints for this chain
+    this.executionLogger.debug({}, 'Skipping simulation import in browser - prevents blocking availability check');
+    return null;
+  }
+  
+  /**
+   * Fallback to individual simulations when sequential simulation is unavailable
+   */
+  private async fallbackToIndividualSimulations(
+    items: ExecutionItem[],
+    relayApi: ApiPromise,
+    assetHubApi: ApiPromise | null,
+    executionArray: ExecutionArray,
+    accountAddress: string,
+    relayChainManager: RpcManager,
+    assetHubManager: RpcManager,
+    relayChainSession: ExecutionSession,
+    assetHubSession: ExecutionSession | null,
+    onSimulationStatus?: SimulationStatusCallback
+  ): Promise<void> {
+    this.executionLogger.warn({}, 'Chopsticks not available, falling back to individual simulations');
+    for (const item of items) {
+      await this.simulateItem(item, relayApi, assetHubApi, executionArray, accountAddress, relayChainManager, assetHubManager, relayChainSession, assetHubSession, onSimulationStatus);
+    }
+  }
+  
+  /**
+   * Prepare RPC endpoints for sequential simulation
+   */
+  private prepareSequentialSimulationEndpoints(
+    apiForExtrinsics: ApiPromise,
+    relayChainManager: RpcManager,
+    assetHubManager: RpcManager,
+    relayChainSession: ExecutionSession,
+    assetHubSession: ExecutionSession | null
+  ): string[] {
     const isAssetHub = apiForExtrinsics.registry.chainSS58 === 0;
     const manager = isAssetHub ? assetHubManager : relayChainManager;
-    
-    // CRITICAL FIX: Use session endpoint first (for metadata consistency), fallback to manager endpoints
     const sessionEndpoint = isAssetHub ? assetHubSession?.endpoint : relayChainSession.endpoint;
-    let rpcEndpoints: string[];
+    
     if (sessionEndpoint) {
       const managerEndpoints = this.getRpcEndpointsFromManager(manager, isAssetHub);
-      rpcEndpoints = [sessionEndpoint, ...managerEndpoints.filter(e => e !== sessionEndpoint)];
+      const rpcEndpoints = [sessionEndpoint, ...managerEndpoints.filter(e => e !== sessionEndpoint)];
       this.executionLogger.debug({ endpoint: sessionEndpoint }, 'Using session endpoint for sequential simulation');
-    } else {
-      rpcEndpoints = this.getRpcEndpointsFromManager(manager, isAssetHub);
-      this.executionLogger.warn({}, 'No session endpoint available, using manager endpoints (may cause metadata mismatch)');
+      return rpcEndpoints;
     }
     
-    // Set initial status for all items
+    const rpcEndpoints = this.getRpcEndpointsFromManager(manager, isAssetHub);
+    this.executionLogger.warn({}, 'No session endpoint available, using manager endpoints (may cause metadata mismatch)');
+    return rpcEndpoints;
+  }
+  
+  /**
+   * Set initial simulation status for all items
+   */
+  private setInitialSimulationStatus(items: ExecutionItem[], executionArray: ExecutionArray): void {
     for (const item of items) {
       executionArray.updateSimulationStatus(item.id, {
         phase: 'initializing',
@@ -431,17 +513,28 @@ export class ExecutionSystem {
         progress: 0,
       });
     }
-    
-    // Prepare items for sequential simulation
-    const sequentialItems = items.map(item => ({
+  }
+  
+  /**
+   * Create items for sequential simulation
+   */
+  private createSequentialSimulationItems(items: ExecutionItem[], accountAddress: string): any[] {
+    return items.map(item => ({
       extrinsic: item.agentResult.extrinsic!,
       description: item.description,
       senderAddress: accountAddress,
     }));
-    
-    // Create status callback that updates individual items
-    const itemStatusCallback = (status: any) => {
-      // Broadcast to all items (they'll show overall progress)
+  }
+  
+  /**
+   * Create status callback for sequential simulation
+   */
+  private createItemStatusCallback(
+    items: ExecutionItem[],
+    executionArray: ExecutionArray,
+    onSimulationStatus?: SimulationStatusCallback
+  ): (status: any) => void {
+    return (status: any) => {
       for (const item of items) {
         executionArray.updateSimulationStatus(item.id, status);
       }
@@ -449,96 +542,113 @@ export class ExecutionSystem {
         onSimulationStatus(status);
       }
     };
+  }
+  
+  /**
+   * Process results from sequential simulation
+   */
+  private processSequentialSimulationResults(items: ExecutionItem[], executionArray: ExecutionArray, result: any): void {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const itemResult = result.results[i];
+      
+      if (itemResult && itemResult.result.success) {
+        this.markItemAsSuccessful(item, executionArray, itemResult);
+      } else {
+        this.markItemAsFailed(item, executionArray, itemResult?.result.error || 'Simulation failed');
+        this.markRemainingItemsAsFailed(items, executionArray, i);
+        break;
+      }
+    }
+  }
+  
+  /**
+   * Mark item as successful
+   */
+  private markItemAsSuccessful(item: ExecutionItem, executionArray: ExecutionArray, itemResult: any): void {
+    const convertedResult = {
+      success: itemResult.result.success,
+      estimatedFee: itemResult.result.estimatedFee,
+      validationMethod: 'chopsticks' as const,
+      balanceChanges: itemResult.result.balanceChanges.map((bc: any) => ({
+        value: bc.value.toString(),
+        change: bc.change,
+      })),
+      error: itemResult.result.error || undefined,
+      wouldSucceed: true,
+    };
     
-    try {
-      // Run sequential simulation
-      const result = await simulateSequentialTransactions(
-        apiForExtrinsics,
-        rpcEndpoints,
-        sequentialItems,
-        itemStatusCallback
-      );
-      
-      // Update each item with its specific result
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const itemResult = result.results[i];
-        
-        if (itemResult && itemResult.result.success) {
-          // Convert BN values to strings and null to undefined for ExecutionArray
-          const convertedResult = {
-            success: itemResult.result.success,
-            estimatedFee: itemResult.result.estimatedFee,
-            validationMethod: 'chopsticks' as const,
-            balanceChanges: itemResult.result.balanceChanges.map(bc => ({
-              value: bc.value.toString(),
-              change: bc.change,
-            })),
-            error: itemResult.result.error || undefined,
-            wouldSucceed: true,
-          };
-          
-          executionArray.updateSimulationStatus(item.id, {
-            phase: 'complete',
-            message: 'Simulation completed successfully',
-            result: convertedResult,
-          });
-          executionArray.updateStatus(item.id, 'ready');
-        } else {
-          const error = itemResult?.result.error || 'Simulation failed';
-          executionArray.updateSimulationStatus(item.id, {
-            phase: 'error',
-            message: `Simulation failed: ${error}`,
-            result: {
-              success: false,
-              error,
-              wouldSucceed: false,
-            },
-          });
-          executionArray.updateStatus(item.id, 'failed', error);
-          
-          // If one fails, mark remaining as failed too (can't continue the chain)
-          for (let j = i + 1; j < items.length; j++) {
-            const failedItem = items[j];
-            executionArray.updateSimulationStatus(failedItem.id, {
-              phase: 'error',
-              message: 'Skipped due to previous transaction failure',
-              result: {
-                success: false,
-                error: 'Previous transaction in sequence failed',
-                wouldSucceed: false,
-              },
-            });
-            executionArray.updateStatus(failedItem.id, 'failed', 'Previous transaction failed');
-          }
-          break;
-        }
-      }
-      
-      this.executionLogger.info({ 
-        totalItems: items.length,
-        success: result.success
-      }, 'Sequential simulation completed');
-    } catch (error) {
-      this.executionLogger.error({ 
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      }, 'Sequential simulation failed');
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      
-      // Mark all items as failed
-      for (const item of items) {
-        executionArray.updateSimulationStatus(item.id, {
-          phase: 'error',
-          message: `Sequential simulation failed: ${errorMsg}`,
-          result: {
-            success: false,
-            error: errorMsg,
-            wouldSucceed: false,
-          },
-        });
-        executionArray.updateStatus(item.id, 'failed', errorMsg);
-      }
+    executionArray.updateSimulationStatus(item.id, {
+      phase: 'complete',
+      message: 'Simulation completed successfully',
+      result: convertedResult,
+    });
+    executionArray.updateStatus(item.id, 'ready');
+  }
+  
+  /**
+   * Mark item as failed
+   */
+  private markItemAsFailed(item: ExecutionItem, executionArray: ExecutionArray, error: string): void {
+    executionArray.updateSimulationStatus(item.id, {
+      phase: 'error',
+      message: `Simulation failed: ${error}`,
+      result: {
+        success: false,
+        error,
+        wouldSucceed: false,
+      },
+    });
+    executionArray.updateStatus(item.id, 'failed', error);
+  }
+  
+  /**
+   * Mark remaining items as failed after a failure in sequence
+   */
+  private markRemainingItemsAsFailed(items: ExecutionItem[], executionArray: ExecutionArray, failedIndex: number): void {
+    for (let j = failedIndex + 1; j < items.length; j++) {
+      const failedItem = items[j];
+      executionArray.updateSimulationStatus(failedItem.id, {
+        phase: 'error',
+        message: 'Skipped due to previous transaction failure',
+        result: {
+          success: false,
+          error: 'Previous transaction in sequence failed',
+          wouldSucceed: false,
+        },
+      });
+      executionArray.updateStatus(failedItem.id, 'failed', 'Previous transaction failed');
+    }
+  }
+  
+  /**
+   * Handle errors from sequential simulation
+   */
+  private handleSequentialSimulationError(error: unknown, items: ExecutionItem[], executionArray: ExecutionArray): void {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    this.executionLogger.error({ 
+      error: errorMsg,
+      stack: error instanceof Error ? error.stack : undefined
+    }, 'Sequential simulation failed');
+    
+    this.markItemsAsFailed(items, executionArray, `Sequential simulation failed: ${errorMsg}`);
+  }
+  
+  /**
+   * Mark all items as failed with error message
+   */
+  private markItemsAsFailed(items: ExecutionItem[], executionArray: ExecutionArray, errorMessage: string): void {
+    for (const item of items) {
+      executionArray.updateSimulationStatus(item.id, {
+        phase: 'error',
+        message: errorMessage,
+        result: {
+          success: false,
+          error: errorMessage,
+          wouldSucceed: false,
+        },
+      });
+      executionArray.updateStatus(item.id, 'failed', errorMessage);
     }
   }
   
@@ -599,9 +709,26 @@ export class ExecutionSystem {
     onSimulationStatus?: SimulationStatusCallback
   ): Promise<void> {
     const extrinsic = item.agentResult.extrinsic!;
+    const apiForExtrinsic = this.validateApiForItem(item, extrinsic, executionArray, relayApi, assetHubApi);
+    if (!apiForExtrinsic) return;
     
-    // CRITICAL: Use the extrinsic's own registry to find matching API
-    // The extrinsic was created with session APIs (via orchestrator), so it should match
+    const connectionReady = await this.waitForApiConnection(item, apiForExtrinsic, executionArray);
+    if (!connectionReady) return;
+    
+    this.logRegistryMismatchIfNeeded(item, extrinsic, apiForExtrinsic);
+    await this.runItemSimulation(item, extrinsic, apiForExtrinsic, accountAddress, assetHubApi, assetHubManager, relayChainManager, relayChainSession, assetHubSession, executionArray, onSimulationStatus);
+  }
+  
+  /**
+   * Validate and find API for item simulation
+   */
+  private validateApiForItem(
+    item: ExecutionItem,
+    extrinsic: any,
+    executionArray: ExecutionArray,
+    relayApi: ApiPromise,
+    assetHubApi: ApiPromise | null
+  ): ApiPromise | null {
     const apiForExtrinsic = findMatchingApi(extrinsic, relayApi, assetHubApi);
     
     if (!apiForExtrinsic) {
@@ -609,59 +736,70 @@ export class ExecutionSystem {
       executionArray.updateSimulationStatus(item.id, {
         phase: 'error',
         message: errorMsg,
-        result: {
-          success: false,
-          error: errorMsg,
-          wouldSucceed: false,
-        },
+        result: { success: false, error: errorMsg, wouldSucceed: false },
       });
       console.error(errorMsg);
-      return;
+      return null;
     }
     
-    // CRITICAL: Validate API is connected before simulation
-    // This prevents errors when RPC connections are lazy-loaded or after environment switches
-    if (!apiForExtrinsic.isConnected) {
+    return apiForExtrinsic;
+  }
+  
+  /**
+   * Wait for API connection to be ready
+   */
+  private async waitForApiConnection(
+    item: ExecutionItem,
+    apiForExtrinsic: ApiPromise,
+    executionArray: ExecutionArray
+  ): Promise<boolean> {
+    if (apiForExtrinsic.isConnected) {
+      return true;
+    }
+    
+    executionArray.updateSimulationStatus(item.id, {
+      phase: 'initializing',
+      message: 'Waiting for blockchain connection...',
+      progress: 5,
+    });
+    
+    try {
+      await Promise.race([
+        apiForExtrinsic.isReady,
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 30000)
+        )
+      ]);
+      return true;
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Connection timeout';
+      const userMsg = `Cannot connect to blockchain for simulation: ${errorMsg}. Please check your network connection.`;
+      this.executionLogger.error({ itemId: item.id, error: errorMsg }, userMsg);
       executionArray.updateSimulationStatus(item.id, {
-        phase: 'initializing',
-        message: 'Waiting for blockchain connection...',
-        progress: 5,
+        phase: 'error',
+        message: userMsg,
+        result: { success: false, error: userMsg, wouldSucceed: false },
       });
-      
-      try {
-        await Promise.race([
-          apiForExtrinsic.isReady,
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Connection timeout')), 30000)
-          )
-        ]);
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Connection timeout';
-        const userMsg = `Cannot connect to blockchain for simulation: ${errorMsg}. Please check your network connection.`;
-        this.executionLogger.error({ itemId: item.id, error: errorMsg }, userMsg);
-        executionArray.updateSimulationStatus(item.id, {
-          phase: 'error',
-          message: userMsg,
-          result: {
-            success: false,
-            error: userMsg,
-            wouldSucceed: false,
-          },
-        });
-        return;
-      }
+      return false;
     }
-    
-    // Log warning if registries don't match (shouldn't happen if orchestration used session APIs)
-    if (apiForExtrinsic.registry !== extrinsic.registry) {
-      console.warn(
-        `Registry mismatch for item ${item.id}: extrinsic registry does not match session API registry. ` +
-        `This may cause simulation to fail. Extrinsic was likely created before session APIs were initialized.`
-      );
-    }
-    
-    // CRITICAL FIX: Get the session endpoint for metadata consistency
-    // Use the endpoint from the session that matches the API
+  }
+  
+  /**
+   * Run simulation for a single item
+   */
+  private async runItemSimulation(
+    item: ExecutionItem,
+    extrinsic: any,
+    apiForExtrinsic: ApiPromise,
+    accountAddress: string,
+    assetHubApi: ApiPromise | null,
+    assetHubManager: RpcManager,
+    relayChainManager: RpcManager,
+    relayChainSession: ExecutionSession,
+    assetHubSession: ExecutionSession | null,
+    executionArray: ExecutionArray,
+    onSimulationStatus?: SimulationStatusCallback
+  ): Promise<void> {
     const isAssetHub = apiForExtrinsic === assetHubApi;
     const sessionEndpoint = isAssetHub ? assetHubSession?.endpoint : relayChainSession.endpoint;
     
@@ -671,7 +809,7 @@ export class ExecutionSystem {
       accountAddress,
       assetHubManager,
       relayChainManager,
-      sessionEndpoint, // Pass session endpoint for metadata consistency
+      sessionEndpoint,
       onSimulationStatus
     );
     

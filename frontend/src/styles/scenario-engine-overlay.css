@@ -888,6 +888,16 @@
   background: rgba(0, 255, 65, 0.6);
 }
 
+.scenario-report-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.scenario-report-empty {
+  padding: 0;
+}
+
 .scenario-report-text {
   color: #00ff41;
   font-family: 'Courier New', 'Consolas', monospace;
@@ -896,6 +906,48 @@
   margin: 0;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.scenario-message {
+  margin: 0;
+  padding: 0;
+  display: block;
+}
+
+.scenario-message-content {
+  color: #00ff41;
+  font-family: 'Courier New', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.scenario-message-default .scenario-message-content {
+  color: #00ff41;
+}
+
+.scenario-message-info .scenario-message-content {
+  color: #00aaff;
+}
+
+.scenario-message-success .scenario-message-content {
+  color: #00ff41;
+}
+
+.scenario-message-warning .scenario-message-content {
+  color: #ffaa00;
+}
+
+.scenario-message-error .scenario-message-content {
+  color: #ff4444;
+}
+
+.scenario-message-phase .scenario-message-content {
+  color: #00ffff;
+  font-weight: 600;
 }
 
 .scenario-cursor {

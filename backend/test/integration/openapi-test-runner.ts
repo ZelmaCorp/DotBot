@@ -744,9 +744,9 @@ class OpenAPITestRunner {
 
             // Show request details
             if (verbose) {
-              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
               console.log('REQUEST');
-              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
               console.log(`Method: ${method.toUpperCase()}`);
               console.log(`URL: ${this.baseUrl}${displayPath}`);
               
@@ -766,9 +766,9 @@ class OpenAPITestRunner {
             
             // Show response details
             if (verbose) {
-              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
               console.log('RESPONSE');
-              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
               console.log(`Status: ${result.responseStatus || 'N/A'}`);
               if (result.responseBody) {
                 console.log('Body:');
@@ -785,9 +785,9 @@ class OpenAPITestRunner {
               console.log('\x1b[31m❌ Test FAILED\x1b[0m');
               console.log(`Duration: ${result.duration}ms`);
               console.log('');
-              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
               console.log('ERROR DETAILS');
-              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+              console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
               console.log(`Error: ${result.error}`);
               
               if (result.validationErrors && result.validationErrors.length > 0) {

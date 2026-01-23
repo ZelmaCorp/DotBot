@@ -18,12 +18,12 @@ import WelcomeScreen from './components/chat/WelcomeScreen';
 import Chat from './components/chat/Chat';
 import ChatHistory from './components/history/ChatHistory';
 import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOverlay';
+import { ScenarioEngineProvider } from './components/scenarioEngine/context/ScenarioEngineContext';
 import LoadingOverlay from './components/common/LoadingOverlay';
-import { DotBot, Environment, ScenarioEngine } from '@dotbot/core';
+import { DotBot, Environment, ScenarioEngine, SigningRequest, BatchSigningRequest, DotBotEventType } from '@dotbot/core';
 import type { ChatInstanceData } from '@dotbot/core/types/chatInstance';
 import type { ExecutionMessage } from '@dotbot/core/types/chatInstance';
 import { useWalletStore } from './stores/walletStore';
-import { SigningRequest, BatchSigningRequest } from '@dotbot/core';
 import { Settings } from 'lucide-react';
 import {
   createDotBotInstance,
@@ -269,26 +269,14 @@ const AppContent: React.FC = () => {
   // NOTE: With session-level subscription, we don't need to subscribe per executionId.
   // WebSocket removed - no subscription needed, ExecutionFlow subscribes directly to ExecutionArray
 
-  // Helper: Add messages to chat (user, bot, execution)
+  // Helper: Add messages to chat (bot, execution)
+  // NOTE: User message is now added in handleSendMessage before backend call
   const addMessagesToChat = (
     message: string,
     chatResult: any,
     currentChat: any
   ): Promise<any>[] => {
     const persistencePromises: Promise<any>[] = [];
-    
-    // Add user message first (persistence in background)
-    persistencePromises.push(
-      currentChat.addUserMessage(message, true)
-        .then(() => {
-          console.log('[App] User message persisted');
-          // Emit event so Chat component can react
-          if (dotbot) {
-            dotbot.emit({ type: 'user-message-added', message, timestamp: Date.now() });
-          }
-        })
-        .catch((err: unknown) => console.error('[App] Failed to persist user message:', err))
-    );
 
     // Add bot response
     if (chatResult.response) {
@@ -298,7 +286,7 @@ const AppContent: React.FC = () => {
             console.log('[App] Bot message persisted');
             // Emit event so Chat component can react
             if (dotbot) {
-              dotbot.emit({ type: 'bot-message-added', message: chatResult.response, timestamp: Date.now() });
+              dotbot.emit({ type: DotBotEventType.BOT_MESSAGE_ADDED, message: chatResult.response, timestamp: Date.now() });
             }
           })
           .catch((err: unknown) => console.error('[App] Failed to persist bot message:', err))
@@ -307,6 +295,12 @@ const AppContent: React.FC = () => {
 
     // If there's an execution plan, add execution message
     if (chatResult.plan) {
+      console.log('[App] ExecutionPlan received from backend:', {
+        planId: chatResult.plan.id,
+        stepsCount: chatResult.plan.steps.length,
+        originalRequest: chatResult.plan.originalRequest
+      });
+      
       const executionId = chatResult.executionId || chatResult.executionArrayState?.id;
       
       if (!executionId) {
@@ -321,8 +315,10 @@ const AppContent: React.FC = () => {
         .find((m: any) => m.type === 'execution' && m.executionId === executionId);
       
       if (!existingMessage) {
-        console.log('[App] Adding execution message:', { 
+        console.log('[App] ExecutionPlan sent to frontend - adding execution message:', { 
           executionId, 
+          planId: chatResult.plan.id,
+          stepsCount: chatResult.plan.steps.length,
           hasState: !!chatResult.executionArrayState,
           hasPlan: !!chatResult.plan 
         });
@@ -448,11 +444,27 @@ const AppContent: React.FC = () => {
       // Step 1: Validate prerequisites
       const { currentChat } = validateSendMessagePrerequisites();
 
-      // Step 2: Send message to backend (returns plan only, no simulation)
+      // Step 2: Add user message to chat IMMEDIATELY (before backend call)
+      // This ensures the user sees their message right away
+      const userMessagePromise = currentChat.addUserMessage(message, true)
+        .then(() => {
+          console.log('[App] User message persisted');
+          // Emit event so Chat component can react
+          if (dotbot) {
+            dotbot.emit({ type: DotBotEventType.USER_MESSAGE_ADDED, message, timestamp: Date.now() });
+          }
+          // Trigger UI refresh immediately
+          setConversationRefresh(prev => prev + 1);
+        })
+        .catch((err: unknown) => console.error('[App] Failed to persist user message:', err));
+
+      // Step 3: Send message to backend (returns plan only, no simulation)
       const chatResult = await sendMessageToBackend(message, currentChat);
 
-      // Step 4: Add messages to chat
+      // Step 4: Add bot/execution messages to chat
       const persistencePromises = addMessagesToChat(message, chatResult, currentChat);
+      // Include user message promise in persistence promises
+      persistencePromises.push(userMessagePromise);
 
       // Step 5: Update UI
       updateUIAfterMessages(persistencePromises);
@@ -689,20 +701,22 @@ const AppContent: React.FC = () => {
           {scenarioEngineEnabled && 
            dotbot && 
            dotbot.getEnvironment() === 'testnet' && (
-        <ScenarioEngineOverlay 
-              engine={scenarioEngine}
-              dotbot={dotbot}
-              onClose={() => {
-                setScenarioEngineEnabled(false);
-                // Reset ready state when closed (will re-initialize on next open)
-                setIsScenarioEngineReady(false);
-              }}
-              onSendMessage={handleSendMessageWithScenario}
-              autoSubmit={autoSubmitPrompts}
-              onAutoSubmitChange={setAutoSubmitPrompts}
-              isInitializing={isScenarioEngineInitializing}
-              isReady={isScenarioEngineReady}
-        />
+        <ScenarioEngineProvider>
+          <ScenarioEngineOverlay 
+                engine={scenarioEngine}
+                dotbot={dotbot}
+                onClose={() => {
+                  setScenarioEngineEnabled(false);
+                  // Reset ready state when closed (will re-initialize on next open)
+                  setIsScenarioEngineReady(false);
+                }}
+                onSendMessage={handleSendMessageWithScenario}
+                autoSubmit={autoSubmitPrompts}
+                onAutoSubmitChange={setAutoSubmitPrompts}
+                isInitializing={isScenarioEngineInitializing}
+                isReady={isScenarioEngineReady}
+          />
+        </ScenarioEngineProvider>
       )}
         </div>
       </ThemeProvider>

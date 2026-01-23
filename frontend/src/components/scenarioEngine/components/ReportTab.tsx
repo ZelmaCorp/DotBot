@@ -4,8 +4,9 @@
  * Displays scenario execution report with typing animation and auto-scroll
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Trash2, Square, Copy, Check } from 'lucide-react';
+import { ReportMessage, type ReportMessageData } from './ReportMessage';
 
 interface ExecutionPhase {
   phase: 'beginning' | 'cycle' | 'final-report' | null;
@@ -15,35 +16,29 @@ interface ExecutionPhase {
 }
 
 interface ReportTabProps {
-  report: string;
-  isTyping: boolean;
-  isRunning?: boolean;  // Whether a scenario is currently running
-  statusMessage?: string;  // Current status message (e.g., "Executing prompt...")
-  executionPhase?: ExecutionPhase | null;  // Current execution phase and activity
+  messages: ReportMessageData[];
+  isRunning?: boolean;
+  statusMessage?: string;
+  executionPhase?: ExecutionPhase | null;
   onClear?: () => void;
-  onEndScenario?: () => void;  // Callback to end scenario early
+  onEndScenario?: () => void;
 }
 
 export const ReportTab: React.FC<ReportTabProps> = ({
-  report,
-  isTyping: externalIsTyping,
+  messages,
   isRunning = false,
   statusMessage,
   executionPhase,
   onClear,
   onEndScenario,
 }) => {
-  // Initialize displayedText to current report on mount (no animation for existing content)
-  const [displayedText, setDisplayedText] = useState(() => report);
-  const [isTyping, setIsTyping] = useState(false);
   const [copied, setCopied] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastProcessedLengthRef = useRef<number>(report.length);
+  const prevMessagesLengthRef = useRef(0);
 
-  // Auto-scroll to bottom when text changes
+  // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    if (reportRef.current) {
+    if (messages.length > prevMessagesLengthRef.current && reportRef.current) {
       // Use requestAnimationFrame for smooth scrolling
       requestAnimationFrame(() => {
         if (reportRef.current) {
@@ -51,156 +46,99 @@ export const ReportTab: React.FC<ReportTabProps> = ({
         }
       });
     }
-  }, [displayedText, isTyping]);
+    prevMessagesLengthRef.current = messages.length;
+  }, [messages.length]);
 
-  // Typing animation effect - only animate NEW text
-  useEffect(() => {
-    if (report === '') {
-      setDisplayedText('');
-      setIsTyping(false);
-      lastProcessedLengthRef.current = 0;
-      return;
-    }
+  // Memoize the full report text for copy functionality
+  const fullReportText = useMemo(() => {
+    return messages.map(m => m.content).join('');
+  }, [messages]);
 
-    const lastProcessedLength = lastProcessedLengthRef.current;
-
-    // If report is shorter than what we've processed, it was cleared/reset
-    if (report.length < lastProcessedLength) {
-      setDisplayedText(report);
-      setIsTyping(false);
-      lastProcessedLengthRef.current = report.length;
-      return;
-    }
-
-    // If report has new content beyond what we've already processed
-    if (report.length > lastProcessedLength) {
-      // Immediately show everything we've already processed (no animation)
-      const alreadyProcessed = report.slice(0, lastProcessedLength);
-      if (displayedText.length < lastProcessedLength) {
-        setDisplayedText(alreadyProcessed);
-      }
-
-      // Only animate the NEW characters
-      const newChars = report.slice(lastProcessedLength);
-      
-      // If there's a very large backlog (e.g., ongoing process with many steps),
-      // skip animation entirely to keep up with real-time updates
-      if (newChars.length > 500) {
-        // Skip animation for very large updates - show immediately
-        setDisplayedText(report);
-        lastProcessedLengthRef.current = report.length;
-        setIsTyping(false);
-        return;
-      }
-      
-      let charIndex = 0;
-      setIsTyping(true);
-
-      const typeNextChar = () => {
-        // Check if report has changed (might have been cleared or updated)
-        const currentReportLength = report.length;
-        if (currentReportLength < lastProcessedLengthRef.current) {
-          // Report was cleared, stop typing
-          setIsTyping(false);
-          lastProcessedLengthRef.current = currentReportLength;
-          setDisplayedText(report);
-          return;
-        }
-
-        if (charIndex < newChars.length) {
-          const currentLength = lastProcessedLength + charIndex;
-          const unprintedChars = newChars.length - charIndex;
-          
-          // Make sure we don't go beyond current report length
-          if (currentLength < currentReportLength) {
-            // Batch process multiple characters when there's a large backlog
-            // This keeps the display responsive during ongoing processes with many steps
-            let charsToProcess = 1;
-            let delay = 20; // Default delay
-            
-            if (unprintedChars > 100) {
-              // Very large backlog: process 50 chars at a time, no delay
-              charsToProcess = 50;
-              delay = 0;
-            } else if (unprintedChars > 50) {
-              // Large backlog: process 20 chars at a time, minimal delay
-              charsToProcess = 20;
-              delay = 1;
-            } else if (unprintedChars > 10) {
-              // Medium backlog: process 5 chars at a time, fast
-              charsToProcess = 5;
-              delay = 5;
-            }
-            
-            // Don't process more than what's available
-            charsToProcess = Math.min(charsToProcess, newChars.length - charIndex, currentReportLength - currentLength);
-            
-            setDisplayedText(report.slice(0, currentLength + charsToProcess));
-            charIndex += charsToProcess;
-            
-            timeoutRef.current = setTimeout(typeNextChar, delay);
-          } else {
-            // Caught up - show everything
-            setIsTyping(false);
-            lastProcessedLengthRef.current = currentReportLength;
-            setDisplayedText(report);
-          }
-        } else {
-          // Finished processing new chars
-          setIsTyping(false);
-          lastProcessedLengthRef.current = currentReportLength;
-          setDisplayedText(report);
-        }
-      };
-
-      typeNextChar();
-    } else {
-      // Report hasn't changed, just ensure displayedText matches
-      if (displayedText.length !== report.length) {
-        setDisplayedText(report);
-      }
-      lastProcessedLengthRef.current = report.length;
-    }
-
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, [report]);
-
-  const handleClear = () => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    setDisplayedText('');
-    setIsTyping(false);
+  const handleClear = useCallback(() => {
     if (onClear) {
       onClear();
     }
-  };
+  }, [onClear]);
 
-  const handleClick = () => {
-    // Finish typing animation immediately when clicked
-    if (isTyping && timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-      setDisplayedText(report);
-      setIsTyping(false);
-      lastProcessedLengthRef.current = report.length;
-    }
-  };
-
-  const handleCopy = async () => {
+  const handleCopy = useCallback(async () => {
     try {
-      // Copy the full report text (not just displayedText, in case typing is still in progress)
-      await navigator.clipboard.writeText(report || displayedText);
+      await navigator.clipboard.writeText(fullReportText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy report:', err);
     }
-  };
+  }, [fullReportText]);
+
+  const handleEndScenario = useCallback(() => {
+    if (onEndScenario) {
+      onEndScenario();
+    }
+  }, [onEndScenario]);
+
+  // Render status message component
+  // Extract specific values to avoid re-renders when object reference changes but values don't
+  const executionPhasePhase = executionPhase?.phase;
+  const executionPhaseStepCount = executionPhase?.stepCount;
+  const executionPhaseDotbotActivity = executionPhase?.dotbotActivity;
+  
+  const statusMessageComponent = useMemo(() => {
+    if (!isRunning) return null;
+
+    if (executionPhase) {
+      if (executionPhasePhase === 'beginning') {
+        return <span className="scenario-status-message">Setting up...</span>;
+      }
+      if (executionPhasePhase === 'cycle') {
+        if (executionPhaseDotbotActivity) {
+          const preview = executionPhaseDotbotActivity.substring(0, 50);
+          const truncated = executionPhaseDotbotActivity.length > 50 ? '...' : '';
+          return (
+            <span className="scenario-status-message">
+              DotBot: {preview}{truncated}
+            </span>
+          );
+        }
+        return (
+          <span className="scenario-status-message">
+            Executing step {executionPhaseStepCount}...
+          </span>
+        );
+      }
+      if (executionPhasePhase === 'final-report') {
+        return <span className="scenario-status-message">Generating final report...</span>;
+      }
+    }
+
+    if (statusMessage) {
+      return <span className="scenario-status-message">{statusMessage}</span>;
+    }
+
+    return <span className="scenario-loading-dots">...</span>;
+  }, [
+    isRunning, 
+    executionPhase, // Required by ESLint - but we use extracted values above
+    executionPhasePhase,
+    executionPhaseStepCount,
+    executionPhaseDotbotActivity,
+    statusMessage
+  ]);
+
+  const hasMessages = messages.length > 0;
+  
+  // Debug: Log when messages count changes (only on length change to avoid render loops)
+  useEffect(() => {
+    if (prevMessagesLengthRef.current !== messages.length) {
+      console.log('[ReportTab] Messages count changed:', prevMessagesLengthRef.current, '->', messages.length);
+      if (messages.length > 0) {
+        console.log('[ReportTab] First message:', messages[0].id, messages[0].content.substring(0, 50));
+        console.log('[ReportTab] Last message:', messages[messages.length - 1].id, messages[messages.length - 1].content.substring(0, 50));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Intentionally only depend on length to avoid render loops when array reference changes
+    // messages array is intentionally excluded - we only care about length changes
+  }, [messages.length]);
 
   return (
     <div className="scenario-panel">
@@ -209,7 +147,7 @@ export const ReportTab: React.FC<ReportTabProps> = ({
         <div style={{ display: 'flex', gap: '8px' }}>
           {isRunning && onEndScenario && (
             <button
-              onClick={onEndScenario}
+              onClick={handleEndScenario}
               className="scenario-end-button"
               title="End scenario early and jump to evaluation"
               style={{
@@ -229,7 +167,7 @@ export const ReportTab: React.FC<ReportTabProps> = ({
               End Scenario
             </button>
           )}
-          {(report || displayedText) && (
+          {hasMessages && (
             <button
               onClick={handleCopy}
               className="scenario-copy-button"
@@ -250,7 +188,7 @@ export const ReportTab: React.FC<ReportTabProps> = ({
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
           )}
-          {onClear && displayedText && (
+          {onClear && hasMessages && (
             <button
               onClick={handleClear}
               className="scenario-clear-button"
@@ -261,32 +199,30 @@ export const ReportTab: React.FC<ReportTabProps> = ({
           )}
         </div>
       </div>
-      <div className="scenario-report" ref={reportRef} onClick={handleClick}>
-        <pre className="scenario-report-text">
-          {displayedText || '> Awaiting scenario execution...\n> Run a scenario to see results.'}
-          {isTyping && <span className="scenario-cursor">█</span>}
-          {isRunning && !isTyping && executionPhase && (
-            <span className="scenario-status-message">
-              {executionPhase.phase === 'beginning' && 'Setting up...'}
-              {executionPhase.phase === 'cycle' && (
-                executionPhase.dotbotActivity 
-                  ? `DotBot: ${executionPhase.dotbotActivity.substring(0, 50)}${executionPhase.dotbotActivity.length > 50 ? '...' : ''}`
-                  : `Executing step ${executionPhase.stepCount}...`
+      <div className="scenario-report" ref={reportRef}>
+        <div className="scenario-report-content">
+          {!hasMessages ? (
+            <div className="scenario-report-empty">
+              <pre className="scenario-report-text">
+                {'> Run a scenario to see results.'}
+              </pre>
+            </div>
+          ) : (
+            <>
+              {/* Debug: Show message count */}
+              {process.env.NODE_ENV === 'development' && (
+                <div style={{ color: '#ff0', fontSize: '10px', padding: '4px' }}>
+                  DEBUG: {messages.length} messages
+                </div>
               )}
-              {executionPhase.phase === 'final-report' && 'Generating final report...'}
-              {!executionPhase.phase && statusMessage && statusMessage}
-              {!executionPhase.phase && !statusMessage && 'Running...'}
-            </span>
+              {messages.map((message) => (
+                <ReportMessage key={message.id} message={message} />
+              ))}
+              {statusMessageComponent}
+            </>
           )}
-          {isRunning && !isTyping && !executionPhase && statusMessage && (
-            <span className="scenario-status-message">{statusMessage}</span>
-          )}
-          {isRunning && !isTyping && !executionPhase && !statusMessage && (
-            <span className="scenario-loading-dots">...</span>
-          )}
-        </pre>
+        </div>
       </div>
     </div>
   );
 };
-
