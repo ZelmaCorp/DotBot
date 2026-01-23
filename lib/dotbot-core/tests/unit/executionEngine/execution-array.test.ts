@@ -279,8 +279,13 @@ describe('ExecutionArray', () => {
 
       executionArray.add(createMockAgentResult());
       
-      // Wait for deferred callback
-      await wait(20);
+      // Wait for deferred callback - need to wait for both setTimeout calls
+      // (one in scheduleNotification, one in flushNotifications)
+      await wait(50);
+      
+      // Flush any remaining microtasks
+      await Promise.resolve();
+      await Promise.resolve();
       
       expect(callback).toHaveBeenCalled();
 
