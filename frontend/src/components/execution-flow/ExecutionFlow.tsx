@@ -7,7 +7,7 @@
 
 import React from 'react';
 import type { ExecutionMessage, DotBot } from '@dotbot/core';
-import { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
+import type { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
 import { isSimulationEnabled } from '@dotbot/core/executionEngine/simulation/simulationConfig';
 import { useExecutionFlowState, useExpandedItems } from './hooks';
 import { LoadingState, ApprovalMessage } from './components';
@@ -25,13 +25,13 @@ import {
   isFlowSuccessful,
   isFlowFailed
 } from './executionFlowUtils';
+import { handleAcceptAndStart } from './executionHandlers';
 import './execution-flow.css';
 
 export interface ExecutionFlowProps {
   // New API: Pass ExecutionMessage + DotBot instance
   executionMessage?: ExecutionMessage;
   dotbot?: DotBot;
-  backendSessionId?: string | null; // Backend session ID for API calls (stateless mode)
   
   // Legacy API: Pass state directly
   state?: ExecutionArrayState | null;
@@ -43,14 +43,13 @@ export interface ExecutionFlowProps {
 const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
   executionMessage,
   dotbot,
-  backendSessionId,
   state,
   onAcceptAndStart,
   onCancel,
   show = true
 }) => {
-  // Use custom hooks for state management (passes backendSessionId for polling)
-  const executionState = useExecutionFlowState(executionMessage, dotbot, state, backendSessionId);
+  // Use custom hooks for state management
+  const executionState = useExecutionFlowState(executionMessage, dotbot, state);
   const { isExpanded, toggleExpand } = useExpandedItems();
 
   // Determine if we should show the component
@@ -59,54 +58,30 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
     return null;
   }
 
-  // Loading states
-  if (executionMessage && !executionState) {
-    return (
-      <div className="execution-flow-container">
-        <ExecutionFlowHeader
-          executionState={null}
-          isWaitingForApproval={false}
-          isExecuting={false}
-        />
-        <LoadingState />
-      </div>
-    );
-  }
+  // Render loading state helper
+  const renderLoadingState = (state: typeof executionState) => (
+    <div className="execution-flow-container">
+      <ExecutionFlowHeader
+        executionState={state}
+        isWaitingForApproval={false}
+        isExecuting={false}
+      />
+      <LoadingState />
+    </div>
+  );
 
-  if (executionState && executionState.items.length === 0) {
-    return (
-      <div className="execution-flow-container">
-        <ExecutionFlowHeader
-          executionState={executionState}
-          isWaitingForApproval={false}
-          isExecuting={false}
-        />
-        <LoadingState />
-      </div>
-    );
-  }
-
+  // Show loading if no state or no items
   if (!executionState) {
-    return null;
+    return executionMessage ? renderLoadingState(null) : null;
+  }
+
+  if (executionState.items.length === 0) {
+    return renderLoadingState(executionState);
   }
 
   // Handle execution through DotBot if using new API
-  // Option 3: Always execute on frontend (cleaner - no remote signing needed)
-  const handleAcceptAndStart = async () => {
-    if (executionMessage && dotbot) {
-      try {
-        // Always use frontend's local execution
-        // Frontend DotBot is stateful, so it will:
-        // 1. Get execution message with executionPlan
-        // 2. Rebuild ExecutionArray from plan (if needed)
-        // 3. Execute using frontend's browser wallet signer
-        await dotbot.startExecution(executionMessage.executionId, { autoApprove: false });
-      } catch (error) {
-        console.error('Failed to start execution:', error);
-      }
-    } else if (onAcceptAndStart) {
-      onAcceptAndStart();
-    }
+  const onAcceptAndStartHandler = () => {
+    handleAcceptAndStart(executionMessage, dotbot, onAcceptAndStart);
   };
 
   const handleCancel = () => {
@@ -144,15 +119,19 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
       )}
 
       <div className="execution-flow-items">
-        {executionState.items.map((item, index) => (
-          <ExecutionFlowItem
-            key={item.id}
-            item={item}
-            index={index}
-            isExpanded={isExpanded(item.id)}
-            onToggleExpand={toggleExpand}
-          />
-        ))}
+        {executionState.items.map((item, index) => {
+          // Memoize expanded state to prevent unnecessary re-renders
+          const itemIsExpanded = isExpanded(item.id);
+          return (
+            <ExecutionFlowItem
+              key={item.id}
+              item={item}
+              index={index}
+              isExpanded={itemIsExpanded}
+              onToggleExpand={toggleExpand}
+            />
+          );
+        })}
       </div>
 
       <ExecutionFlowFooter
@@ -164,7 +143,7 @@ const ExecutionFlow: React.FC<ExecutionFlowProps> = ({
         isSimulating={isSimulating}
         showCancel={false}
         showAccept={!!(onAcceptAndStart || executionMessage)}
-        onAcceptAndStart={handleAcceptAndStart}
+        onAcceptAndStart={onAcceptAndStartHandler}
         onCancel={handleCancel}
       />
     </div>

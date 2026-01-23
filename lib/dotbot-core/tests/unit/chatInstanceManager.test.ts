@@ -53,7 +53,11 @@ describe('ChatInstanceManager', () => {
     mockLocalStorage.clear.mockClear();
     manager = new ChatInstanceManager();
     // Ensure all instances are cleared before each test
-    await manager.clearAllInstances();
+    try {
+      await manager.clearAllInstances();
+    } catch (error) {
+      // Ignore errors during cleanup - storage might already be empty
+    }
   });
 
   afterEach(async () => {
@@ -61,8 +65,14 @@ describe('ChatInstanceManager', () => {
     clearStorage();
     // Also clear via manager to ensure async operations complete
     if (manager) {
-      await manager.clearAllInstances();
+      try {
+        await manager.clearAllInstances();
+      } catch (error) {
+        // Ignore errors during cleanup
+      }
     }
+    // Give async operations time to complete
+    await new Promise(resolve => setImmediate(resolve));
   });
 
   describe('createInstance()', () => {
@@ -379,9 +389,17 @@ describe('ChatInstanceManager', () => {
         timestamp: Date.now(),
       };
 
-      await expect(async () => {
-        await manager.addMessage('non-existent', message);
-      }).rejects.toThrow(/not found/);
+      // Create the promise and attach error handler to prevent unhandled rejection warning
+      const promise = manager.addMessage('non-existent', message);
+      
+      // Attach a catch handler to prevent unhandled rejection
+      // This doesn't prevent the rejection from propagating to expect().rejects
+      promise.catch(() => {
+        // Expected error, ignore
+      });
+      
+      // Use expect().rejects pattern - this should work now that we've handled the promise
+      await expect(promise).rejects.toThrow(/not found/);
     });
 
     it('should add multiple messages in order', async () => {

@@ -225,7 +225,7 @@ export class DotBotSessionManager {
   /**
    * Create AI service from environment variables or config
    */
-  private createAIService(provider?: AIProviderType): AIService {
+  createAIService(provider?: AIProviderType): AIService {
     const config: AIServiceConfig = {
       ...this.defaultAIServiceConfig,
       providerType: provider || this.defaultAIServiceConfig?.providerType,
@@ -268,38 +268,27 @@ export class DotBotSessionManager {
   }
 
   /**
-   * Get or create a DotBot session
-   * 
-   * If a session exists for the same sessionId, wallet, environment, and network,
-   * it returns the existing instance. Otherwise, creates a new one.
+   * Check if existing session matches request
    */
-  async getOrCreateSession(config: SessionConfig): Promise<DotBotSession> {
-    const { sessionId, wallet, environment = 'mainnet', network, aiProvider } = config;
-    
-    // Determine effective network - use provided network or default for environment
-    const effectiveNetwork = network || this.getDefaultNetwork(environment);
-    
-    sessionLogger.info({ 
-      sessionId,
-      walletAddress: wallet.address,
-      walletName: wallet.name,
-      walletSource: wallet.source,
-      environment,
-      network: effectiveNetwork,
-      aiProvider
-    }, 'getOrCreateSession: Checking for existing session');
+  private isSessionMatch(
+    existing: DotBotSession,
+    wallet: WalletAccount,
+    environment: Environment,
+    network: Network
+  ): boolean {
+    return (
+      existing.wallet.address === wallet.address &&
+      existing.environment === environment &&
+      existing.network === network
+    );
+  }
 
-    // Check if session exists
-    let existing: DotBotSession | null = null;
+  /**
+   * Get existing session from store
+   */
+  private async getExistingSession(sessionId: string): Promise<DotBotSession | null> {
     try {
-      existing = await this.store.get(sessionId);
-      sessionLogger.debug({ 
-        sessionId,
-        found: !!existing,
-        existingWallet: existing?.wallet.address,
-        existingEnvironment: existing?.environment,
-        existingNetwork: existing?.network
-      }, 'getOrCreateSession: Store lookup result');
+      return await this.store.get(sessionId);
     } catch (storeError: any) {
       sessionLogger.error({ 
         error: storeError.message,
@@ -307,28 +296,142 @@ export class DotBotSessionManager {
       }, 'getOrCreateSession: Failed to check store');
       throw storeError;
     }
+  }
+
+  /**
+   * Create DotBot instance with timeout
+   */
+  private async createDotBotWithTimeout(
+    config: DotBotConfig,
+    network: Network,
+    sessionId: string
+  ): Promise<DotBot> {
+    const DOTBOT_CREATE_TIMEOUT_MS = 300000; // 5 minutes
+    
+    sessionLogger.info({ 
+      sessionId,
+      environment: config.environment,
+      network
+    }, 'getOrCreateSession: Creating DotBot instance');
+    
+    const createPromise = DotBot.create(config);
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(
+          `DotBot.create() timed out after ${DOTBOT_CREATE_TIMEOUT_MS}ms. ` +
+          `RPC connection to ${network} is slow or endpoints are unavailable. ` +
+          `The system will try multiple endpoints in round-robin fashion.`
+        ));
+      }, DOTBOT_CREATE_TIMEOUT_MS);
+    });
+    
+    try {
+      const dotbot = await Promise.race([createPromise, timeoutPromise]);
+      
+      sessionLogger.info({ 
+        sessionId,
+        dotbotEnvironment: dotbot.getEnvironment(),
+        dotbotNetwork: dotbot.getNetwork()
+      }, 'getOrCreateSession: DotBot instance created');
+      
+      return dotbot;
+    } catch (dotbotError: any) {
+      sessionLogger.error({ 
+        error: dotbotError.message,
+        stack: dotbotError.stack,
+        sessionId,
+        environment: config.environment,
+        network,
+        errorName: dotbotError.name
+      }, 'getOrCreateSession: Failed to create DotBot instance');
+      throw dotbotError;
+    }
+  }
+
+  /**
+   * Create new DotBot session
+   */
+  private async createNewSession(
+    sessionId: string,
+    wallet: WalletAccount,
+    environment: Environment,
+    network: Network,
+    aiProvider?: AIProviderType
+  ): Promise<DotBotSession> {
+    sessionLogger.info({ 
+      sessionId,
+      environment,
+      network,
+      aiProvider
+    }, 'getOrCreateSession: Creating new session');
+
+    const aiService = this.createAIService(aiProvider);
+    const chatManager = new ChatInstanceManager({
+      storage: new InMemoryChatStorage(),
+    });
+
+    const dotbotConfig: DotBotConfig = {
+      wallet,
+      environment,
+      network,
+      aiService: aiService as any,
+      chatManager,
+      autoApprove: false,
+      stateful: false,
+      backendSimulation: false, // Frontend does simulation
+    };
+
+    const dotbot = await this.createDotBotWithTimeout(dotbotConfig, network, sessionId);
+    
+    // No ChatInstance needed for SESSION_SERVER_MODE!
+    // WebSocket broadcasting subscribes directly to ExecutionArray.onProgress()
+    // This is simpler and more efficient
+    
+    const session: DotBotSession = {
+      sessionId,
+      dotbot,
+      wallet,
+      environment,
+      network,
+      createdAt: new Date(),
+      lastAccessed: new Date(),
+      aiProvider,
+    };
+
+    await this.store.set(sessionId, session);
+    
+    sessionLogger.info({ 
+      sessionId,
+      environment: session.environment,
+      network: session.network,
+      createdAt: session.createdAt.toISOString()
+    }, 'getOrCreateSession: Session stored successfully');
+
+    return session;
+  }
+
+  /**
+   * Get or create a DotBot session
+   * 
+   * If a session exists for the same sessionId, wallet, environment, and network,
+   * it returns the existing instance. Otherwise, creates a new one.
+   */
+  async getOrCreateSession(config: SessionConfig): Promise<DotBotSession> {
+    const { sessionId, wallet, environment = 'mainnet', network, aiProvider } = config;
+    const effectiveNetwork = network || this.getDefaultNetwork(environment);
+    
+    sessionLogger.info({ 
+      sessionId,
+      walletAddress: wallet.address,
+      environment,
+      network: effectiveNetwork,
+      aiProvider
+    }, 'getOrCreateSession: Checking for existing session');
+
+    const existing = await this.getExistingSession(sessionId);
     
     if (existing) {
-      // Verify it's for the same wallet/environment/network
-      const walletMatch = existing.wallet.address === wallet.address;
-      const envMatch = existing.environment === environment;
-      const networkMatch = existing.network === effectiveNetwork;
-      
-      sessionLogger.debug({ 
-        sessionId,
-        walletMatch,
-        envMatch,
-        networkMatch,
-        existingWallet: existing.wallet.address,
-        requestedWallet: wallet.address,
-        existingEnv: existing.environment,
-        requestedEnv: environment,
-        existingNetwork: existing.network,
-        requestedNetwork: effectiveNetwork
-      }, 'getOrCreateSession: Session validation');
-
-      if (walletMatch && envMatch && networkMatch) {
-        // Update last accessed and save
+      if (this.isSessionMatch(existing, wallet, environment, effectiveNetwork)) {
         existing.lastAccessed = new Date();
         await this.store.set(sessionId, existing);
         sessionLogger.info({ 
@@ -338,112 +441,20 @@ export class DotBotSessionManager {
         return existing;
       }
       
-      // Different wallet/environment/network, remove old session
       sessionLogger.warn({ 
         sessionId,
-        reason: 'wallet/environment/network mismatch',
-        existingWallet: existing.wallet.address,
-        requestedWallet: wallet.address,
-        existingEnv: existing.environment,
-        requestedEnv: environment,
-        existingNetwork: existing.network,
-        requestedNetwork: effectiveNetwork
+        reason: 'wallet/environment/network mismatch'
       }, 'getOrCreateSession: Removing mismatched session');
       await this.store.delete(sessionId);
     }
 
-    // Create new session
-    sessionLogger.info({ 
+    return await this.createNewSession(
       sessionId,
+      wallet,
       environment,
-      network: effectiveNetwork,
+      effectiveNetwork,
       aiProvider
-    }, 'getOrCreateSession: Creating new session');
-
-    let aiService: AIService;
-    try {
-      aiService = this.createAIService(aiProvider);
-      sessionLogger.debug({ 
-        sessionId,
-        providerType: aiService.getProviderType?.() || 'unknown'
-      }, 'getOrCreateSession: AI service created');
-    } catch (aiError: any) {
-      sessionLogger.error({ 
-        error: aiError.message,
-        sessionId,
-        aiProvider
-      }, 'getOrCreateSession: Failed to create AI service');
-      throw aiError;
-    }
-    
-    // Create chat manager with in-memory storage (backend use)
-    // Frontend will use LocalStorageChatStorage
-    const chatManager = new ChatInstanceManager({
-      storage: new InMemoryChatStorage(),
-    });
-
-    const dotbotConfig: DotBotConfig = {
-      wallet,
-      environment,
-      network: effectiveNetwork,
-      aiService: aiService as any, // Type assertion to handle source/dist type mismatch
-      chatManager,
-      autoApprove: false, // Backend should handle signing properly
-      stateful: false, // Backend is stateless - returns state to frontend
-    };
-
-    let dotbot: DotBot;
-    try {
-      sessionLogger.info({ 
-        sessionId,
-        environment,
-        network: effectiveNetwork
-      }, 'getOrCreateSession: Creating DotBot instance');
-      dotbot = await DotBot.create(dotbotConfig);
-      sessionLogger.info({ 
-        sessionId,
-        dotbotEnvironment: dotbot.getEnvironment(),
-        dotbotNetwork: dotbot.getNetwork()
-      }, 'getOrCreateSession: DotBot instance created');
-    } catch (dotbotError: any) {
-      sessionLogger.error({ 
-        error: dotbotError.message,
-        stack: dotbotError.stack,
-        sessionId,
-        environment,
-        network: effectiveNetwork
-      }, 'getOrCreateSession: Failed to create DotBot instance');
-      throw dotbotError;
-    }
-    
-    const session: DotBotSession = {
-      sessionId,
-      dotbot,
-      wallet,
-      environment,
-      network: effectiveNetwork,
-      createdAt: new Date(),
-      lastAccessed: new Date(),
-      aiProvider, // Store for Redis recreation
-    };
-
-    try {
-      await this.store.set(sessionId, session);
-      sessionLogger.info({ 
-        sessionId,
-        environment: session.environment,
-        network: session.network,
-        createdAt: session.createdAt.toISOString()
-      }, 'getOrCreateSession: Session stored successfully');
-    } catch (storeError: any) {
-      sessionLogger.error({ 
-        error: storeError.message,
-        sessionId
-      }, 'getOrCreateSession: Failed to store session');
-      throw storeError;
-    }
-
-    return session;
+    );
   }
 
   /**

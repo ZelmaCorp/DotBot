@@ -15,55 +15,69 @@ const app = express();
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 /**
+ * Check if origin is localhost (development)
+ */
+function isLocalhostOrigin(origin: string): boolean {
+  return origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
+}
+
+/**
+ * Parse allowed origins from environment variable
+ */
+function getAllowedOrigins(): string[] {
+  const corsOrigins = process.env.CORS_ORIGINS;
+  if (!corsOrigins) return [];
+  return corsOrigins.split(',').map(o => o.trim());
+}
+
+/**
+ * Check if origin should be allowed
+ */
+function isOriginAllowed(origin: string | undefined, allowedOrigins: string[]): boolean {
+  // Allow requests with no origin (like mobile apps or curl requests)
+  if (!origin) return true;
+
+  // In development, always allow localhost
+  if (NODE_ENV === 'development' && isLocalhostOrigin(origin)) {
+    return true;
+  }
+
+  // If CORS_ORIGINS is '*' or empty, allow all origins
+  if (process.env.CORS_ORIGINS === '*' || allowedOrigins.length === 0) {
+    return true;
+  }
+
+  // Check if origin is in allowed list
+  return allowedOrigins.includes(origin);
+}
+
+/**
+ * CORS origin validation callback
+ */
+function corsOriginCallback(
+  origin: string | undefined,
+  callback: (err: Error | null, allow?: boolean) => void
+): void {
+  const allowedOrigins = getAllowedOrigins();
+  
+  if (isOriginAllowed(origin, allowedOrigins)) {
+    callback(null, true);
+  } else {
+    console.warn(`[CORS] Blocked request from origin: ${origin}`);
+    callback(new Error('Not allowed by CORS'));
+  }
+}
+
+/**
  * Middleware configuration
  */
-// CORS configuration - works for both development and production
 const corsOptions = {
-  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    // Get allowed origins from environment variable
-    const allowedOrigins = process.env.CORS_ORIGINS 
-      ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
-      : [];
-
-    // In development, always allow localhost origins
-    if (NODE_ENV === 'development') {
-      const localhostPatterns = [
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://127.0.0.1:3000',
-        'http://127.0.0.1:3001',
-      ];
-      
-      // Add localhost patterns if not already in allowedOrigins
-      localhostPatterns.forEach(pattern => {
-        if (!allowedOrigins.includes(pattern)) {
-          allowedOrigins.push(pattern);
-        }
-      });
-    }
-
-    // If CORS_ORIGINS is set to '*' or empty, allow all origins
-    if (process.env.CORS_ORIGINS === '*' || allowedOrigins.length === 0) {
-      return callback(null, true);
-    }
-
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`[CORS] Blocked request from origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: corsOriginCallback,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   exposedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200, // Some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 
 app.use(cors(corsOptions));
@@ -106,6 +120,15 @@ app.use('/api/chat', chatRouter);
 
 // Mount DotBot routes (full DotBot chat with AI on backend)
 app.use('/api/dotbot', dotbotRouter);
+
+// Mount simulation routes (Chopsticks server)
+import { simulationRouter } from '@dotbot/express';
+if (simulationRouter) {
+  app.use('/api/simulation', simulationRouter);
+  console.log('[App] Simulation routes mounted at /api/simulation');
+} else {
+  console.error('[App] ERROR: simulationRouter is undefined!');
+}
 
 /**
  * Error handling

@@ -5,9 +5,10 @@
  * Component hierarchy ready for @dotbot/react package extraction.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { ThemeProvider } from './contexts/ThemeContext';
+// WebSocket removed - frontend does all simulation locally
 import { useScenarioPrompt } from './hooks/useScenarioPrompt';
 import WalletButton from './components/wallet/WalletButton';
 import ThemeToggle from './components/ui/ThemeToggle';
@@ -17,11 +18,12 @@ import WelcomeScreen from './components/chat/WelcomeScreen';
 import Chat from './components/chat/Chat';
 import ChatHistory from './components/history/ChatHistory';
 import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOverlay';
+import { ScenarioEngineProvider } from './components/scenarioEngine/context/ScenarioEngineContext';
 import LoadingOverlay from './components/common/LoadingOverlay';
-import { DotBot, Environment, ScenarioEngine } from '@dotbot/core';
+import { DotBot, Environment, ScenarioEngine, SigningRequest, BatchSigningRequest, DotBotEventType } from '@dotbot/core';
 import type { ChatInstanceData } from '@dotbot/core/types/chatInstance';
+import type { ExecutionMessage } from '@dotbot/core/types/chatInstance';
 import { useWalletStore } from './stores/walletStore';
-import { SigningRequest, BatchSigningRequest } from '@dotbot/core';
 import { Settings } from 'lucide-react';
 import {
   createDotBotInstance,
@@ -31,7 +33,6 @@ import {
 import {
   createDotBotSession,
   sendDotBotMessage,
-  getDotBotSession,
   type WalletAccount,
 } from './services/dotbotApi';
 import './styles/globals.css';
@@ -46,6 +47,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// WebSocket removed - frontend does all simulation locally via ExecutionArray subscriptions
 
 const AppContent: React.FC = () => {
   // UI State
@@ -68,12 +71,13 @@ const AppContent: React.FC = () => {
   const [initializingMessage, setInitializingMessage] = useState<string>('');
   const [initializingSubMessage, setInitializingSubMessage] = useState<string>('');
   
-  // ScenarioEngine State
+  // ScenarioEngine State - lazy loaded
   const [scenarioEngine] = useState(() => new ScenarioEngine({
     logLevel: 'info',
     autoSaveResults: true,
   }));
   const [isScenarioEngineReady, setIsScenarioEngineReady] = useState(false);
+  const [isScenarioEngineInitializing, setIsScenarioEngineInitializing] = useState(false);
   
   // Environment preference (for when wallet is not connected yet)
   const [preferredEnvironment, setPreferredEnvironment] = useState<Environment>('mainnet');
@@ -84,6 +88,8 @@ const AppContent: React.FC = () => {
   const [signingRequest, setSigningRequest] = useState<SigningRequest | BatchSigningRequest | null>(null);
   
   const { isConnected, selectedAccount } = useWalletStore();
+  
+  // WebSocket removed - execution updates come from local ExecutionArray subscriptions
   
   // Note: useChatInput is called in AppWithChatInput component (inside provider)
 
@@ -98,6 +104,32 @@ const AppContent: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, selectedAccount]);
 
+  // Initialize ScenarioEngine dependencies when enabled and DotBot is ready
+  useEffect(() => {
+    if (scenarioEngineEnabled && dotbot && selectedAccount && !isScenarioEngineReady && !isScenarioEngineInitializing) {
+      setIsScenarioEngineInitializing(true);
+      
+      const walletAccount: WalletAccount = {
+        address: selectedAccount.address,
+        name: selectedAccount.name,
+        source: selectedAccount.source,
+      };
+      
+      setupScenarioEngineDependencies(scenarioEngine, dotbot, walletAccount)
+        .then(() => {
+          setIsScenarioEngineReady(true);
+          setIsScenarioEngineInitializing(false);
+          console.log('[App] ScenarioEngine dependencies initialized');
+        })
+        .catch((error) => {
+          console.error('[App] Failed to initialize ScenarioEngine dependencies:', error);
+          setIsScenarioEngineInitializing(false);
+          // Don't set ready state on error - user can retry by toggling
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarioEngineEnabled, dotbot, selectedAccount, isScenarioEngineReady, isScenarioEngineInitializing]);
+
   // Sync current chat ID when dotbot changes
   useEffect(() => {
     if (dotbot?.currentChat) {
@@ -105,7 +137,7 @@ const AppContent: React.FC = () => {
     } else {
       setCurrentChatId(null);
     }
-  }, [dotbot, conversationRefresh]);
+  }, [dotbot]);
 
   // Auto-hide welcome screen when chat has messages
   useEffect(() => {
@@ -122,12 +154,13 @@ const AppContent: React.FC = () => {
     }
   }, [signingRequest]);
 
+
   // Preload function removed - not needed, DotBot handles connections directly
 
   const initializeDotBot = async () => {
     setIsInitializing(true);
     setInitializingMessage('Initializing DotBot');
-    setInitializingSubMessage('Connecting to backend...');
+    setInitializingSubMessage('Connecting...');
     
     try {
       // Create backend session first (this creates DotBot instance on backend)
@@ -137,7 +170,6 @@ const AppContent: React.FC = () => {
         source: selectedAccount!.source,
       };
       
-      setInitializingSubMessage('Creating backend session...');
       const network = getNetworkFromEnvironment(preferredEnvironment);
       const sessionResponse = await createDotBotSession(
         walletAccount,
@@ -149,9 +181,9 @@ const AppContent: React.FC = () => {
       setBackendSessionId(sessionResponse.sessionId);
       console.log('[App] Backend session created:', sessionResponse.sessionId);
       
-      // Create frontend DotBot instance for UI state management only
-      // This is a "frontend helper" - it doesn't do AI calls
-      setInitializingSubMessage('Setting up frontend UI...');
+      // Create frontend DotBot instance - DotBot handles RPC connections directly
+      // When preloadedManagers is null, DotBot creates its own RPC managers internally
+      // RPC connections are lazy-loaded (created but not connected during initialization)
       const dotbotInstance = await createDotBotInstance(
         selectedAccount!,
         preferredEnvironment,
@@ -160,27 +192,10 @@ const AppContent: React.FC = () => {
       );
       
       setDotbot(dotbotInstance);
+      console.groupEnd();
       
-      // Initialize ScenarioEngine (still needs frontend DotBot for now)
-      try {
-        setInitializingMessage('Initializing ScenarioEngine');
-        setInitializingSubMessage('Setting up scenario execution engine...');
-        
-        await setupScenarioEngineDependencies(
-          scenarioEngine,
-          dotbotInstance,
-          selectedAccount
-        );
-        
-        setIsScenarioEngineReady(true);
-        console.log('[ScenarioEngine] Initialized and ready');
-        setInitializingMessage('Ready');
-        setInitializingSubMessage('DotBot is ready to use');
-      } catch (error) {
-        console.error('[ScenarioEngine] Failed to initialize:', error);
-        setInitializingMessage('Initialization Complete');
-        setInitializingSubMessage('ScenarioEngine initialization failed, but DotBot is ready');
-      }
+      // LAZY LOADING: ScenarioEngine will be initialized when overlay is opened
+      // No initialization here - faster DotBot startup
     } catch (error) {
       console.error('Failed to initialize DotBot:', error);
       setInitializingMessage('Initialization Failed');
@@ -194,6 +209,230 @@ const AppContent: React.FC = () => {
     }
   };
 
+  // Helper: Validate prerequisites before sending message
+  const validateSendMessagePrerequisites = (): { currentChat: any } => {
+    if (!dotbot || !backendSessionId || !selectedAccount) {
+      throw new Error('Please connect your wallet first');
+    }
+
+    const currentChat = dotbot.currentChat;
+    if (!currentChat) {
+      throw new Error('No active chat session');
+    }
+
+    return { currentChat };
+  };
+
+  // Helper: Send message to backend API
+  const sendMessageToBackend = async (
+    message: string,
+    currentChat: any
+  ): Promise<any> => {
+    const walletAccount: WalletAccount = {
+      address: selectedAccount!.address,
+      name: selectedAccount!.name,
+      source: selectedAccount!.source,
+    };
+
+    const conversationHistory = currentChat.getHistory();
+
+    const apiResponse = await sendDotBotMessage({
+      message,
+      sessionId: backendSessionId!,
+      wallet: walletAccount,
+      environment: dotbot!.getEnvironment(),
+      network: dotbot!.getNetwork(),
+      conversationHistory,
+    });
+
+    // Validate backend response structure
+    if (!apiResponse || !apiResponse.result) {
+      throw new Error('Invalid response from backend: missing result');
+    }
+
+    const chatResult = apiResponse.result;
+
+    // Validate chatResult structure
+    if (typeof chatResult !== 'object' || chatResult === null) {
+      throw new Error('Invalid response from backend: result is not an object');
+    }
+
+    if (typeof chatResult.response !== 'string' && chatResult.response !== undefined) {
+      throw new Error('Invalid response from backend: response field is not a string');
+    }
+
+    return chatResult;
+  };
+
+  // Helper: Track executionId for session-level subscription
+  // 
+  // NOTE: With session-level subscription, we don't need to subscribe per executionId.
+  // WebSocket removed - no subscription needed, ExecutionFlow subscribes directly to ExecutionArray
+
+  // Helper: Add messages to chat (bot, execution)
+  // NOTE: User message is now added in handleSendMessage before backend call
+  const addMessagesToChat = (
+    message: string,
+    chatResult: any,
+    currentChat: any
+  ): Promise<any>[] => {
+    const persistencePromises: Promise<any>[] = [];
+
+    // Add bot response
+    if (chatResult.response) {
+      persistencePromises.push(
+        currentChat.addBotMessage(chatResult.response, true)
+          .then(() => {
+            console.log('[App] Bot message persisted');
+            // Emit event so Chat component can react
+            if (dotbot) {
+              dotbot.emit({ type: DotBotEventType.BOT_MESSAGE_ADDED, message: chatResult.response, timestamp: Date.now() });
+            }
+          })
+          .catch((err: unknown) => console.error('[App] Failed to persist bot message:', err))
+      );
+    }
+
+    // If there's an execution plan, add execution message
+    if (chatResult.plan) {
+      console.log('[App] ExecutionPlan received from backend:', {
+        planId: chatResult.plan.id,
+        stepsCount: chatResult.plan.steps.length,
+        originalRequest: chatResult.plan.originalRequest
+      });
+      
+      const executionId = chatResult.executionId || chatResult.executionArrayState?.id;
+      
+      if (!executionId) {
+        console.error('[App] CRITICAL: Backend did not provide executionId for execution plan. This is a backend bug.');
+        console.error('[App] Plan:', chatResult.plan);
+        console.error('[App] Result:', chatResult);
+        throw new Error('Backend did not provide executionId for execution plan. This is a backend bug.');
+      }
+      
+      // Check for existing execution message AFTER user/bot messages are added
+      const existingMessage = currentChat.getDisplayMessages()
+        .find((m: any) => m.type === 'execution' && m.executionId === executionId);
+      
+      if (!existingMessage) {
+        console.log('[App] ExecutionPlan sent to frontend - adding execution message:', { 
+          executionId, 
+          planId: chatResult.plan.id,
+          stepsCount: chatResult.plan.steps.length,
+          hasState: !!chatResult.executionArrayState,
+          hasPlan: !!chatResult.plan 
+        });
+        
+        // Add execution message first (stores plan)
+        // Use skipReload: true to avoid reloading before user/bot messages are persisted
+        // We'll manually trigger UI update after all messages are added
+        const addMessagePromise = currentChat.addExecutionMessage(
+          executionId,
+          chatResult.plan,
+          undefined, // Don't use backend's executionArrayState - frontend will rebuild and simulate
+          true // Skip reload to avoid race condition with user/bot message persistence
+        )
+          .then(async (executionMessage: ExecutionMessage) => {
+            console.log('[App] Execution message persisted');
+            
+            // Trigger UI refresh to show execution message
+            setConversationRefresh(prev => prev + 1);
+            
+            // Frontend rebuilds ExecutionArray from plan and runs simulation
+            // NOTE: This will create RPC connections directly from the frontend to blockchain nodes
+            // This is expected when frontend simulation is enabled (backendSimulation: false)
+            // The frontend DotBot instance uses its own RPC managers to connect to public endpoints
+            if (chatResult.plan && dotbot) {
+              console.log('[App] Rebuilding ExecutionArray from plan and running simulation on frontend');
+              console.log('[App] NOTE: Frontend will create direct RPC connections for simulation');
+              try {
+                // prepareExecution is private, but we need to call it to rebuild and simulate
+                // Type assertion to access private method (prepareExecution will create ExecutionArray and run simulation)
+                // This will trigger RPC connections via dotbot's relayChainManager and assetHubManager
+                await (dotbot as any).prepareExecution(chatResult.plan, executionId, false);
+                console.log('[App] Frontend simulation completed');
+                
+                // Trigger UI refresh after ExecutionArray is set
+                setConversationRefresh(prev => prev + 1);
+              } catch (error) {
+                console.error('[App] Failed to prepare execution on frontend:', error);
+                // Don't throw - execution message is already added, user can retry
+              }
+            }
+          })
+          .catch((err: unknown) => console.error('[App] Failed to persist execution message:', err));
+        
+        persistencePromises.push(addMessagePromise);
+      } else {
+        // Update existing message with plan and/or state
+        const updates: any = {};
+        if (chatResult.executionArrayState) {
+          updates.executionArray = chatResult.executionArrayState;
+        }
+        if (chatResult.plan) {
+          updates.executionPlan = chatResult.plan;
+        }
+        
+        if (Object.keys(updates).length > 0) {
+          persistencePromises.push(
+            currentChat.updateExecutionMessage(existingMessage.id, updates)
+              .then(() => console.log('[App] Execution message updated:', Object.keys(updates)))
+              .catch((err: unknown) => console.error('[App] Failed to update execution message:', err))
+          );
+        }
+      }
+    }
+
+    return persistencePromises;
+  };
+
+  // Helper: Update UI after messages are added
+  const updateUIAfterMessages = (persistencePromises: Promise<any>[]) => {
+    // Messages are now in memory (push is synchronous), trigger UI refresh
+    console.log('[App] Messages added to memory, triggering refresh. Count:', dotbot?.currentChat?.getDisplayMessages().length);
+    console.log('[App] Current messages:', dotbot?.currentChat?.getDisplayMessages().map((m: any) => ({ type: m.type, id: m.id })));
+    
+    // Trigger UI refresh immediately (messages are in memory, persistence happens in background)
+    setConversationRefresh(prev => prev + 1);
+    
+    // Let persistence complete in background (don't await)
+    // The merge logic in reload() will preserve in-memory messages even if they're not persisted yet
+    Promise.all(persistencePromises).catch(err => 
+      console.error('[App] Some persistence operations failed:', err)
+    );
+  };
+
+  // Helper: Handle errors and add error message to chat
+  const handleSendMessageError = async (error: unknown): Promise<any> => {
+    console.error('Error:', error);
+    
+    const errorMessage = `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    
+    const currentChat = dotbot?.currentChat;
+    if (currentChat) {
+      try {
+        await currentChat.addBotMessage(errorMessage);
+        setConversationRefresh(prev => prev + 1);
+      } catch (addMessageError) {
+        console.error('[App] Failed to add error message to chat:', addMessageError);
+        setConversationRefresh(prev => prev + 1);
+      }
+    }
+    
+    // Return error result for scenario engine
+    return {
+      response: errorMessage,
+      plan: undefined,
+      executionArrayState: undefined,
+      executionId: undefined,
+      executed: false,
+      success: false,
+      completed: 0,
+      failed: 1,
+    };
+  };
+
+  // Main handler: Orchestrates the message sending flow
   const handleSendMessage = async (message: string) => {
     if (showWelcomeScreen) {
       setShowWelcomeScreen(false);
@@ -202,77 +441,38 @@ const AppContent: React.FC = () => {
     setIsTyping(true);
 
     try {
-      if (!dotbot || !backendSessionId || !selectedAccount) {
-        throw new Error('Please connect your wallet first');
-      }
+      // Step 1: Validate prerequisites
+      const { currentChat } = validateSendMessagePrerequisites();
 
-      // Send message to backend DotBot API (all AI communication happens here)
-      const walletAccount: WalletAccount = {
-        address: selectedAccount.address,
-        name: selectedAccount.name,
-        source: selectedAccount.source,
-      };
+      // Step 2: Add user message to chat IMMEDIATELY (before backend call)
+      // This ensures the user sees their message right away
+      const userMessagePromise = currentChat.addUserMessage(message, true)
+        .then(() => {
+          console.log('[App] User message persisted');
+          // Emit event so Chat component can react
+          if (dotbot) {
+            dotbot.emit({ type: DotBotEventType.USER_MESSAGE_ADDED, message, timestamp: Date.now() });
+          }
+          // Trigger UI refresh immediately
+          setConversationRefresh(prev => prev + 1);
+        })
+        .catch((err: unknown) => console.error('[App] Failed to persist user message:', err));
 
-      // Get conversation history from frontend DotBot for context
-      const conversationHistory = dotbot.currentChat?.getHistory() || [];
+      // Step 3: Send message to backend (returns plan only, no simulation)
+      const chatResult = await sendMessageToBackend(message, currentChat);
 
-      const apiResponse = await sendDotBotMessage({
-        message,
-        sessionId: backendSessionId,
-        wallet: walletAccount,
-        environment: dotbot.getEnvironment(),
-        network: dotbot.getNetwork(),
-        conversationHistory,
-      });
+      // Step 4: Add bot/execution messages to chat
+      const persistencePromises = addMessagesToChat(message, chatResult, currentChat);
+      // Include user message promise in persistence promises
+      persistencePromises.push(userMessagePromise);
 
-      const chatResult = apiResponse.result;
+      // Step 5: Update UI
+      updateUIAfterMessages(persistencePromises);
 
-      // Update frontend DotBot with the response (for UI state)
-      // Add user message
-      if (dotbot.currentChat) {
-        await dotbot.currentChat.addUserMessage(message);
-      }
-
-      // Add bot response
-      if (chatResult.response && dotbot.currentChat) {
-        await dotbot.currentChat.addBotMessage(chatResult.response);
-      }
-
-      // If there's an execution plan and executionArrayState, add execution message
-      if (chatResult.plan && chatResult.executionArrayState && dotbot.currentChat) {
-        // Add execution message with the state from backend (stateless mode)
-        await dotbot.currentChat.addExecutionMessage(
-          chatResult.executionId || chatResult.executionArrayState.id,
-          chatResult.plan,
-          chatResult.executionArrayState
-        );
-      } else if (chatResult.plan && dotbot.currentChat) {
-        // Stateful mode: execution message was already added by backend
-        // Frontend just needs to sync (polling will handle it)
-      }
-
-      setConversationRefresh(prev => prev + 1);
-      
       // Return the chat result for scenario engine
       return chatResult;
     } catch (error) {
-      console.error('Error:', error);
-      
-      const errorMessage = `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      
-      if (dotbot?.currentChat) {
-        await dotbot.currentChat.addBotMessage(errorMessage);
-        setConversationRefresh(prev => prev + 1);
-      }
-      
-      // Return error result for scenario engine
-      return {
-        response: errorMessage,
-        executed: false,
-        success: false,
-        completed: 0,
-        failed: 1,
-      };
+      return await handleSendMessageError(error);
     } finally {
       setIsTyping(false);
     }
@@ -463,6 +663,7 @@ const AppContent: React.FC = () => {
             />
               ) : dotbot && dotbot.currentChat ? (
             <Chat
+                  key={currentChatId || 'default'}
                   dotbot={dotbot}
                   onSendMessage={handleSendMessageWithScenario}
                   isTyping={isTyping}
@@ -471,7 +672,6 @@ const AppContent: React.FC = () => {
                   injectedPrompt={injectedPrompt?.prompt || null}
                   onPromptProcessed={notifyPromptProcessed}
                   autoSubmit={autoSubmitPrompts}
-                  backendSessionId={backendSessionId}
             />
           ) : (
             <div style={{ textAlign: 'center', padding: '2rem' }}>
@@ -500,18 +700,25 @@ const AppContent: React.FC = () => {
       {/* ScenarioEngine Overlay - Only on testnet */}
           {scenarioEngineEnabled && 
            dotbot && 
-           isScenarioEngineReady && 
            dotbot.getEnvironment() === 'testnet' && (
-        <ScenarioEngineOverlay 
-              engine={scenarioEngine}
-              dotbot={dotbot}
-              onClose={() => setScenarioEngineEnabled(false)}
-              onSendMessage={handleSendMessageWithScenario}
-              autoSubmit={autoSubmitPrompts}
-              onAutoSubmitChange={setAutoSubmitPrompts}
-        />
+        <ScenarioEngineProvider>
+          <ScenarioEngineOverlay 
+                engine={scenarioEngine}
+                dotbot={dotbot}
+                onClose={() => {
+                  setScenarioEngineEnabled(false);
+                  // Reset ready state when closed (will re-initialize on next open)
+                  setIsScenarioEngineReady(false);
+                }}
+                onSendMessage={handleSendMessageWithScenario}
+                autoSubmit={autoSubmitPrompts}
+                onAutoSubmitChange={setAutoSubmitPrompts}
+                isInitializing={isScenarioEngineInitializing}
+                isReady={isScenarioEngineReady}
+          />
+        </ScenarioEngineProvider>
       )}
-    </div>
+        </div>
       </ThemeProvider>
     </QueryClientProvider>
   );

@@ -888,6 +888,16 @@
   background: rgba(0, 255, 65, 0.6);
 }
 
+.scenario-report-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.scenario-report-empty {
+  padding: 0;
+}
+
 .scenario-report-text {
   color: #00ff41;
   font-family: 'Courier New', 'Consolas', monospace;
@@ -896,6 +906,48 @@
   margin: 0;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.scenario-message {
+  margin: 0;
+  padding: 0;
+  display: block;
+}
+
+.scenario-message-content {
+  color: #00ff41;
+  font-family: 'Courier New', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.scenario-message-default .scenario-message-content {
+  color: #00ff41;
+}
+
+.scenario-message-info .scenario-message-content {
+  color: #00aaff;
+}
+
+.scenario-message-success .scenario-message-content {
+  color: #00ff41;
+}
+
+.scenario-message-warning .scenario-message-content {
+  color: #ffaa00;
+}
+
+.scenario-message-error .scenario-message-content {
+  color: #ff4444;
+}
+
+.scenario-message-phase .scenario-message-content {
+  color: #00ffff;
+  font-weight: 600;
 }
 
 .scenario-cursor {
@@ -1043,5 +1095,48 @@
     top: 60px; /* Slightly smaller navbar on mobile */
     height: calc(100vh - 60px);
   }
+}
+
+/* =============================================================================
+   LOADING SCREEN
+   ============================================================================= */
+
+.scenario-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 40px;
+}
+
+.scenario-loading-spinner {
+  width: 50px;
+  height: 50px;
+  border: 3px solid rgba(0, 255, 65, 0.2);
+  border-top-color: #00ff41;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scenario-loading-text {
+  font-size: 14px;
+  color: #00ff41;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.scenario-loading-subtext {
+  font-size: 12px;
+  color: rgba(0, 255, 65, 0.7);
+  text-align: center;
+  margin-top: 10px;
 }
 

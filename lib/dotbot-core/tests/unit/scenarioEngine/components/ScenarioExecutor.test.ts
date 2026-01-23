@@ -20,8 +20,7 @@ import { ScenarioExecutor, createScenarioExecutor } from '../../../../scenarioEn
 import type {
   Scenario,
   ScenarioStep,
-  ScenarioAction,
-  ScenarioAssertion,
+
   ScenarioEngineEvent,
 } from '../../../../scenarioEngine/types';
 import type { ApiPromise } from '@polkadot/api';
@@ -623,6 +622,278 @@ describe('ScenarioExecutor', () => {
 
       jest.advanceTimersByTime(100);
       await executePromise;
+    });
+  });
+
+  describe('Stop() and Promise Rejection', () => {
+    beforeEach(() => {
+      executor.setDependencies({ api: mockApi });
+    });
+
+    it('should reject waitForResponseReceived when stop() is called', async () => {
+      const scenario: Scenario = {
+        id: 'test-1',
+        name: 'Stop During Wait',
+        description: 'Test stopping during wait-for-response',
+        category: 'happy-path',
+        steps: [
+          {
+            id: 'step-1',
+            type: 'action',
+            action: {
+              type: 'wait-for-response',
+            },
+          },
+        ],
+        expectations: [],
+      };
+
+      const executePromise = executor.executeScenario(scenario);
+
+      // Flush microtasks to ensure executor has set up promise resolvers
+      await flushMicrotasks();
+
+      // Stop the scenario before response arrives
+      executor.stop();
+
+      // Flush to process the rejection
+      await flushMicrotasks();
+
+      const results = await executePromise;
+
+      // Should have one result with error indicating scenario was stopped
+      expect(results).toHaveLength(1);
+      expect(results[0].error).toBeDefined();
+      expect(results[0].error?.message).toBe('Scenario stopped by user');
+    });
+
+    it('should handle stop() gracefully if no response resolver is waiting', async () => {
+      // Stop when not waiting for response - should not throw
+      expect(() => executor.stop()).not.toThrow();
+    });
+
+    it('should clear both resolver and rejector after stop()', async () => {
+      const scenario: Scenario = {
+        id: 'test-1',
+        name: 'Stop and Clear',
+        description: 'Test that resolvers are cleared',
+        category: 'happy-path',
+        steps: [
+          {
+            id: 'step-1',
+            type: 'action',
+            action: {
+              type: 'wait-for-response',
+            },
+          },
+        ],
+        expectations: [],
+      };
+
+      const executePromise = executor.executeScenario(scenario);
+      await flushMicrotasks();
+
+      // Stop should clear resolvers
+      executor.stop();
+      await flushMicrotasks();
+
+      // Try to notify response after stop - should not cause issues
+      executor.notifyResponseReceived({ response: 'Late response' });
+      await flushMicrotasks();
+
+      const results = await executePromise;
+      expect(results).toHaveLength(1);
+      expect(results[0].error?.message).toBe('Scenario stopped by user');
+    });
+  });
+
+  describe('Step Timing Tracking', () => {
+    beforeEach(() => {
+      executor.setDependencies({ api: mockApi });
+    });
+
+    it('should track currentStepStartTime when step starts', async () => {
+      const scenario: Scenario = {
+        id: 'test-1',
+        name: 'Step Timing',
+        description: 'Test step start time tracking',
+        category: 'happy-path',
+        steps: [
+          {
+            id: 'step-1',
+            type: 'wait',
+            waitMs: 100,
+          },
+        ],
+        expectations: [],
+      };
+
+      const executePromise = executor.executeScenario(scenario);
+
+      // Wait a bit for step to start
+      await flushMicrotasks();
+
+      const context = executor.getContext();
+      expect(context).not.toBeNull();
+      expect(context?.currentStepStartTime).toBeDefined();
+      expect(typeof context?.currentStepStartTime).toBe('number');
+      expect(context?.currentStepStartTime).toBeGreaterThan(0);
+
+      jest.advanceTimersByTime(100);
+      await executePromise;
+    });
+
+    it('should clear currentStepStartTime after step completion', async () => {
+      const scenario: Scenario = {
+        id: 'test-1',
+        name: 'Step Timing Clear',
+        description: 'Test step start time is cleared',
+        category: 'happy-path',
+        steps: [
+          {
+            id: 'step-1',
+            type: 'wait',
+            waitMs: 100,
+          },
+        ],
+        expectations: [],
+      };
+
+      const executePromise = executor.executeScenario(scenario);
+      await flushMicrotasks();
+
+      // Verify start time is set
+      let context = executor.getContext();
+      expect(context?.currentStepStartTime).toBeDefined();
+
+      // Complete the step
+      jest.advanceTimersByTime(100);
+      await executePromise;
+
+      // Verify start time is cleared
+      context = executor.getContext();
+      expect(context?.currentStepStartTime).toBeUndefined();
+    });
+
+    it('should clear currentStepStartTime on step error', async () => {
+      const scenario: Scenario = {
+        id: 'test-1',
+        name: 'Step Timing Error',
+        description: 'Test step start time cleared on error',
+        category: 'happy-path',
+        steps: [
+          {
+            id: 'step-1',
+            type: 'action',
+            // Missing action - will cause error
+          } as ScenarioStep,
+        ],
+        expectations: [],
+      };
+
+      const results = await executor.executeScenario(scenario);
+
+      // Verify error occurred
+      expect(results).toHaveLength(1);
+      expect(results[0].error).toBeDefined();
+
+      // Verify start time is cleared even on error
+      const context = executor.getContext();
+      expect(context?.currentStepStartTime).toBeUndefined();
+    });
+  });
+
+  describe('Error Handling Improvements', () => {
+    beforeEach(() => {
+      executor.setDependencies({ api: mockApi });
+    });
+
+    it('should include error message and stack in error events', async () => {
+      const errorEvents: ScenarioEngineEvent[] = [];
+      const listener = (event: ScenarioEngineEvent) => {
+        if (event.type === 'error' || (event.type === 'log' && event.level === 'error')) {
+          errorEvents.push(event);
+        }
+      };
+      executor.addEventListener(listener);
+
+      const scenario: Scenario = {
+        id: 'test-1',
+        name: 'Error Details',
+        description: 'Test error details in events',
+        category: 'happy-path',
+        steps: [
+          {
+            id: 'step-1',
+            type: 'action',
+            // Missing action - will cause error
+          } as ScenarioStep,
+        ],
+        expectations: [],
+      };
+
+      await executor.executeScenario(scenario);
+
+      // Clean up
+      executor.removeEventListener(listener);
+
+      // Should have error event with message
+      expect(errorEvents.length).toBeGreaterThan(0);
+      const errorEvent = errorEvents.find(e => e.type === 'error');
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent?.error).toBeDefined();
+      expect(typeof errorEvent?.error).toBe('string');
+      expect(errorEvent?.error).toContain('Action step requires action');
+    });
+
+    it('should create error result with proper error details', async () => {
+      const scenario: Scenario = {
+        id: 'test-1',
+        name: 'Error Result',
+        description: 'Test error result structure',
+        category: 'happy-path',
+        steps: [
+          {
+            id: 'step-1',
+            type: 'action',
+            // Missing action - will cause error
+          } as ScenarioStep,
+        ],
+        expectations: [],
+      };
+
+      const results = await executor.executeScenario(scenario);
+
+      expect(results).toHaveLength(1);
+      expect(results[0].error).toBeDefined();
+      expect(results[0].error?.message).toBeDefined();
+      expect(typeof results[0].error?.message).toBe('string');
+      expect(results[0].error?.message.length).toBeGreaterThan(0);
+    });
+
+    it('should handle notifyResponseReceived when no resolver is waiting', async () => {
+      const logEvents: ScenarioEngineEvent[] = [];
+      const listener = (event: ScenarioEngineEvent) => {
+        if (event.type === 'log') {
+          logEvents.push(event);
+        }
+      };
+      executor.addEventListener(listener);
+
+      // Call notifyResponseReceived when not waiting - should log warning
+      executor.notifyResponseReceived({ response: 'Unexpected response' });
+      await flushMicrotasks();
+
+      // Clean up
+      executor.removeEventListener(listener);
+
+      // Should have logged a warning
+      const warningLog = logEvents.find(
+        e => e.type === 'log' && 
+        e.level === 'warn' && 
+        e.message?.includes('notifyResponseReceived called but no resolver waiting')
+      );
+      expect(warningLog).toBeDefined();
     });
   });
 });

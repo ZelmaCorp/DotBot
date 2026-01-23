@@ -23,7 +23,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22'
+        node-version: '20'
         
     - name: Install all dependencies (workspaces)
       run: npm install
@@ -52,7 +52,7 @@ jobs:
       
     - name: Run frontend tests
       working-directory: ./frontend
-      run: npm test -- --coverage --watchAll=false
+      run: npm test -- --coverage
       
     - name: Run frontend type check
       working-directory: ./frontend
@@ -68,7 +68,7 @@ jobs:
       
     - name: Run backend tests
       working-directory: ./backend
-      run: npm test -- --coverage --watchAll=false || echo "No tests configured yet"
+      run: npm test -- --coverage || echo "No tests configured yet"
       
   security-scan:
     name: Security Scan (Non-blocking)
@@ -151,10 +151,11 @@ jobs:
         tags: ${{ steps.meta-frontend.outputs.tags }}
         labels: ${{ steps.meta-frontend.outputs.labels }}
         build-args: |
-          REACT_APP_API_URL=https://live.dotbot.zelmacorp.io/api
-          REACT_APP_BACKEND_URL=https://live.dotbot.zelmacorp.io/api
+          REACT_APP_API_URL=https://live.dotbot.zelmacorp.io
+          REACT_APP_WS_URL=wss://live.dotbot.zelmacorp.io
         cache-from: type=gha
         cache-to: type=gha,mode=max
+      # Verify build args are being used (will show in build logs)
         
     - name: Extract backend metadata
       id: meta-backend
@@ -198,7 +199,7 @@ jobs:
         cat > deploy/.env << EOF
         NODE_ENV=production
         DEBUG=false
-        LOG_LEVEL=WARNING
+        LOG_LEVEL=warn
         
         # Domain Configuration
         DOMAIN_NAME=live.dotbot.zelmacorp.io
@@ -227,8 +228,11 @@ jobs:
         SESSION_SECRET=${{ secrets.SESSION_SECRET }}
         
         # Application URLs
+        # NOTE: Base URLs should NOT include /api suffix
+        # API paths will be appended by application code
         FRONTEND_URL=https://live.dotbot.zelmacorp.io
-        BACKEND_URL=https://live.dotbot.zelmacorp.io/api
+        BACKEND_URL=https://live.dotbot.zelmacorp.io
+        WS_URL=wss://live.dotbot.zelmacorp.io
         
         # Feature Flags for Production
         ENABLE_BACKEND_MEMORY=true

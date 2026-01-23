@@ -79,7 +79,8 @@ import { ApiPromise as ApiPromiseClass, WsProvider } from '@polkadot/api';
 import { BN } from '@polkadot/util';
 import { decodeAddress } from '@polkadot/util-crypto';
 import { ChatInstanceManager } from '../../chatInstanceManager';
-import { createChopsticksDatabase } from '../../services/simulation/database';
+// NOTE: Chopsticks imports removed - emulated mode not currently supported
+// Emulated mode would require server-side Chopsticks setup
 import type { Network, RpcManager } from '../../rpcManager';
 import { getEndpointsForNetwork } from '../../rpcManager';
 import type { ConversationItem, TextMessage, SystemMessage } from '../../types/chatInstance';
@@ -177,8 +178,9 @@ export interface AllocationResult {
 export class StateAllocator {
   private config: StateAllocatorConfig;
   private initialized: boolean = false;
-  private chopsticksChain: any = null; // Chopsticks chain instance for emulated mode
-  private chopsticksApi: ApiPromise | null = null; // API instance for Chopsticks fork (emulated mode)
+  // NOTE: Chopsticks properties removed - emulated mode is disabled
+  // private chopsticksChain: any = null;
+  // private chopsticksApi: ApiPromise | null = null;
   private api: ApiPromise | null = null; // Polkadot.js API for live mode
   private executionSession: any = null; // Execution session for live mode (keeps API alive)
   private chatManager: ChatInstanceManager;
@@ -217,49 +219,15 @@ export class StateAllocator {
 
   /**
    * Connect to Chopsticks for emulated mode
+   * 
+   * NOTE: Emulated mode is currently disabled. Chopsticks setup now happens on the server.
+   * This functionality would need to be moved to @dotbot/express if emulated mode is needed.
    */
   private async connectToChopsticks(): Promise<void> {
-    try {
-      const { BuildBlockMode, setup } = await import('@acala-network/chopsticks-core');
-      
-      // Get RPC endpoints for the chain (use RPC manager if available)
-      const rpcEndpoints = this.getRpcEndpoints();
-      if (!rpcEndpoints || rpcEndpoints.length === 0) {
-        throw new Error(`No RPC endpoints available for chain: ${this.config.chain}`);
-      }
-
-      // For Chopsticks, use the first healthy endpoint (round-robin handled by RPC manager)
-      // Chopsticks needs a single endpoint, so we use the best one from the manager
-      const rpcEndpoint = rpcEndpoints[0];
-
-      // Create database for caching
-      const dbName = `dotbot-scenario-allocator:${this.config.chain}`;
-      const storage = createChopsticksDatabase(dbName);
-
-      // Create Chopsticks chain fork
-      this.chopsticksChain = await setup({
-        endpoint: [rpcEndpoint],
-        block: undefined, // Let Chopsticks fetch latest block
-        buildBlockMode: BuildBlockMode.Batch,
-        mockSignatureHost: true,
-        db: storage,
-      });
-
-      // Diagnostic: Log available methods for debugging
-      const availableMethods = Object.keys(this.chopsticksChain).filter(key => 
-        typeof this.chopsticksChain[key] === 'function'
-      );
-      console.log(`[StateAllocator] Connected to Chopsticks fork for ${this.config.chain} using ${rpcEndpoint}`);
-      console.log(`[StateAllocator] Chain object methods: ${availableMethods.join(', ')}`);
-      console.log(`[StateAllocator] Chain has api: ${!!this.chopsticksChain.api}`);
-      
-      // Note: We use the setStorage utility function directly with the chain object
-      // No separate API instance is needed for setting storage
-      // If we need to query balances later, we can create an API instance then
-      console.log(`[StateAllocator] Chopsticks chain ready. Will use setStorage utility for state manipulation.`);
-    } catch (error) {
-      throw new Error(`Failed to connect to Chopsticks: ${error}`);
-    }
+    throw new Error(
+      'Emulated mode is not currently supported. Chopsticks setup has been moved to the server (@dotbot/express). ' +
+      'Please use "live" or "synthetic" mode instead, or implement emulated mode on the server side.'
+    );
   }
 
   /**
@@ -597,12 +565,10 @@ export class StateAllocator {
     this.ensureInitialized();
     
     try {
-      // Reset Chopsticks fork if in emulated mode
-      if (this.config.mode === 'emulated' && this.chopsticksChain) {
-        // Chopsticks forks are ephemeral - just clear the reference
-        this.chopsticksChain = null;
-        console.log('[StateAllocator] Cleared Chopsticks fork');
-      }
+      // NOTE: Chopsticks cleanup removed - emulated mode is disabled
+      // if (this.config.mode === 'emulated' && this.chopsticksChain) {
+      //   this.chopsticksChain = null;
+      // }
 
       // Note: We don't clear localStorage here as it might contain other app data
       // Only clear scenario-specific keys if needed
@@ -628,9 +594,10 @@ export class StateAllocator {
       this.api = null;
     }
     
-    if (this.chopsticksChain) {
-      this.chopsticksChain = null;
-    }
+    // NOTE: Chopsticks cleanup removed - emulated mode is disabled
+    // if (this.chopsticksChain) {
+    //   this.chopsticksChain = null;
+    // }
     
     this.initialized = false;
   }
@@ -696,21 +663,12 @@ export class StateAllocator {
         return new BN(0);
         
       case 'emulated':
-        // Query balance from Chopsticks API
-        if (!this.chopsticksChain) {
-          throw new Error('Chopsticks chain not initialized');
-        }
-        if (!this.chopsticksApi) {
-          // Create API instance if not exists
-          this.chopsticksApi = await this.chopsticksChain.api;
-        }
-        if (!this.chopsticksApi) {
-          throw new Error('Failed to create Chopsticks API instance');
-        }
-        await this.chopsticksApi.isReady;
-        const emulatedAccountInfo = await this.chopsticksApi.query.system.account(address);
-        const emulatedData = (emulatedAccountInfo as any).data;
-        return new BN(emulatedData.free.toString());
+        // Query balance from Chopsticks API (emulated mode)
+        // NOTE: Emulated mode is currently disabled
+        throw new Error(
+          'Emulated mode is not currently supported. Chopsticks setup has been moved to the server. ' +
+          'Please use "live" or "synthetic" mode instead.'
+        );
         
       case 'live':
         // Query balance from live API
@@ -727,50 +685,20 @@ export class StateAllocator {
     }
   }
 
+  /**
+   * Set balance on Chopsticks fork (emulated mode)
+   * 
+   * NOTE: Emulated mode is currently disabled. This would need server-side implementation.
+   */
   private async setChopsticksBalance(
     address: string,
     planck: string,
     result: AllocationResult
   ): Promise<void> {
-    if (!this.chopsticksChain) {
-      throw new Error('Chopsticks chain not initialized');
-    }
-
-    try {
-      // Import the setStorage utility from Chopsticks
-      // This is the correct way to set storage when using Chopsticks as a library
-      const { setStorage } = await import('@acala-network/chopsticks-core');
-      
-      // Decode address to get account ID
-      const accountId = decodeAddress(address);
-
-      // Use the setStorage utility function with StorageConfig format
-      // This is the correct way to set storage in Chopsticks when using it as a library
-      await setStorage(this.chopsticksChain, {
-        System: {
-          Account: [
-            [
-              [accountId],
-              {
-                data: {
-                  free: planck,
-                  reserved: '0',
-                  frozen: '0',
-                  miscFrozen: '0',
-                },
-                nonce: '0',
-              },
-            ],
-          ],
-        },
-      });
-
-      result.balances.set(address, { free: planck });
-      console.log(`[StateAllocator] Set balance via setStorage utility for ${address}: ${planck} planck`);
-    } catch (error) {
-      result.errors.push(`Failed to set Chopsticks balance for ${address}: ${error}`);
-      throw error;
-    }
+    throw new Error(
+      'Emulated mode is not currently supported. Chopsticks setup has been moved to the server. ' +
+      'Please use "live" or "synthetic" mode instead.'
+    );
   }
 
   /**
@@ -883,44 +811,19 @@ export class StateAllocator {
     result.assets.set(address, allocatedAssets);
   }
 
+  /**
+   * Set asset balance on Chopsticks fork (emulated mode)
+   * 
+   * NOTE: Emulated mode is currently disabled. This would need server-side implementation.
+   */
   private async setChopsticksAsset(
     address: string,
     asset: AssetState
   ): Promise<void> {
-    if (!this.chopsticksChain) {
-      throw new Error('Chopsticks chain not initialized');
-    }
-
-    try {
-      const accountId = decodeAddress(address);
-      const assetId = typeof asset.assetId === 'number' ? asset.assetId : parseInt(asset.assetId);
-      const balance = this.parseBalance(asset.balance);
-
-      // For Asset Hub, set asset balance using Assets pallet
-      // Format: Assets.Account(AssetId, AccountId) -> AssetAccount { balance, ... }
-      // Use the setStorage utility function from Chopsticks
-      const { setStorage } = await import('@acala-network/chopsticks-core');
-      
-      await setStorage(this.chopsticksChain, {
-        Assets: {
-          Account: [
-            [
-              [assetId, accountId],
-              {
-                balance: balance.planck,
-                isFrozen: false,
-                sufficient: true,
-              },
-            ],
-          ],
-        },
-      });
-
-      console.log(`[StateAllocator] Chopsticks asset ${asset.assetId} for ${address}: ${asset.balance}`);
-    } catch (error) {
-      console.warn(`Failed to set Chopsticks asset ${asset.assetId} for ${address}: ${error}`);
-      // Don't throw - asset allocation is optional
-    }
+    throw new Error(
+      'Emulated mode is not currently supported. Chopsticks setup has been moved to the server. ' +
+      'Please use "live" or "synthetic" mode instead.'
+    );
   }
 
   // ===========================================================================

@@ -273,11 +273,20 @@ describe('ExecutionArray', () => {
       expect(callback.mock.calls[0][0].status).toBe('executing');
     });
 
-    it('should fire progress callback on changes', () => {
+    it('should fire progress callback on changes', async () => {
       const callback = jest.fn();
       executionArray.onProgress(callback);
 
       executionArray.add(createMockAgentResult());
+      
+      // Wait for deferred callback - need to wait for both setTimeout calls
+      // (one in scheduleNotification, one in flushNotifications)
+      await wait(50);
+      
+      // Flush any remaining microtasks
+      await Promise.resolve();
+      await Promise.resolve();
+      
       expect(callback).toHaveBeenCalled();
 
       const state = callback.mock.calls[0][0];
@@ -312,16 +321,22 @@ describe('ExecutionArray', () => {
       expect(callback2).toHaveBeenCalled();
     });
 
-    it('should allow unsubscribe', () => {
+    it('should allow unsubscribe', async () => {
       const callback = jest.fn();
       const unsubscribe = executionArray.onStatusUpdate(callback);
 
       const id = executionArray.add(createMockAgentResult());
+      await wait(20);
+      
       executionArray.updateStatus(id, 'executing');
+      await wait(20);
+      
       expect(callback).toHaveBeenCalledTimes(2); // Once from add, once from updateStatus
 
       unsubscribe();
       executionArray.updateStatus(id, 'completed');
+      await wait(20);
+      
       expect(callback).toHaveBeenCalledTimes(2); // Not called again after unsubscribe
     });
   });

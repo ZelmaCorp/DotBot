@@ -21,7 +21,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22'
+        node-version: '20'
         
     - name: Install all dependencies (workspaces)
       run: npm install
@@ -47,7 +47,7 @@ jobs:
       
     - name: Run frontend tests
       working-directory: ./frontend
-      run: npm test -- --coverage --watchAll=false
+      run: npm test -- --coverage
       
     - name: Run frontend type check
       working-directory: ./frontend
@@ -59,7 +59,7 @@ jobs:
         
     - name: Run backend tests
       working-directory: ./backend
-      run: npm test -- --coverage --watchAll=false || echo "No tests configured yet"
+      run: npm test -- --coverage || echo "No tests configured yet"
       
   build:
     name: Build and Push Images
@@ -109,10 +109,11 @@ jobs:
         tags: ${{ steps.meta-frontend.outputs.tags }}
         labels: ${{ steps.meta-frontend.outputs.labels }}
         build-args: |
-          REACT_APP_API_URL=https://sandbox.dotbot.zelmacorp.io/api
-          REACT_APP_BACKEND_URL=https://sandbox.dotbot.zelmacorp.io/api
+          REACT_APP_API_URL=https://sandbox.dotbot.zelmacorp.io
+          REACT_APP_WS_URL=wss://sandbox.dotbot.zelmacorp.io
         cache-from: type=gha
         cache-to: type=gha,mode=max
+      # Verify build args are being used (will show in build logs)
         
     - name: Extract backend metadata
       id: meta-backend
@@ -216,8 +217,11 @@ jobs:
         CORS_ORIGINS=${{ secrets.CORS_ORIGINS || '*' }}
         
         # Application URLs
+        # NOTE: Base URLs should NOT include /api suffix
+        # API paths will be appended by application code
         FRONTEND_URL=https://sandbox.dotbot.zelmacorp.io
-        BACKEND_URL=https://sandbox.dotbot.zelmacorp.io/api
+        BACKEND_URL=https://sandbox.dotbot.zelmacorp.io
+        WS_URL=wss://sandbox.dotbot.zelmacorp.io
         EOF
         
         # Conditionally add CLAUDE_API_KEY only if secret exists (to avoid empty string warnings)

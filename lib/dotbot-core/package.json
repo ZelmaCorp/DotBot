@@ -1,6 +1,6 @@
 {
   "name": "@dotbot/core",
-  "version": "0.5.0",
+  "version": "0.7.2",
   "description": "DotBot core library for Polkadot operations through natural language",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,19 +20,23 @@
     "@polkadot/types": "^14.3.1",
     "@polkadot/util": "^14.0.1",
     "@polkadot/util-crypto": "^14.0.1",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "idb": "^8.0.3",
     "pino": "^9.9.4"
   },
   "peerDependencies": {
     "@polkadot/api": "^14.3.1",
-    "@polkadot/extension-dapp": "^0.53.1"
+    "@polkadot/extension-dapp": "^0.53.1",
+    "@polkadot/rpc-augment": "^14.3.1"
   },
   "optionalDependencies": {
-    "@acala-network/chopsticks-core": "^1.2.5",
-    "idb": "^8.0.3",
-    "pino-pretty": "^11.3.0"
+    "pino-pretty": "^13.1.3"
+  },
+  "overrides": {
+    "@polkadot/rpc-provider": "^14.3.1"
   },
   "devDependencies": {
-    "@acala-network/chopsticks-core": "^1.2.5",
     "@polkadot/extension-dapp": "^0.53.1",
     "@types/jest": "^29.5.14",
     "idb": "^8.0.3",

@@ -73,6 +73,10 @@ export interface DotBotConfig {
   /** Simulation status callback for UI feedback */
   onSimulationStatus?: SimulationStatusCallback;
   
+  /** Callback called when execution is ready (after orchestration, before simulation) */
+  /** Use this to set up WebSocket broadcasting or other subscriptions before simulation starts */
+  onExecutionReady?: (executionId: string, chat: ChatInstance) => void;
+  
   /** Auto-approve transactions (NOT recommended for production!) */
   autoApprove?: boolean;
   
@@ -88,10 +92,31 @@ export interface DotBotConfig {
   
   /** 
    * Stateful mode: If true (default), DotBot maintains chat instances and execution state.
-   * If false (stateless), DotBot processes requests and returns state without maintaining it.
-   * Use stateless mode for backend/API services where the client maintains state.
+   * If false (SESSION_SERVER_MODE), DotBot processes requests and returns state without maintaining it.
+   * Use SESSION_SERVER_MODE for backend/API services where the client maintains state.
+   * 
+   * Default: true
    */
   stateful?: boolean;
+  
+  /**
+   * Backend simulation: If true, backend runs transaction simulation before returning.
+   * If false, client is expected to run simulation (only works in stateful mode).
+   * 
+   * Default: !stateful (backend simulates in SESSION_SERVER_MODE, client in stateful mode)
+   * 
+   * Performance: Backend simulation is typically 0.5-2s faster due to better RPC connectivity.
+   * Client simulation works fine on decent connections.
+   * 
+   * Valid combinations:
+   * - stateful: true, backendSimulation: false (default) → client simulates, has ExecutionArray
+   * - stateful: false, backendSimulation: true (default) → SESSION_SERVER_MODE: server simulates, returns state
+   * - stateful: true, backendSimulation: true → server simulates even in stateful mode
+   * 
+   * Invalid:
+   * - stateful: false, backendSimulation: false → ERROR (client can't simulate without ExecutionArray)
+   */
+  backendSimulation?: boolean;
 }
 
 export interface ChatResult {
@@ -101,10 +126,10 @@ export interface ChatResult {
   /** Execution plan (if any) */
   plan?: ExecutionPlan;
   
-  /** Execution array state (in stateless mode, this is returned instead of being stored) */
+  /** Execution array state (in SESSION_SERVER_MODE, this is returned instead of being stored) */
   executionArrayState?: ExecutionArrayState;
   
-  /** Execution ID (for tracking execution in stateless mode) */
+  /** Execution ID (for tracking execution in SESSION_SERVER_MODE) */
   executionId?: string;
   
   /** Whether operations were executed */
@@ -118,18 +143,37 @@ export interface ChatResult {
   
   /** Number of operations failed */
   failed: number;
+  
+  /** Whether backend simulation was run (if false, client should simulate) */
+  backendSimulated?: boolean;
+}
+
+/**
+ * DotBot event type enum for type safety and DRY principles
+ */
+export enum DotBotEventType {
+  CHAT_STARTED = 'chat-started',
+  USER_MESSAGE_ADDED = 'user-message-added',
+  BOT_MESSAGE_ADDED = 'bot-message-added',
+  EXECUTION_MESSAGE_ADDED = 'execution-message-added',
+  EXECUTION_MESSAGE_UPDATED = 'execution-message-updated',
+  CHAT_COMPLETE = 'chat-complete',
+  CHAT_ERROR = 'chat-error',
+  CHAT_LOADED = 'chat-loaded',
 }
 
 /**
  * DotBot event types for external observers (e.g., ScenarioEngine)
  */
 export type DotBotEvent = 
-  | { type: 'chat-started'; message: string }
-  | { type: 'user-message-added'; message: string; timestamp: number }
-  | { type: 'bot-message-added'; message: string; timestamp: number }
-  | { type: 'execution-message-added'; executionId: string; plan?: ExecutionPlan; timestamp: number }
-  | { type: 'chat-complete'; result: ChatResult }
-  | { type: 'chat-error'; error: Error };
+  | { type: DotBotEventType.CHAT_STARTED; message: string }
+  | { type: DotBotEventType.USER_MESSAGE_ADDED; message: string; timestamp: number }
+  | { type: DotBotEventType.BOT_MESSAGE_ADDED; message: string; timestamp: number }
+  | { type: DotBotEventType.EXECUTION_MESSAGE_ADDED; executionId: string; plan?: ExecutionPlan; timestamp: number }
+  | { type: DotBotEventType.EXECUTION_MESSAGE_UPDATED; executionId: string; timestamp: number }
+  | { type: DotBotEventType.CHAT_COMPLETE; result: ChatResult }
+  | { type: DotBotEventType.CHAT_ERROR; error: Error }
+  | { type: DotBotEventType.CHAT_LOADED; chatId: string; messageCount: number };
 
 export type DotBotEventListener = (event: DotBotEvent) => void;
 
@@ -180,7 +224,8 @@ export interface ChatOptions {
  * Everything you need in one simple class.
  */
 export class DotBot {
-  private api: ApiPromise;
+  private api: ApiPromise | null = null;
+  private executionSystemInitialized: boolean = false;
   private assetHubApi: ApiPromise | null = null;
   private executionSystem: ExecutionSystem;
   private wallet: WalletAccount;
@@ -200,6 +245,7 @@ export class DotBot {
   public currentChat: ChatInstance | null = null;
   private chatPersistenceEnabled: boolean;
   private _stateful: boolean;
+  private _backendSimulation: boolean;
   
   /**
    * Get whether DotBot is in stateful mode
@@ -208,12 +254,21 @@ export class DotBot {
     return this._stateful;
   }
   
-  // Stateless mode: Temporary storage for execution sessions, plans, and states (keyed by executionId)
+  // SESSION_SERVER_MODE: Temporary storage for execution sessions, plans, states, and ExecutionArrays (keyed by executionId)
   // These are created during prepareExecution and reused for execution
   // executionStates stores current state during preparation (for polling)
-  private executionSessions: Map<string, { relayChain: ExecutionSession; assetHub: ExecutionSession | null }> = new Map();
+  // executionArrays stores ExecutionArray instances for direct subscription (no ChatInstance needed)
+  private executionSessions: Map<string, { 
+    relayChain: ExecutionSession; 
+    assetHub: ExecutionSession | null;
+    createdAt: number; 
+  }> = new Map();
   private executionPlans: Map<string, ExecutionPlan> = new Map();
   private executionStates: Map<string, ExecutionArrayState> = new Map();
+  private executionArrays: Map<string, ExecutionArray> = new Map(); // Store ExecutionArray directly for WebSocket subscriptions
+  
+  // Session TTL: 15 minutes (900000ms) - after this time, sessions expire
+  private readonly SESSION_TTL_MS = 15 * 60 * 1000;
   
   // Event emitter for external observers (e.g., ScenarioEngine)
   private eventListeners: Set<DotBotEventListener> = new Set();
@@ -224,7 +279,7 @@ export class DotBot {
   private chatLogger: ReturnType<typeof createSubsystemLogger>;
   
   private constructor(
-    api: ApiPromise, 
+    api: ApiPromise | null, 
     executionSystem: ExecutionSystem, 
     config: DotBotConfig,
     network: Network,
@@ -250,6 +305,8 @@ export class DotBot {
     this.chatPersistenceEnabled = !config.disableChatPersistence;
     this.aiService = config.aiService;
     this._stateful = config.stateful !== false; // Default to true for backward compatibility
+    // Default: backend simulation enabled in SESSION_SERVER_MODE, disabled in stateful mode (client does it)
+    this._backendSimulation = config.backendSimulation ?? !this._stateful;
   }
   
   /**
@@ -374,18 +431,13 @@ export class DotBot {
       assetHubManager = managers.assetHubManager;
     }
     
-    const api = await relayChainManager.getReadApi();
-    const relayChainEndpoint = relayChainManager.getCurrentEndpoint();
     const rpcLogger = createSubsystemLogger(Subsystem.RPC);
-    rpcLogger.info({ 
-      endpoint: relayChainEndpoint,
-      chain: 'relay'
-    }, `Connected to Relay Chain via: ${relayChainEndpoint}`);
+    // LAZY LOADING: Don't connect to RPC endpoints during initialization
+    // Connections will be established when needed (e.g., in startExecution)
+    rpcLogger.debug({ network: configuredNetwork }, 'DotBot.create: RPC connections will be lazy-loaded when needed');
     
-    // Detect actual network from chain name (in case pre-initialized managers are for a different network)
-    const chainInfo = await api.rpc.system.chain();
-    const detectedNetwork = detectNetworkFromChainName(chainInfo.toString());
-    const actualNetwork = detectedNetwork;
+    // Use configured network (will be validated when connections are established)
+    const actualNetwork = configuredNetwork;
     
     const dotbotLogger = createSubsystemLogger(Subsystem.DOTBOT);
     dotbotLogger.info({ 
@@ -413,8 +465,9 @@ export class DotBot {
     // Create or use chat manager
     const chatManager = config.chatManager || new ChatInstanceManager();
     
+    // Create DotBot without connecting to RPC - connections will be lazy-loaded when needed
     const dotbot = new DotBot(
-      api, 
+      null, // API will be set lazily when RPC connections are established
       executionSystem, 
       config, 
       actualNetwork, 
@@ -429,15 +482,8 @@ export class DotBot {
       await dotbot.initializeChatInstance();
     }
     
-    try {
-      await dotbot.initializeAssetHub();
-    } catch (err) {
-      // Note: This is in static create() method, logger not available yet
-      // Asset Hub connection failure is non-critical, so we continue
-    }
-    
-    // Initialize execution system with both APIs and RPC managers (after Asset Hub is connected)
-    executionSystem.initialize(api, config.wallet, signer, dotbot.getAssetHubApi(), relayChainManager, assetHubManager, config.onSimulationStatus);
+    // LAZY LOADING: Don't initialize execution system yet - will be done when RPC connections are ready
+    // executionSystem.initialize() will be called in ensureRpcConnectionsReady()
     
     return dotbot;
   }
@@ -502,6 +548,26 @@ export class DotBot {
           network: this.network
         }, `Created new chat: ${this.currentChat.id}`);
       }
+      
+      // Initialize execution sessions immediately when chat is created/loaded
+      // This ensures RPC connections are ready before execution starts
+      if (this.currentChat) {
+        try {
+          await this.currentChat.initializeExecutionSessions(
+            this.relayChainManager,
+            this.assetHubManager
+          );
+          this.chatLogger.debug({ 
+            chatId: this.currentChat.id
+          }, 'Execution sessions initialized for chat instance');
+        } catch (error) {
+          // Log but don't fail - sessions can be created later if needed
+          this.chatLogger.warn({ 
+            chatId: this.currentChat.id,
+            error: error instanceof Error ? error.message : String(error)
+          }, 'Failed to initialize execution sessions during chat creation (will retry during execution)');
+        }
+      }
     } catch (error) {
       this.chatLogger.error({ 
         error: error instanceof Error ? error.message : String(error),
@@ -548,6 +614,25 @@ export class DotBot {
       this.chatPersistenceEnabled
     );
     
+    // Initialize execution sessions immediately when new chat is created
+    if (this.currentChat) {
+      try {
+        await this.currentChat.initializeExecutionSessions(
+          this.relayChainManager,
+          this.assetHubManager
+        );
+        this.chatLogger.debug({ 
+          chatId: this.currentChat.id
+        }, 'Execution sessions initialized for new chat after clearHistory');
+      } catch (error) {
+        // Log but don't fail - sessions can be created later if needed
+        this.chatLogger.warn({ 
+          chatId: this.currentChat.id,
+          error: error instanceof Error ? error.message : String(error)
+        }, 'Failed to initialize execution sessions after clearHistory (will retry during execution)');
+      }
+    }
+    
     this.chatLogger.info({ chatId: this.currentChat.id }, 'Started new chat');
   }
   
@@ -572,16 +657,17 @@ export class DotBot {
     this.environment = environment;
     this.network = targetNetwork;
     
-    // Create RPC managers for new network
+    // Create RPC managers for new network (lazy loading - connections will be established when needed)
     const managers = createRpcManagersForNetwork(targetNetwork);
     this.relayChainManager = managers.relayChainManager;
     this.assetHubManager = managers.assetHubManager;
     
-    // Reconnect APIs
-    this.api = await this.relayChainManager.getReadApi();
-    await this.initializeAssetHub().catch(() => {
-      this.rpcLogger.warn({}, 'Asset Hub connection failed after environment switch');
-    });
+    // LAZY LOADING: Don't connect to RPC endpoints immediately
+    // Connections will be established when needed (e.g., in ensureRpcConnectionsReady)
+    this.api = null;
+    this.assetHubApi = null;
+    this.executionSystemInitialized = false;
+    this.rpcLogger.debug({ network: targetNetwork }, 'switchEnvironment: RPC managers created, connections will be lazy-loaded when needed');
     
     // Create new chat instance
     if (this.chatPersistenceEnabled) {
@@ -643,16 +729,17 @@ export class DotBot {
       this.environment = chatData.environment;
       this.network = chatData.network;
       
-      // Create RPC managers for new network
+      // Create RPC managers for new network (lazy loading - connections will be established when needed)
       const managers = createRpcManagersForNetwork(chatData.network);
       this.relayChainManager = managers.relayChainManager;
       this.assetHubManager = managers.assetHubManager;
       
-      // Reconnect APIs
-      this.api = await this.relayChainManager.getReadApi();
-      await this.initializeAssetHub().catch(() => {
-        this.rpcLogger.warn({}, 'Asset Hub connection failed after environment/network switch');
-      });
+      // LAZY LOADING: Don't connect to RPC endpoints immediately
+      // Connections will be established when needed (e.g., in ensureRpcConnectionsReady)
+      this.api = null;
+      this.assetHubApi = null;
+      this.executionSystemInitialized = false;
+      this.rpcLogger.debug({ network: chatData.network }, 'loadChatInstance: RPC managers created for network switch, connections will be lazy-loaded when needed');
     }
     
     // Create ChatInstance from loaded data (same pattern as initializeChatInstance)
@@ -662,7 +749,125 @@ export class DotBot {
       this.chatPersistenceEnabled
     );
     
-    this.chatLogger.info({ chatId: this.currentChat.id }, 'Loaded chat instance');
+    // Initialize execution sessions immediately when chat is loaded
+    // This ensures RPC connections are ready before execution starts
+    try {
+      await this.currentChat.initializeExecutionSessions(
+        this.relayChainManager,
+        this.assetHubManager
+      );
+      this.chatLogger.debug({ 
+        chatId: this.currentChat.id
+      }, 'Execution sessions initialized for loaded chat instance');
+    } catch (error) {
+      // Log but don't fail - sessions can be created later if needed
+      this.chatLogger.warn({ 
+        chatId: this.currentChat.id,
+        error: error instanceof Error ? error.message : String(error)
+      }, 'Failed to initialize execution sessions during chat load (will retry during execution)');
+    }
+    
+    // LAZY LOADING: Don't connect to RPCs or rebuild ExecutionArrays when loading history
+    // RPCs will connect when execution actually starts (in startExecution or prepareExecution)
+    // ExecutionArrays will be rebuilt lazily when needed (when user interacts with execution)
+    this.chatLogger.info({ 
+      chatId: this.currentChat.id,
+      messageCount: this.currentChat.getDisplayMessages().length,
+      executionCount: this.currentChat.getDisplayMessages().filter(m => m.type === 'execution').length
+    }, 'Loaded chat instance (RPCs will connect lazily when execution starts)');
+    
+    // Emit event to notify UI that chat was loaded (triggers refresh)
+    this.emit({
+      type: DotBotEventType.CHAT_LOADED,
+      chatId: this.currentChat.id,
+      messageCount: this.currentChat.getDisplayMessages().length
+    });
+  }
+  
+  /**
+   * Ensure RPC connections are ready (lazy loading)
+   * Connects to RPC endpoints if not already connected
+   * Initializes execution system if not already initialized
+   */
+  private async ensureRpcConnectionsReady(): Promise<void> {
+    // If already initialized, nothing to do
+    if (this.executionSystemInitialized && this.api) {
+      return;
+    }
+    
+    this.rpcLogger.debug({ network: this.network }, 'ensureRpcConnectionsReady: Connecting to RPC endpoints (lazy loading)');
+    
+    // Connect to Relay Chain
+    if (!this.api) {
+      this.api = await this.relayChainManager.getReadApi();
+      const relayChainEndpoint = this.relayChainManager.getCurrentEndpoint();
+      this.rpcLogger.info({ 
+        endpoint: relayChainEndpoint,
+        chain: 'relay'
+      }, `Connected to Relay Chain via: ${relayChainEndpoint}`);
+      
+      // Detect actual network from chain name
+      try {
+        const chainInfo = await this.api.rpc.system.chain();
+        const detectedNetwork = detectNetworkFromChainName(chainInfo.toString());
+        if (detectedNetwork !== this.network) {
+          this.rpcLogger.warn({ 
+            detected: detectedNetwork,
+            configured: this.network
+          }, 'Network mismatch detected');
+        }
+      } catch {
+        // Skip network detection if it fails
+      }
+    }
+    
+    // Connect to Asset Hub (optional)
+    let assetHubApi: ApiPromise | null = null;
+    if (!this.assetHubApi) {
+      try {
+        assetHubApi = await this.assetHubManager.getReadApi();
+        const assetHubEndpoint = this.assetHubManager.getCurrentEndpoint();
+        this.rpcLogger.info({ 
+          endpoint: assetHubEndpoint,
+          chain: 'asset-hub'
+        }, `Connected to Asset Hub via: ${assetHubEndpoint}`);
+        this._setAssetHubApi(assetHubApi);
+      } catch (error) {
+        this.rpcLogger.warn({ 
+          error: error instanceof Error ? error.message : String(error)
+        }, 'Asset Hub connection failed, will retry when needed');
+      }
+    } else {
+      assetHubApi = this.assetHubApi;
+    }
+    
+    // Initialize execution system if not already initialized
+    if (!this.executionSystemInitialized) {
+      const signer = new BrowserWalletSigner({ 
+        autoApprove: this.config.autoApprove || false 
+      });
+      
+      // Set up signing handlers
+      if (this.config.onSigningRequest) {
+        signer.setSigningRequestHandler(this.config.onSigningRequest);
+      }
+      if (this.config.onBatchSigningRequest) {
+        signer.setBatchSigningRequestHandler(this.config.onBatchSigningRequest);
+      }
+      
+      this.executionSystem.initialize(
+        this.api!,
+        this.wallet,
+        signer,
+        assetHubApi,
+        this.relayChainManager,
+        this.assetHubManager,
+        this.config.onSimulationStatus
+      );
+      
+      this.executionSystemInitialized = true;
+      this.rpcLogger.debug({}, 'Execution system initialized (lazy loading)');
+    }
   }
   
   /**
@@ -678,8 +883,12 @@ export class DotBot {
    * @param options Execution options (autoApprove, etc.)
    */
   async startExecution(executionId: string, options?: ExecutionOptions): Promise<void> {
-    // Handle stateless mode
+    // GUARD: Ensure RPC connections are ready before execution (lazy loading)
+    await this.ensureRpcConnectionsReady();
+    
+    // Handle SESSION_SERVER_MODE
     if (!this._stateful) {
+      // Handle SESSION_SERVER_MODE
       return this.startExecutionStateless(executionId, options);
     }
     
@@ -696,11 +905,26 @@ export class DotBot {
       const executionMessage = this.currentChat.getDisplayMessages()
         .find(m => m.type === 'execution' && (m as any).executionId === executionId) as any;
       
-      if (executionMessage?.executionPlan) {
+      let plan = executionMessage?.executionPlan;
+      
+      // Fallback: Try to extract plan from state if missing (e.g., created from WebSocket without plan)
+      if (!plan && executionMessage?.executionArray) {
+        this.dotbotLogger.debug({ executionId }, 'ExecutionPlan missing, attempting to extract from state');
+        // Use internal method via type assertion (extractExecutionPlanFromState is private)
+        const extractedPlan = (this.currentChat as any).extractExecutionPlanFromState(executionMessage.executionArray);
+        if (extractedPlan) {
+          plan = extractedPlan;
+          // Save extracted plan to execution message for future use
+          await this.currentChat.updateExecutionMessage(executionMessage.id, { executionPlan: plan });
+          this.dotbotLogger.info({ executionId }, 'Extracted and saved ExecutionPlan from state');
+        }
+      }
+      
+      if (plan) {
         // Rebuild requires new sessions
         // CRITICAL: Pass the original executionId to preserve the ExecutionMessage and prevent duplicates
         // CRITICAL: Skip simulation to prevent double simulation (simulation already ran during initial prepareExecution)
-        await this.prepareExecution(executionMessage.executionPlan, executionId, true);
+        await this.prepareExecution(plan, executionId, true);
         executionArray = this.currentChat.getExecutionArray(executionId);
         if (!executionArray) {
           throw new Error('Failed to rebuild execution array');
@@ -713,8 +937,23 @@ export class DotBot {
     } else {
       // Only validate sessions if we're NOT rebuilding (using existing executionArray)
       // If we rebuild, prepareExecution will create new sessions
+      // Validate sessions are still connected (important with lazy-loaded RPC connections)
       if (!(await this.currentChat.validateExecutionSessions())) {
-        throw new Error('Execution session expired. Please prepare the execution again.');
+        this.dotbotLogger.warn({ executionId }, 'Execution sessions expired or disconnected, recreating...');
+        // Try to recreate sessions
+        try {
+          await this.currentChat.initializeExecutionSessions(
+            this.relayChainManager,
+            this.assetHubManager
+          );
+          // Validate again after recreation
+          if (!(await this.currentChat.validateExecutionSessions())) {
+            throw new Error('Failed to recreate execution sessions. Please try again or check your network connection.');
+          }
+        } catch (recreateError) {
+          const errorMsg = recreateError instanceof Error ? recreateError.message : 'Unknown error';
+          throw new Error(`Execution session expired and could not be recreated: ${errorMsg}. Please prepare the execution again.`);
+        }
       }
     }
     
@@ -728,7 +967,7 @@ export class DotBot {
   }
   
   /**
-   * Start execution in stateless mode
+   * Start execution in SESSION_SERVER_MODE
    * Rebuilds ExecutionArray from stored plan and sessions, then executes
    */
   private async startExecutionStateless(executionId: string, options?: ExecutionOptions): Promise<void> {
@@ -738,6 +977,22 @@ export class DotBot {
     
     if (!sessions || !plan) {
       throw new Error(`Execution ${executionId} not found. It may have expired or not been prepared yet.`);
+    }
+    
+    // Check TTL expiration
+    const age = Date.now() - sessions.createdAt;
+    if (age > this.SESSION_TTL_MS) {
+      this.cleanupExecutionSessions(executionId);
+      throw new Error(`Execution ${executionId} has expired (${Math.round(age / 60000)} minutes old). Maximum session lifetime is ${this.SESSION_TTL_MS / 60000} minutes. Please prepare the execution again.`);
+    }
+    
+    // Validate sessions are still active
+    const relayChainValid = await this.validateExecutionSession(sessions.relayChain);
+    const assetHubValid = !sessions.assetHub || await this.validateExecutionSession(sessions.assetHub);
+    
+    if (!relayChainValid || !assetHubValid) {
+      this.cleanupExecutionSessions(executionId);
+      throw new Error(`Execution ${executionId} has expired. Sessions are no longer valid. Please prepare the execution again.`);
     }
     
     this.dotbotLogger.info({ executionId }, 'startExecutionStateless: Rebuilding ExecutionArray from plan');
@@ -791,65 +1046,141 @@ export class DotBot {
     }, 'chat: Starting chat request');
     
     // Emit chat started event
-    this.emit({ type: 'chat-started', message });
+    this.emit({ type: DotBotEventType.CHAT_STARTED, message });
     
-    // Save user message
-    if (this.currentChat) {
-      await this.currentChat.addUserMessage(message);
-      this.emit({ type: 'user-message-added', message, timestamp: Date.now() });
-    }
-    
-    // Get LLM response
-    this.dotbotLogger.debug({ 
-      messagePreview: message.substring(0, 100)
-    }, 'chat: Getting LLM response');
-    const llmResponse = await this.getLLMResponse(message, options);
-    
-    this.dotbotLogger.debug({ 
-      responseLength: llmResponse.length,
-      responsePreview: llmResponse.substring(0, 200)
-    }, 'chat: LLM response received');
-    
-    // Extract execution plan
-    const plan = this.extractExecutionPlan(llmResponse);
-    
-    this.dotbotLogger.info({ 
-      hasPlan: !!plan,
-      planId: plan?.id || null,
-      stepsCount: plan?.steps.length || 0,
-      originalRequest: plan?.originalRequest || null
-    }, 'chat: Execution plan extraction result');
-    
-    let result: ChatResult;
-    
-    // No execution needed - just a conversation
-    if (!plan || plan.steps.length === 0) {
+    try {
+      // Save user message
+      if (this.currentChat) {
+        await this.currentChat.addUserMessage(message);
+        this.emit({ type: DotBotEventType.USER_MESSAGE_ADDED, message, timestamp: Date.now() });
+      }
+      
+      // Get LLM response
+      this.dotbotLogger.debug({ 
+        messagePreview: message.substring(0, 100)
+      }, 'chat: Getting LLM response');
+      const llmResponse = await this.getLLMResponse(message, options);
+      
+      this.dotbotLogger.debug({ 
+        responseLength: llmResponse.length,
+        responsePreview: llmResponse.substring(0, 200)
+      }, 'chat: LLM response received');
+      
+      // Extract execution plan
+      // Log that we expect a plan for transfer/action commands
+      const messageLower = message.toLowerCase();
+      const shouldHavePlan = messageLower.includes('send') || 
+                            messageLower.includes('transfer') || 
+                            messageLower.includes('execute') ||
+                            messageLower.includes('create') ||
+                            messageLower.includes('stake') ||
+                            messageLower.includes('unstake');
+      
+      if (shouldHavePlan) {
+        console.log('[DotBot] ExecutionPlan should be created for message:', message.substring(0, 100));
+        this.dotbotLogger.info({ 
+          messagePreview: message.substring(0, 100)
+        }, 'ExecutionPlan should be created');
+      }
+      
+      const plan = this.extractExecutionPlan(llmResponse);
+      
+      if (plan) {
+        console.log('[DotBot] ExecutionPlan was created:', {
+          planId: plan.id,
+          stepsCount: plan.steps.length,
+          originalRequest: plan.originalRequest
+        });
+        this.dotbotLogger.info({ 
+          planId: plan.id,
+          stepsCount: plan.steps.length,
+          originalRequest: plan.originalRequest
+        }, 'ExecutionPlan was created');
+      } else {
+        if (shouldHavePlan) {
+          console.warn('[DotBot] ExecutionPlan was not created (expected for this message)');
+          this.dotbotLogger.warn({ 
+            messagePreview: message.substring(0, 100)
+          }, 'ExecutionPlan was not created (expected for this message)');
+        }
+        this.dotbotLogger.info({ 
+          hasPlan: false,
+          planId: null,
+          stepsCount: 0,
+          originalRequest: null
+        }, 'chat: Execution plan extraction result (no plan)');
+      }
+      
+      let result: ChatResult;
+      
+      // No execution needed - just a conversation
+      if (!plan || plan.steps.length === 0) {
+        this.dotbotLogger.info({ 
+          responseLength: llmResponse.length
+        }, 'chat: Handling as conversation (no execution plan)');
+        result = await this.handleConversationResponse(llmResponse);
+      } else {
+        // Execute blockchain operations
+        this.dotbotLogger.info({ 
+          planId: plan.id,
+          stepsCount: plan.steps.length
+        }, 'chat: Handling as execution (plan found)');
+        result = await this.handleExecutionResponse(llmResponse, plan, options);
+      }
+      
       this.dotbotLogger.info({ 
-        responseLength: llmResponse.length
-      }, 'chat: Handling as conversation (no execution plan)');
-      result = await this.handleConversationResponse(llmResponse);
-    } else {
-      // Execute blockchain operations
-      this.dotbotLogger.info({ 
-        planId: plan.id,
-        stepsCount: plan.steps.length
-      }, 'chat: Handling as execution (plan found)');
-      result = await this.handleExecutionResponse(llmResponse, plan, options);
+        executed: result.executed,
+        success: result.success,
+        completed: result.completed,
+        failed: result.failed,
+        hasPlan: !!result.plan,
+        responseLength: result.response.length
+      }, 'chat: Chat request completed');
+      
+      // Emit chat complete event
+      this.emit({ type: DotBotEventType.CHAT_COMPLETE, result });
+      
+      return result;
+    } catch (error) {
+      // Always emit chat-error or chat-complete, even on failures
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorObj = error instanceof Error ? error : new Error(errorMsg);
+      
+      this.dotbotLogger.error({ 
+        error: errorMsg,
+        stack: error instanceof Error ? error.stack : undefined
+      }, 'chat: Error during chat request');
+      
+      // Create error result
+      const errorResult: ChatResult = {
+        response: `I encountered an error while processing your request: ${errorMsg}`,
+        executed: false,
+        success: false,
+        completed: 0,
+        failed: 1,
+      };
+      
+      // Save error message to chat if possible
+      if (this.currentChat) {
+        try {
+          await this.currentChat.addBotMessage(errorResult.response);
+        } catch (saveError) {
+          // If saving fails, log but continue
+          this.dotbotLogger.warn({ 
+            error: saveError instanceof Error ? saveError.message : String(saveError)
+          }, 'chat: Failed to save error message to chat');
+        }
+      }
+      
+      // Emit error event
+      this.emit({ type: DotBotEventType.CHAT_ERROR, error: errorObj });
+      
+      // Also emit chat-complete with error result to ensure ScenarioExecutor doesn't hang
+      // This is a fallback - chat-error should be sufficient, but this ensures compatibility
+      this.emit({ type: DotBotEventType.CHAT_COMPLETE, result: errorResult });
+      
+      return errorResult;
     }
-    
-    this.dotbotLogger.info({ 
-      executed: result.executed,
-      success: result.success,
-      completed: result.completed,
-      failed: result.failed,
-      hasPlan: !!result.plan,
-      responseLength: result.response.length
-    }, 'chat: Chat request completed');
-    
-    // Emit chat complete event
-    this.emit({ type: 'chat-complete', result });
-    
-    return result;
   }
   
   /**
@@ -869,8 +1200,9 @@ export class DotBot {
   
   /**
    * Emit event to all listeners
+   * Public so frontend can emit events when managing its own state
    */
-  private emit(event: DotBotEvent): void {
+  emit(event: DotBotEvent): void {
     for (const listener of this.eventListeners) {
       try {
         listener(event);
@@ -922,7 +1254,7 @@ export class DotBot {
     // Save bot response
     if (this.currentChat) {
       await this.currentChat.addBotMessage(cleanedResponse);
-      this.emit({ type: 'bot-message-added', message: cleanedResponse, timestamp: Date.now() });
+      this.emit({ type: DotBotEventType.BOT_MESSAGE_ADDED, message: cleanedResponse, timestamp: Date.now() });
       
       // Auto-generate title if needed
       if (!this.currentChat.title || this.currentChat.title.startsWith('Chat -')) {
@@ -947,41 +1279,75 @@ export class DotBot {
     plan: ExecutionPlan,
     options?: ChatOptions
   ): Promise<ChatResult> {
+    console.log('[DotBot] ExecutionPlan was created, preparing execution:', {
+      planId: plan.id,
+      stepsCount: plan.steps.length,
+      originalRequest: plan.originalRequest
+    });
     this.dotbotLogger.info({ 
       planId: plan.id,
       stepsCount: plan.steps.length,
       originalRequest: plan.originalRequest
-    }, 'Handling execution response - preparing execution');
+    }, 'ExecutionPlan was created, preparing execution');
     
     // Prepare execution (orchestrate + add to chat)
     // Do NOT auto-execute - wait for user approval in UI!
     let executionArrayState: ExecutionArrayState | undefined;
+    let executionId: string | undefined;
+    
     try {
-      const result = await this.prepareExecution(plan);
-      if (result) {
-        // Stateless mode - result is ExecutionArrayState
-        executionArrayState = result;
+      // If backend simulation is disabled, skip orchestration - frontend will handle it
+      if (!this._stateful && !this._backendSimulation) {
+        // SESSION_SERVER_MODE with frontend simulation: Just generate executionId and return plan
+        executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         this.dotbotLogger.info({ 
           planId: plan.id,
-          stepsCount: plan.steps.length,
-          executionId: executionArrayState.id
-        }, 'Execution preparation completed successfully (stateless mode)');
-      } else {
-        // Stateful mode - execution was added to chat
-        this.dotbotLogger.info({ 
-          planId: plan.id,
+          executionId,
           stepsCount: plan.steps.length
-        }, 'Execution preparation completed successfully (stateful mode)');
+        }, 'Skipping backend orchestration - frontend will handle orchestration and simulation');
+      } else {
+        // Normal flow: orchestrate (and optionally simulate) on backend
+        const result = await this.prepareExecution(plan);
+        if (result) {
+          // SESSION_SERVER_MODE - result is ExecutionArrayState
+          executionArrayState = result;
+          executionId = executionArrayState.id;
+          this.dotbotLogger.info({ 
+            planId: plan.id,
+            stepsCount: plan.steps.length,
+            executionId: executionArrayState.id
+          }, 'Execution preparation completed successfully (SESSION_SERVER_MODE)');
+        } else {
+          // Stateful mode - execution was added to chat
+          // Extract executionId from the execution message
+          if (this.currentChat) {
+            const messages = this.currentChat.getDisplayMessages();
+            const execMsg = messages.find(
+              m => m.type === 'execution' && (m as any).executionPlan?.id === plan.id
+            ) as any;
+            executionId = execMsg?.executionId;
+          }
+          this.dotbotLogger.info({ 
+            planId: plan.id,
+            stepsCount: plan.steps.length,
+            executionId
+          }, 'Execution preparation completed successfully (stateful mode)');
+        }
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('[DotBot] ExecutionPlan was not created - preparation failed:', {
+        error: errorMsg,
+        planId: plan.id,
+        originalRequest: plan.originalRequest
+      });
       this.dotbotLogger.error({ 
         error: errorMsg,
         stack: error instanceof Error ? error.stack : undefined,
         planId: plan.id,
         originalRequest: plan.originalRequest,
         stepsCount: plan.steps.length
-      }, 'Execution preparation failed');
+      }, 'ExecutionPlan was not created - preparation failed');
       
       // Clean up any partial execution message that might have been added
       if (this.currentChat) {
@@ -1004,7 +1370,7 @@ export class DotBot {
       const errorResponse = await this.getLLMResponse(errorContextMessage, options);
       
       // Emit error event
-      this.emit({ type: 'chat-error', error: error instanceof Error ? error : new Error(errorMsg) });
+      this.emit({ type: DotBotEventType.CHAT_ERROR, error: error instanceof Error ? error : new Error(errorMsg) });
       
       // Save error message to chat
       if (this.currentChat) {
@@ -1023,7 +1389,9 @@ export class DotBot {
     }
     
     // Generate friendly message (pre-execution)
-    const friendlyMessage = `I've prepared a transaction flow with ${plan.steps.length} step${plan.steps.length !== 1 ? 's' : ''}. Review the details below and click "Accept and Start" when ready.`;
+    // Include the original request so the LLM can recognize it in conversation history
+    const originalRequestText = plan.originalRequest ? ` for: "${plan.originalRequest}"` : '';
+    const friendlyMessage = `I've prepared a transaction flow with ${plan.steps.length} step${plan.steps.length !== 1 ? 's' : ''}${originalRequestText}. Review the details below and click "Accept and Start" when ready.`;
     
     this.dotbotLogger.info({ 
       planId: plan.id,
@@ -1045,8 +1413,8 @@ export class DotBot {
     return {
       response: friendlyMessage,
       plan,
-      executionArrayState, // Included in stateless mode
-      executionId: executionArrayState?.id, // Included in stateless mode
+      executionArrayState, // Included in SESSION_SERVER_MODE (when backend orchestrates)
+      executionId: executionId || executionArrayState?.id, // Always include executionId
       executed: false,  // Not executed yet!
       success: true,
       completed: 0,
@@ -1064,16 +1432,20 @@ export class DotBot {
    * IMPORTANT: 
    * - In stateful mode: Adds ExecutionMessage to chat IMMEDIATELY (before orchestration) so the UI
    *   can show "Preparing..." state, then orchestrates and updates the message with the executionArray.
-   * - In stateless mode: Creates sessions, orchestrates, simulates, and returns ExecutionArrayState
+   * - In SESSION_SERVER_MODE: Creates sessions, orchestrates, simulates, and returns ExecutionArrayState
    *   (sessions are stored temporarily for later execution)
    * 
    * @param plan ExecutionPlan from LLM
    * @param executionId Optional execution ID to preserve when rebuilding (prevents duplicate ExecutionMessages)
    * @param skipSimulation If true, skip simulation (used when rebuilding to prevent double simulation)
-   * @returns ExecutionArrayState in stateless mode, void in stateful mode
+   * @returns ExecutionArrayState in SESSION_SERVER_MODE, void in stateful mode
    */
   private async prepareExecution(plan: ExecutionPlan, executionId?: string, skipSimulation: boolean = false): Promise<ExecutionArrayState | void> {
-    // Step 0: Generate executionId if not provided
+    // Step 0: Ensure RPC connections are ready (including Asset Hub) before preparing execution
+    // LAZY LOADING: Only connect when execution is actually being prepared (not when loading history)
+    await this.ensureRpcConnectionsReady();
+    
+    // Step 1: Generate executionId if not provided
     const finalExecutionId = executionId || `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     this.dotbotLogger.info({ 
@@ -1084,7 +1456,7 @@ export class DotBot {
       stateful: this._stateful
     }, 'prepareExecution: Starting execution preparation');
     
-    // Handle stateless mode
+    // Handle SESSION_SERVER_MODE
     if (!this._stateful) {
       return this.prepareExecutionStateless(plan, finalExecutionId, skipSimulation);
     }
@@ -1098,6 +1470,9 @@ export class DotBot {
     }
     
     try {
+      // GUARD: Ensure RPC connections are ready before preparing execution (lazy loading)
+      await this.ensureRpcConnectionsReady();
+      
       // Step 1: Initialize execution sessions for this chat (if not already initialized)
       this.dotbotLogger.debug({ 
         executionId: finalExecutionId 
@@ -1230,10 +1605,11 @@ export class DotBot {
         this.dotbotLogger.debug({ executionId }, 'Asset Hub session creation failed (expected in some cases)');
       }
       
-      // Store sessions and plan for later execution
+      // Store sessions and plan for later execution (with TTL)
       this.executionSessions.set(executionId, {
         relayChain: relayChainSession,
-        assetHub: assetHubSession
+        assetHub: assetHubSession,
+        createdAt: Date.now()
       });
       this.executionPlans.set(executionId, plan);
       
@@ -1255,6 +1631,9 @@ export class DotBot {
         executionId
       );
       
+      // Store ExecutionArray directly (no ChatInstance needed for SESSION_SERVER_MODE)
+      this.executionArrays.set(executionId, executionArray);
+      
       // Store initial state (after orchestration, before simulation)
       this.executionStates.set(executionId, executionArray.getState());
       
@@ -1263,17 +1642,38 @@ export class DotBot {
         itemsCount: executionArray.getItems().length
       }, 'prepareExecutionStateless: Orchestration completed');
       
-      // Subscribe to progress updates to keep state current (for polling)
+      // Call onExecutionReady callback if provided (allows setting up WebSocket broadcasting before simulation)
+      // Pass ExecutionArray directly instead of ChatInstance
+      if (this.config?.onExecutionReady) {
+        try {
+          // Create a minimal chat-like object for backward compatibility, or pass ExecutionArray directly
+          // For now, we'll call it with currentChat if it exists, otherwise skip
+          // TODO: Refactor onExecutionReady to accept ExecutionArray directly
+          if (this.currentChat) {
+            this.config.onExecutionReady(executionId, this.currentChat);
+            this.dotbotLogger.debug({ 
+              executionId 
+            }, 'prepareExecutionStateless: onExecutionReady callback executed');
+          }
+        } catch (error) {
+          this.dotbotLogger.error({ 
+            executionId,
+            error: error instanceof Error ? error.message : String(error)
+          }, 'prepareExecutionStateless: Error in onExecutionReady callback');
+        }
+      }
+      
+      // Subscribe to progress updates to keep state current (for polling and WebSocket)
       const unsubscribeProgress = executionArray.onProgress(() => {
         const currentState = executionArray.getState();
         this.executionStates.set(executionId, currentState);
       });
       
       // Step 3: Run simulation if enabled and not skipped
-      if (!skipSimulation) {
+      if (!skipSimulation && this._backendSimulation) {
         this.dotbotLogger.info({ 
           executionId 
-        }, 'prepareExecutionStateless: Starting simulation');
+        }, 'prepareExecutionStateless: Starting backend simulation');
         await this.executionSystem.runSimulation(
           executionArray,
           this.wallet.address,
@@ -1285,11 +1685,11 @@ export class DotBot {
         );
         this.dotbotLogger.info({ 
           executionId 
-        }, 'prepareExecutionStateless: Simulation completed');
+        }, 'prepareExecutionStateless: Backend simulation completed');
       } else {
         this.dotbotLogger.debug({ 
           executionId 
-        }, 'prepareExecutionStateless: Skipping simulation');
+        }, 'prepareExecutionStateless: Simulation skipped');
       }
       
       // Unsubscribe from progress updates (preparation complete)
@@ -1307,10 +1707,11 @@ export class DotBot {
       
       return state;
     } catch (error) {
-      // Clean up sessions, plan, and state on error
+      // Clean up sessions, plan, state, and ExecutionArray on error
       this.executionSessions.delete(executionId);
       this.executionPlans.delete(executionId);
       this.executionStates.delete(executionId);
+      this.executionArrays.delete(executionId);
       
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.dotbotLogger.error({ 
@@ -1326,7 +1727,17 @@ export class DotBot {
   }
   
   /**
-   * Get execution sessions for a given executionId (stateless mode)
+   * Validate an execution session is still active
+   */
+  private async validateExecutionSession(session: ExecutionSession): Promise<boolean> {
+    if (!session.isActive) {
+      return false;
+    }
+    return await session.isConnected();
+  }
+  
+  /**
+   * Get execution sessions for a given executionId (SESSION_SERVER_MODE)
    * Used when executing a previously prepared execution
    */
   getExecutionSessions(executionId: string): { relayChain: ExecutionSession; assetHub: ExecutionSession | null } | null {
@@ -1342,8 +1753,17 @@ export class DotBot {
   }
   
   /**
-   * Clean up execution sessions, plan, and state for a given executionId (stateless mode)
+   * Clean up execution sessions, plan, and state for a given executionId (SESSION_SERVER_MODE)
    */
+  /**
+   * Get ExecutionArray instance for a given executionId (SESSION_SERVER_MODE)
+   * Used for direct subscription to execution updates (WebSocket broadcasting)
+   * No ChatInstance needed - subscribe directly to ExecutionArray.onProgress()
+   */
+  getExecutionArray(executionId: string): ExecutionArray | null {
+    return this.executionArrays.get(executionId) || null;
+  }
+  
   cleanupExecutionSessions(executionId: string): void {
     const sessions = this.executionSessions.get(executionId);
     if (sessions) {
@@ -1351,8 +1771,32 @@ export class DotBot {
       this.executionSessions.delete(executionId);
       this.executionPlans.delete(executionId);
       this.executionStates.delete(executionId);
-      this.dotbotLogger.debug({ executionId }, 'Cleaned up execution sessions, plan, and state');
+      this.executionArrays.delete(executionId);
+      this.dotbotLogger.debug({ executionId }, 'Cleaned up execution sessions, plan, state, and ExecutionArray');
     }
+  }
+  
+  /**
+   * Clean up expired execution sessions (call periodically to prevent memory leaks)
+   * Returns the number of executions cleaned up
+   */
+  cleanupExpiredExecutions(): number {
+    const now = Date.now();
+    let cleaned = 0;
+    
+    for (const [executionId, sessions] of this.executionSessions.entries()) {
+      const age = now - sessions.createdAt;
+      if (age > this.SESSION_TTL_MS) {
+        this.cleanupExecutionSessions(executionId);
+        cleaned++;
+        this.dotbotLogger.info({ 
+          executionId, 
+          ageMinutes: Math.round(age / 60000) 
+        }, 'Cleaned up expired execution session');
+      }
+    }
+    
+    return cleaned;
   }
   
   /**
@@ -1369,8 +1813,18 @@ export class DotBot {
     if (!existingMessage) {
       // Create new message with just the plan (no executionArray yet)
       await this.currentChat.addExecutionMessage(executionId, plan);
+      console.log('[DotBot] ExecutionPlan sent to frontend:', {
+        executionId,
+        planId: plan.id,
+        stepsCount: plan.steps.length
+      });
+      this.dotbotLogger.info({ 
+        executionId,
+        planId: plan.id,
+        stepsCount: plan.steps.length
+      }, 'ExecutionPlan sent to frontend');
       this.emit({ 
-        type: 'execution-message-added', 
+        type: DotBotEventType.EXECUTION_MESSAGE_ADDED, 
         executionId, 
         plan, 
         timestamp: Date.now() 
@@ -1406,6 +1860,13 @@ export class DotBot {
     // The ExecutionFlow component will receive updates through its subscription
     this.currentChat.setExecutionArray(state.id, executionArray);
     
+    // Emit event to notify UI that execution was updated (triggers refresh)
+    this.emit({
+      type: DotBotEventType.EXECUTION_MESSAGE_UPDATED,
+      executionId: state.id,
+      timestamp: Date.now()
+    });
+    
     this.dotbotLogger.debug({ 
       executionId: state.id
     }, 'ExecutionArray set in chat, subscriptions active');
@@ -1437,7 +1898,7 @@ export class DotBot {
       // Create new message only if it doesn't exist
       execMessage = await this.currentChat.addExecutionMessage(state, plan);
       this.emit({ 
-        type: 'execution-message-added', 
+        type: DotBotEventType.EXECUTION_MESSAGE_ADDED, 
         executionId: state.id, 
         plan, 
         timestamp: Date.now() 
@@ -1450,6 +1911,13 @@ export class DotBot {
       if (this.currentChat) {
         this.currentChat.updateExecutionMessage(execMessage.id, {
           executionArray: executionArray.getState(),
+        }).then(() => {
+          // Emit event to notify UI of execution message update
+          this.emit({
+            type: DotBotEventType.EXECUTION_MESSAGE_UPDATED,
+            executionId: state.id,
+            timestamp: Date.now()
+          });
         }).catch(err => {
           this.dotbotLogger.error({ 
             error: err instanceof Error ? err.message : String(err),
@@ -1457,6 +1925,30 @@ export class DotBot {
           }, 'Failed to update execution message');
         });
       }
+    });
+  }
+
+  /**
+   * Update an execution message and emit event
+   * This should be used instead of calling currentChat.updateExecutionMessage directly
+   * to ensure events are properly emitted for UI updates
+   */
+  async updateExecutionMessage(
+    messageId: string, 
+    executionId: string,
+    updates: Partial<any>
+  ): Promise<void> {
+    if (!this.currentChat) {
+      throw new Error('No active chat session');
+    }
+    
+    await this.currentChat.updateExecutionMessage(messageId, updates);
+    
+    // Emit event to notify UI
+    this.emit({
+      type: DotBotEventType.EXECUTION_MESSAGE_UPDATED,
+      executionId,
+      timestamp: Date.now()
     });
   }
 
@@ -1502,9 +1994,11 @@ export class DotBot {
     } | null;
     total: string;
   }> {
+    // Ensure RPC connections are ready (lazy loading)
+    await this.ensureRpcConnectionsReady();
     
     // Get Relay Chain balance
-    const relayAccountInfo = await this.api.query.system.account(this.wallet.address);
+    const relayAccountInfo = await this.api!.query.system.account(this.wallet.address);
     const relayData = relayAccountInfo.toJSON() as any;
     
     const relayBalance = {
@@ -1551,9 +2045,12 @@ export class DotBot {
     chain: string;
     version: string;
   }> {
+    // Ensure RPC connections are ready (lazy loading)
+    await this.ensureRpcConnectionsReady();
+    
     const [chain, version] = await Promise.all([
-      this.api.rpc.system.chain(),
-      this.api.rpc.system.version()
+      this.api!.rpc.system.chain(),
+      this.api!.rpc.system.version()
     ]);
     
     return {
@@ -1564,9 +2061,11 @@ export class DotBot {
   
   /**
    * Get Polkadot API (for advanced usage)
+   * Note: This will trigger lazy loading if connections are not ready
    */
-  getApi(): ApiPromise {
-    return this.api;
+  async getApi(): Promise<ApiPromise> {
+    await this.ensureRpcConnectionsReady();
+    return this.api!;
   }
   
   /**
@@ -1574,6 +2073,13 @@ export class DotBot {
    */
   getAssetHubApi(): ApiPromise | null {
     return this.assetHubApi;
+  }
+  
+  /**
+   * Set Asset Hub API (internal use - called during initialization)
+   */
+  _setAssetHubApi(api: ApiPromise | null): void {
+    this.assetHubApi = api;
   }
   
   /**
@@ -1587,7 +2093,9 @@ export class DotBot {
    * Disconnect and cleanup
    */
   async disconnect(): Promise<void> {
-    await this.api.disconnect();
+    if (this.api) {
+      await this.api.disconnect();
+    }
     if (this.assetHubApi) {
       await this.assetHubApi.disconnect();
     }
@@ -1633,6 +2141,9 @@ export class DotBot {
    * Build system prompt with current context
    */
   private async buildContextualSystemPrompt(): Promise<string> {
+    // Ensure RPC connections are ready (lazy loading)
+    await this.ensureRpcConnectionsReady();
+    
     try {
       const balance = await this.getBalance();
       const chainInfo = await this.getChainInfo();
@@ -1643,7 +2154,7 @@ export class DotBot {
                         : 'DOT';
       
       // Get decimals from API registry (environment) - more accurate than hardcoded values
-      const relayChainDecimals = this.api.registry.chainDecimals?.[0];
+      const relayChainDecimals = this.api!.registry.chainDecimals?.[0];
       const assetHubDecimals = this.assetHubApi?.registry.chainDecimals?.[0];
       
       const systemPrompt = await buildSystemPrompt({
@@ -1758,12 +2269,14 @@ export class DotBot {
         // Not plain JSON
       }
 
+      // No plan found in response
       return null;
     } catch (error) {
+      console.error('[DotBot] ExecutionPlan was not created - extraction error:', error instanceof Error ? error.message : String(error));
       this.dotbotLogger.error({ 
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined
-      }, 'Error extracting ExecutionPlan');
+      }, 'ExecutionPlan was not created - extraction error');
       return null;
     }
   }

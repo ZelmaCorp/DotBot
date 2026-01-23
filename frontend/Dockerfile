@@ -1,5 +1,13 @@
 # Frontend Dockerfile
-FROM node:22-alpine as builder
+FROM node:20-bullseye as builder
+
+# Build arguments for environment variables
+ARG REACT_APP_API_URL=http://localhost:8000
+ARG REACT_APP_WS_URL=http://localhost:8000
+
+# Set environment variables for build
+ENV REACT_APP_API_URL=$REACT_APP_API_URL
+ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
 
 # Set working directory
 WORKDIR /app
@@ -27,14 +35,16 @@ RUN npm install
 # Copy frontend source code
 COPY frontend/src ./src
 
-# Build the application
-RUN npm run build
+# Build the application (verify env vars are set)
+RUN echo "Building with REACT_APP_API_URL=$REACT_APP_API_URL" && \
+    echo "Building with REACT_APP_WS_URL=$REACT_APP_WS_URL" && \
+    npm run build
 
 # Production stage
-FROM nginx:alpine
+FROM nginx:bullseye
 
 # Install curl for health checks
-RUN apk add --no-cache curl
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Copy built app to nginx
 COPY --from=builder /app/frontend/build /usr/share/nginx/html

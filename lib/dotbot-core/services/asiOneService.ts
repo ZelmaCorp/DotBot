@@ -53,7 +53,8 @@ export class ASIOneService {
     const apiKey = config?.apiKey || getEnv('ASI_ONE_API_KEY');
     
     if (!apiKey) {
-      logger.warn({}, 'ASI-One API key not provided. Please set ASI_ONE_API_KEY environment variable. API calls will fail without a valid key.');
+      // Use error level to ensure visibility - this is a critical configuration issue
+      logger.error({}, 'ASI-One API key not provided. Please set ASI_ONE_API_KEY environment variable. API calls will fail without a valid key.');
     }
     
     // Merge config carefully - don't let undefined values override defaults
@@ -61,7 +62,7 @@ export class ASIOneService {
       apiKey: apiKey || '',
       baseUrl: 'https://api.asi1.ai/v1', // Default
       model: 'asi1-mini', // Default
-      temperature: 0.7, // Default
+      temperature: 0.3, // Lower temperature for accuracy in blockchain operations (0.0-1.0, lower = more deterministic)
       maxTokens: parseInt(getEnv('ASI_ONE_MAX_TOKENS') || '2048'), // Default
       // Override with env vars if set
       ...(getEnv('ASI_ONE_BASE_URL') && { baseUrl: getEnv('ASI_ONE_BASE_URL') }),
@@ -137,24 +138,19 @@ export class ASIOneService {
   /**
    * Build contextual messages for the API request
    * 
-   * This is now STATELESS - history comes from context (managed by frontend)
+   * Stateless service - conversation history is managed by the caller (frontend).
+   * Filters out system messages from history to ensure the system prompt is first.
    * 
-   * @param context - Context object with conversationHistory from DotBot/frontend
+   * @param context - Context object with conversationHistory and optional systemPrompt
    * @param currentUserMessage - The current user message to include
    */
   private buildContextualMessages(context?: any, currentUserMessage?: string): ASIOneMessage[] {
     const messages: ASIOneMessage[] = [];
-
-    // Use provided systemPrompt from context if available (from DotBot)
-    // Otherwise fall back to default
     const systemPrompt = context?.systemPrompt || this.getSystemPrompt(context);
-    
-    // Get conversation history from context (provided by frontend)
     const conversationHistory = context?.conversationHistory || [];
     
     if (context?.systemPrompt) {
       logger.info({ 
-        subsystem: 'agent-comm',
         promptLength: systemPrompt.length,
         preview: systemPrompt.substring(0, 200),
         historyLength: conversationHistory.length,
@@ -162,22 +158,25 @@ export class ASIOneService {
       }, 'Using provided systemPrompt from DotBot');
     } else {
       logger.warn({ 
-        subsystem: 'agent-comm',
         historyLength: conversationHistory.length
       }, 'WARNING: No systemPrompt provided - using default (DotBot capabilities may be limited)');
     }
     
-    // Add system message
+    // ASI-One API requires system message to be first (and only system message)
     messages.push({
       role: 'system',
       content: systemPrompt
     });
 
     // Add conversation history (from context/frontend)
+    // Filter out system messages to ensure our system prompt is the first (and only) system message
+    // System messages are informational context, not part of the conversation flow
     if (conversationHistory.length > 0) {
-      // Limit to last 20 messages to avoid token limits
-      const recentHistory = conversationHistory.slice(-20);
-      messages.push(...recentHistory);
+      const MAX_HISTORY_MESSAGES = 20; // Limit to avoid token limits
+      const recentHistory = conversationHistory.slice(-MAX_HISTORY_MESSAGES);
+      
+      const conversationMessages = recentHistory.filter((msg: ASIOneMessage) => msg.role !== 'system');
+      messages.push(...conversationMessages);
     }
 
     // ALWAYS add the current user message
@@ -240,15 +239,43 @@ Keep responses concise but informative. Use bullet points for multiple options a
       model: request.model 
     }, 'Fetching from ASI-One');
     
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.apiKey}`,
-        'User-Agent': 'DotBot/1.0.0'
-      },
-      body: JSON.stringify(request)
-    });
+    // Add timeout to prevent hanging (60 seconds for LLM API calls)
+    const ASI_ONE_TIMEOUT_MS = parseInt(getEnv('ASI_ONE_TIMEOUT_MS') || '60000');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ASI_ONE_TIMEOUT_MS);
+    
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.apiKey}`,
+          'User-Agent': 'DotBot/1.0.0'
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      
+      if (fetchError.name === 'AbortError') {
+        logger.error({ 
+          url: url.replace(/\/\/[^\/]+@/, '//***@'),
+          timeout: ASI_ONE_TIMEOUT_MS 
+        }, 'ASI-One API request timed out');
+        throw new Error(`ASI-One API request timed out after ${ASI_ONE_TIMEOUT_MS}ms. The API may be slow or unavailable.`);
+      }
+      
+      // Network errors (DNS, connection refused, etc.)
+      logger.error({ 
+        url: url.replace(/\/\/[^\/]+@/, '//***@'),
+        error: fetchError.message,
+        errorName: fetchError.name
+      }, 'ASI-One API network error');
+      throw new Error(`ASI-One API network error: ${fetchError.message}. Please check your network connection and API endpoint.`);
+    }
 
     if (!response.ok) {
       const errorText = await response.text();

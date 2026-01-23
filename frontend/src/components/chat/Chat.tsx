@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { DotBot, ConversationItem, DotBotEvent } from '@dotbot/core';
+import { DotBot, ConversationItem, DotBotEvent, DotBotEventType } from '@dotbot/core';
 import MessageList from './MessageList';
 import ConversationItems from './ConversationItems';
 import ChatInput from './ChatInput';
@@ -26,8 +26,6 @@ interface ChatProps {
   onPromptProcessed?: () => void;
   /** Auto-submit injected prompts (default: true) */
   autoSubmit?: boolean;
-  /** Backend session ID for API calls (stateless mode) */
-  backendSessionId?: string | null;
 }
 
 const Chat: React.FC<ChatProps> = ({
@@ -39,7 +37,6 @@ const Chat: React.FC<ChatProps> = ({
   injectedPrompt = null,
   onPromptProcessed,
   autoSubmit = true,
-  backendSessionId = null,
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
@@ -133,24 +130,71 @@ const Chat: React.FC<ChatProps> = ({
   }, [injectedPrompt, onPromptProcessed, isTyping, disabled, onSendMessage, autoSubmit]);
 
   // Get conversation items from ChatInstance
-  const conversationItems: ConversationItem[] = dotbot.currentChat?.getDisplayMessages() || [];
+  // Use state to track messages so React detects changes
+  const [conversationItems, setConversationItems] = useState<ConversationItem[]>(() => 
+    dotbot.currentChat?.getDisplayMessages() || []
+  );
   
-  // Subscribe to DotBot events to detect when new execution messages are added
-  // This ensures ExecutionFlow appears immediately when executionMessage is added (before executionArray exists)
+  // Use a ref to track the last known length to avoid dependency issues
+  const lastLengthRef = useRef(conversationItems.length);
+  
+  // Update conversation items when chat changes or messages are added
   useEffect(() => {
+    if (!dotbot.currentChat) {
+      setConversationItems([]);
+      lastLengthRef.current = 0;
+      return;
+    }
+    
+    // Update immediately
+    const updateItems = () => {
+      if (!dotbot.currentChat) {
+        setConversationItems([]);
+        lastLengthRef.current = 0;
+        return;
+      }
+      const items = dotbot.currentChat.getDisplayMessages();
+      // Debug: log all items to see what we have
+      console.log('[Chat] Updating conversation items:', {
+        count: items.length,
+        items: items.map(item => ({ type: item.type, id: item.id, content: 'content' in item ? item.content.substring(0, 50) : 'N/A' }))
+      });
+      setConversationItems(items);
+      lastLengthRef.current = items.length;
+    };
+    
+    updateItems();
+    
+    // Subscribe to DotBot events to detect when messages are added or updated
     const handleDotBotEvent = (event: DotBotEvent) => {
-      // When a new execution message is added, force re-render
-      if (event.type === 'execution-message-added') {
-        setRefreshKey(prev => prev + 1);
+      // When any message is added or updated, update the items
+      if (event.type === DotBotEventType.USER_MESSAGE_ADDED ||
+          event.type === DotBotEventType.BOT_MESSAGE_ADDED ||
+          event.type === DotBotEventType.EXECUTION_MESSAGE_ADDED || 
+          event.type === DotBotEventType.EXECUTION_MESSAGE_UPDATED ||
+          event.type === DotBotEventType.CHAT_LOADED) {
+        // Small delay to ensure message is in the array
+        setTimeout(updateItems, 0);
       }
     };
     
     dotbot.addEventListener(handleDotBotEvent);
     
+    // Also poll for changes (fallback in case events aren't fired)
+    const pollInterval = setInterval(() => {
+      if (!dotbot.currentChat) return;
+      const currentItems = dotbot.currentChat.getDisplayMessages();
+      // Only update if the count changed
+      if (currentItems.length !== lastLengthRef.current) {
+        updateItems();
+      }
+    }, 200); // Check every 200ms
+    
     return () => {
       dotbot.removeEventListener(handleDotBotEvent);
+      clearInterval(pollInterval);
     };
-  }, [dotbot]);
+  }, [dotbot, dotbot.currentChat?.id]);
   
   // Force re-render when executionArray is added to execution messages
   // This ensures ExecutionFlow updates when executionArray state changes
@@ -217,11 +261,10 @@ const Chat: React.FC<ChatProps> = ({
     <div className="chat-container">
       {/* Messages */}
       <MessageList>
-        <ConversationItems 
+        <ConversationItems
           key={refreshKey}
           items={conversationItems}
           dotbot={dotbot}
-          backendSessionId={backendSessionId}
         />
         
         {/* Typing indicator */}

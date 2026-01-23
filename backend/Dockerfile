@@ -1,5 +1,5 @@
 # Build stage
-FROM node:22-alpine AS builder
+FROM node:20-bullseye AS builder
 
 WORKDIR /app
 
@@ -33,39 +33,46 @@ COPY backend/src ./src
 RUN npm run build
 
 # Production stage
-FROM node:22-alpine
+FROM node:20-bullseye
 
 WORKDIR /app
 
 # Install curl for health checks
-RUN apk add --no-cache curl
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Copy shared libraries (needed at runtime)
 COPY lib/ ./lib/
 
-# Build dotbot-core library (must be built for production stage too)
+# Build dotbot-core library first (must be built before backend install to avoid prepare script issues)
 # Install all deps (including dev) needed for TypeScript build, then build
 WORKDIR /app/lib/dotbot-core
 RUN npm install && npm run build
 
-# Build dotbot-express library (must be built for production stage too)
+# Build dotbot-express library (must be built before backend install)
+# @polkadot/api is now in dotbot-express dependencies, so it will be installed here
 WORKDIR /app/lib/dotbot-express
 RUN npm install && npm run build || echo "No build script, skipping"
 
-# Copy backend package files (reset WORKDIR first)
+# Copy backend package files (needed for dependency resolution)
 WORKDIR /app
 COPY backend/package*.json ./backend/
 
-# Install production dependencies only
-# Use npm install since we're in a Docker context without root package-lock.json
+# Install backend production dependencies
+# dotbot-core and dotbot-express are already built, so their prepare scripts won't run
 WORKDIR /app/backend
-RUN npm install --omit=dev
+RUN npm install --omit=dev --ignore-scripts
 
 # Copy built application from builder
 COPY --from=builder /app/backend/dist ./dist
 
+# Create data directory for persistent storage
+RUN mkdir -p /app/backend/data/storage
+
 # Expose port
 EXPOSE 8000
+
+# Define volume for persistent RPC health data
+VOLUME ["/app/backend/data"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

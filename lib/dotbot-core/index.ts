@@ -8,7 +8,7 @@
 // ============================================================================
 // OUT OF THE BOX INTERFACE - Start here!
 // ============================================================================
-export { DotBot } from './dotbot';
+export { DotBot, DotBotEventType } from './dotbot';
 export type { 
   DotBotConfig, 
   ChatResult, 
@@ -278,3 +278,37 @@ export {
 export { AIService, getAIService } from './services/ai/aiService';
 export type { AIServiceConfig } from './services/ai/aiService';
 export { AIProviderType } from './services/ai/aiService';
+
+// ============================================================================
+// Environment and Storage Utilities
+// ============================================================================
+export { 
+  getEnv, 
+  isBrowser, 
+  isNode, 
+  getStorage, 
+  setStorage, 
+  initFileStorage 
+} from './env';
+export type { Storage } from './env';
+
+// ============================================================================
+// Configuration Validation
+// ============================================================================
+export { 
+  validateEnvironment, 
+  validateAndReport 
+} from './utils/validateEnv';
+export type { 
+  ValidationError
+} from './utils/validateEnv';
+
+// ============================================================================
+// WebSocket Types (shared between frontend and backend)
+// ============================================================================
+export type {
+  ClientToServerEvents,
+  ServerToClientEvents,
+} from './types/websocket';
+export { WebSocketEvents } from './types/websocket';
+

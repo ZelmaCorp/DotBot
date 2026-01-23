@@ -109,25 +109,25 @@ export abstract class BaseAgent {
   }
 
   /**
-   * Get account balance information (defaults to relay chain)
+   * Parse account balance from account info query result
    */
-  protected async getBalance(address: string): Promise<BalanceInfo> {
-    const api = this.getApi();
-    const accountInfo = await api.query.system.account(address);
-    
-    // Type assertion for account data
+  private parseBalanceFromAccountInfo(accountInfo: any): BalanceInfo {
     const accountData = accountInfo as any;
     const free = accountData.data?.free?.toString() || '0';
     const reserved = accountData.data?.reserved?.toString() || '0';
     const frozen = accountData.data?.frozen?.toString() || '0';
     const available = new BN(free).sub(new BN(frozen)).toString();
 
-    return {
-      free,
-      reserved,
-      frozen,
-      available,
-    };
+    return { free, reserved, frozen, available };
+  }
+
+  /**
+   * Get account balance information (defaults to relay chain)
+   */
+  protected async getBalance(address: string): Promise<BalanceInfo> {
+    const api = this.getApi();
+    const accountInfo = await api.query.system.account(address);
+    return this.parseBalanceFromAccountInfo(accountInfo);
   }
 
   /**
@@ -135,7 +135,6 @@ export abstract class BaseAgent {
    */
   protected async getAssetHubBalance(address: string): Promise<BalanceInfo | null> {
     if (!this.assetHubApi) {
-      // Try to reconnect if we have the manager
       if (this.assetHubManager) {
         try {
           this.assetHubApi = await this.assetHubManager.getReadApi();
@@ -149,22 +148,8 @@ export abstract class BaseAgent {
 
     try {
       const accountInfo = await this.assetHubApi.query.system.account(address);
-      
-      // Type assertion for account data
-      const accountData = accountInfo as any;
-      const free = accountData.data?.free?.toString() || '0';
-      const reserved = accountData.data?.reserved?.toString() || '0';
-      const frozen = accountData.data?.frozen?.toString() || '0';
-      const available = new BN(free).sub(new BN(frozen)).toString();
-
-      return {
-        free,
-        reserved,
-        frozen,
-        available,
-      };
-    } catch (error) {
-      // Failed to fetch Asset Hub balance
+      return this.parseBalanceFromAccountInfo(accountInfo);
+    } catch {
       return null;
     }
   }
@@ -250,138 +235,195 @@ export abstract class BaseAgent {
     address: string,
     rpcEndpoint?: string | string[]
   ): Promise<DryRunResult> {
+    await this.ensureApiReady(api);
+    this.validateExtrinsic(extrinsic);
+
+    const chopsticksResult = await this.tryChopsticksSimulation(api, extrinsic, address, rpcEndpoint);
+    if (chopsticksResult) {
+      return chopsticksResult;
+    }
+
+    return this.fallbackToPaymentInfo(api, extrinsic, address);
+  }
+
+  /**
+   * Ensure API is ready
+   */
+  private async ensureApiReady(api: ApiPromise): Promise<void> {
     if (!api.isReady) {
       await api.isReady;
     }
+  }
 
+  /**
+   * Validate extrinsic structure
+   */
+  private validateExtrinsic(extrinsic: SubmittableExtrinsic<'promise'>): void {
     if (!extrinsic || !extrinsic.method || !extrinsic.method.section || !extrinsic.method.method) {
       throw new Error('Invalid extrinsic: missing method information');
     }
-    
-    let chopsticksError: any = null;
-    
-    // Try Chopsticks simulation first (real runtime execution)
-    try {
-      const { simulateTransaction, isChopsticksAvailable } = await import(
-        '../services/simulation'
-      );
-      
-      if (await isChopsticksAvailable()) {
-        // Use RPC manager endpoints if available, otherwise fallback
-        const chain = api === this.assetHubApi ? 'assetHub' : 'relay';
-        const endpoints = rpcEndpoint 
-          ? (Array.isArray(rpcEndpoint) ? rpcEndpoint : [rpcEndpoint])
-          : this.getRpcEndpointsForChain(chain);
+  }
 
-        // Pass status callback to simulation for user feedback
-        const result = await simulateTransaction(api, endpoints, extrinsic, address, this.onStatusUpdate || undefined);
-        
-        const dryRunResult: DryRunResult = result.success ? {
-          success: true,
-          estimatedFee: result.estimatedFee,
-          wouldSucceed: true,
-          validationMethod: 'chopsticks',
-          balanceChanges: result.balanceChanges.map((bc: any) => ({
-            value: bc.value.toString(),
-            change: bc.change,
-          })),
-          runtimeInfo: {
-            validated: true,
-            events: result.events.length,
-          },
-        } : {
-          success: false,
-          error: result.error || 'Simulation failed',
-          estimatedFee: result.estimatedFee,
-          wouldSucceed: false,
-          validationMethod: 'chopsticks',
-        };
-
-        // Send result to status callback
-        if (this.onStatusUpdate && (dryRunResult.success || dryRunResult.error)) {
-          this.onStatusUpdate({
-            phase: dryRunResult.success ? 'complete' : 'error',
-            message: dryRunResult.success 
-              ? `✓ Simulation successful!` 
-              : `✗ Simulation failed: ${dryRunResult.error}`,
-            progress: 100,
-            result: {
-              success: dryRunResult.success,
-              estimatedFee: dryRunResult.estimatedFee,
-              validationMethod: dryRunResult.validationMethod,
-              balanceChanges: dryRunResult.balanceChanges,
-              runtimeInfo: dryRunResult.runtimeInfo,
-              error: dryRunResult.error,
-              wouldSucceed: dryRunResult.wouldSucceed,
-            },
-          });
-        }
-
-        return dryRunResult;
-      }
-    } catch (error) {
-      chopsticksError = error;
+  /**
+   * Try Chopsticks simulation (server-only)
+   */
+  private async tryChopsticksSimulation(
+    api: ApiPromise,
+    extrinsic: SubmittableExtrinsic<'promise'>,
+    address: string,
+    rpcEndpoint?: string | string[]
+  ): Promise<DryRunResult | null> {
+    if (typeof window !== 'undefined') {
+      return null; // Browser: skip to prevent blocking import
     }
-    
+
     try {
-      if (!api.isReady) {
-        await api.isReady;
+      const { simulateTransaction, isChopsticksAvailable } = await import('../services/simulation');
+      
+      if (!(await isChopsticksAvailable())) {
+        return null;
       }
 
-      if (!extrinsic.method || !extrinsic.method.section || !extrinsic.method.method) {
-        throw new Error('Invalid extrinsic structure: missing method information');
-      }
+      const chain = api === this.assetHubApi ? 'assetHub' : 'relay';
+      const endpoints = rpcEndpoint 
+        ? (Array.isArray(rpcEndpoint) ? rpcEndpoint : [rpcEndpoint])
+        : this.getRpcEndpointsForChain(chain);
 
-      if (!address || address.trim().length === 0) {
-        throw new Error('Invalid address for paymentInfo');
-      }
+      const result = await simulateTransaction(api, endpoints, extrinsic, address, this.onStatusUpdate || undefined);
+      const dryRunResult = this.createDryRunResultFromSimulation(result);
+      
+      this.notifySimulationStatus(dryRunResult);
+      return dryRunResult;
+    } catch {
+      return null;
+    }
+  }
 
-      const paymentInfo = await extrinsic.paymentInfo(address);
-      const estimatedFee = paymentInfo.partialFee.toString();
-
-      const paymentInfoResult: DryRunResult = {
+  /**
+   * Create dry run result from simulation result
+   */
+  private createDryRunResultFromSimulation(result: any): DryRunResult {
+    if (result.success) {
+      return {
         success: true,
-        estimatedFee,
+        estimatedFee: result.estimatedFee,
         wouldSucceed: true,
-        validationMethod: 'paymentInfo',
+        validationMethod: 'chopsticks',
+        balanceChanges: result.balanceChanges.map((bc: any) => ({
+          value: bc.value.toString(),
+          change: bc.change,
+        })),
         runtimeInfo: {
-          weight: paymentInfo.weight.toString(),
-          class: paymentInfo.class.toString(),
-          validated: false,
-          warning: 'Runtime execution not validated - paymentInfo only checks structure',
-          chopsticksError: chopsticksError ? (chopsticksError instanceof Error ? chopsticksError.message : String(chopsticksError)) : undefined,
+          validated: true,
+          events: result.events.length,
         },
       };
+    }
 
-      // Send result to status callback
-      if (this.onStatusUpdate) {
-        this.onStatusUpdate({
-          phase: 'complete',
-          message: '⚠️ Using basic validation (Chopsticks unavailable)',
-          progress: 100,
-          details: 'Runtime execution not validated - paymentInfo only checks structure',
-          result: {
-            success: paymentInfoResult.success,
-            estimatedFee: paymentInfoResult.estimatedFee,
-            validationMethod: paymentInfoResult.validationMethod,
-            runtimeInfo: paymentInfoResult.runtimeInfo,
-            wouldSucceed: paymentInfoResult.wouldSucceed,
-          },
-        });
-      }
+    return {
+      success: false,
+      error: result.error || 'Simulation failed',
+      estimatedFee: result.estimatedFee,
+      wouldSucceed: false,
+      validationMethod: 'chopsticks',
+    };
+  }
 
-      return paymentInfoResult;
+  /**
+   * Notify status callback about simulation result
+   */
+  private notifySimulationStatus(result: DryRunResult): void {
+    if (!this.onStatusUpdate || (!result.success && !result.error)) {
+      return;
+    }
+
+    this.onStatusUpdate({
+      phase: result.success ? 'complete' : 'error',
+      message: result.success 
+        ? '✓ Simulation successful!' 
+        : `✗ Simulation failed: ${result.error}`,
+      progress: 100,
+      result: {
+        success: result.success,
+        estimatedFee: result.estimatedFee,
+        validationMethod: result.validationMethod,
+        balanceChanges: result.balanceChanges,
+        runtimeInfo: result.runtimeInfo,
+        error: result.error,
+        wouldSucceed: result.wouldSucceed,
+      },
+    });
+  }
+
+  /**
+   * Fallback to paymentInfo validation
+   */
+  private async fallbackToPaymentInfo(
+    api: ApiPromise,
+    extrinsic: SubmittableExtrinsic<'promise'>,
+    address: string
+  ): Promise<DryRunResult> {
+    await this.ensureApiReady(api);
+    
+    if (!address || address.trim().length === 0) {
+      throw new Error('Invalid address for paymentInfo');
+    }
+
+    try {
+      const paymentInfo = await extrinsic.paymentInfo(address);
+      const result = this.createPaymentInfoResult(paymentInfo);
+      this.notifyPaymentInfoStatus(result);
+      return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
       return {
         success: false,
-        error: errorMessage,
+        error: error instanceof Error ? error.message : String(error),
         estimatedFee: '0',
         wouldSucceed: false,
         validationMethod: 'paymentInfo',
       };
     }
+  }
+
+  /**
+   * Create result from paymentInfo
+   */
+  private createPaymentInfoResult(paymentInfo: any): DryRunResult {
+    return {
+      success: true,
+      estimatedFee: paymentInfo.partialFee.toString(),
+      wouldSucceed: true,
+      validationMethod: 'paymentInfo',
+      runtimeInfo: {
+        weight: paymentInfo.weight.toString(),
+        class: paymentInfo.class.toString(),
+        validated: false,
+        warning: 'Runtime execution not validated - paymentInfo only checks structure',
+      },
+    };
+  }
+
+  /**
+   * Notify status callback about paymentInfo result
+   */
+  private notifyPaymentInfoStatus(result: DryRunResult): void {
+    if (!this.onStatusUpdate) {
+      return;
+    }
+
+    this.onStatusUpdate({
+      phase: 'complete',
+      message: '⚠️ Using basic validation (Chopsticks unavailable)',
+      progress: 100,
+      details: 'Runtime execution not validated - paymentInfo only checks structure',
+      result: {
+        success: result.success,
+        estimatedFee: result.estimatedFee,
+        validationMethod: result.validationMethod,
+        runtimeInfo: result.runtimeInfo,
+        wouldSucceed: result.wouldSucceed,
+      },
+    });
   }
 
   /**
@@ -391,47 +433,41 @@ export abstract class BaseAgent {
   protected getRpcEndpointsForChain(chain: 'assetHub' | 'relay'): string[] {
     const manager = chain === 'assetHub' ? this.assetHubManager : this.relayChainManager;
     
-    if (manager) {
-      // Get current endpoint first (the one API is connected to)
-      const currentEndpoint = manager.getCurrentEndpoint();
-      
-      // Get all endpoints from manager (it handles health and ordering)
-      const healthStatus = manager.getHealthStatus();
-      const now = Date.now();
-      const failoverTimeout = 5 * 60 * 1000; // 5 minutes
-      
-      // Filter and sort endpoints
-      const orderedEndpoints = healthStatus
-        .filter(h => {
-          // Include if healthy, or if failure was long ago
-          if (h.healthy) return true;
-          if (!h.lastFailure) return true;
-          return (now - h.lastFailure) >= failoverTimeout;
-        })
-        .sort((a, b) => {
-          // Prioritize current endpoint
-          if (a.endpoint === currentEndpoint) return -1;
-          if (b.endpoint === currentEndpoint) return 1;
-          // Then by health
-          if (a.healthy !== b.healthy) return a.healthy ? -1 : 1;
-          // Then by failure count
-          if (a.failureCount !== b.failureCount) return a.failureCount - b.failureCount;
-          // Finally by response time
-          if (a.avgResponseTime && b.avgResponseTime) return a.avgResponseTime - b.avgResponseTime;
-          return 0;
-        })
-        .map(h => h.endpoint);
-      
-      if (orderedEndpoints.length > 0) {
-        return orderedEndpoints;
-      }
-      
-      // Fallback to all endpoints if none are healthy
-      return healthStatus.map(h => h.endpoint);
+    if (!manager) {
+      return this.getDefaultRpcEndpoints(chain);
     }
-    
-    // Fallback to hardcoded endpoints if no manager
-    return this.getDefaultRpcEndpoints(chain);
+
+    const orderedEndpoints = this.getOrderedEndpoints(manager);
+    return orderedEndpoints.length > 0 
+      ? orderedEndpoints 
+      : manager.getHealthStatus().map(h => h.endpoint);
+  }
+
+  /**
+   * Get ordered endpoints from manager (healthy first, sorted by priority)
+   */
+  private getOrderedEndpoints(manager: RpcManager): string[] {
+    const currentEndpoint = manager.getCurrentEndpoint() || '';
+    const healthStatus = manager.getHealthStatus();
+    const now = Date.now();
+    const failoverTimeout = 5 * 60 * 1000; // 5 minutes
+
+    return healthStatus
+      .filter(h => h.healthy || !h.lastFailure || (now - h.lastFailure) >= failoverTimeout)
+      .sort((a, b) => this.compareEndpoints(a, b, currentEndpoint))
+      .map(h => h.endpoint);
+  }
+
+  /**
+   * Compare endpoints for sorting (current first, then health, then failures, then response time)
+   */
+  private compareEndpoints(a: any, b: any, currentEndpoint: string | null): number {
+    if (a.endpoint === currentEndpoint) return -1;
+    if (b.endpoint === currentEndpoint) return 1;
+    if (a.healthy !== b.healthy) return a.healthy ? -1 : 1;
+    if (a.failureCount !== b.failureCount) return a.failureCount - b.failureCount;
+    if (a.avgResponseTime && b.avgResponseTime) return a.avgResponseTime - b.avgResponseTime;
+    return 0;
   }
 
   /**
@@ -482,68 +518,98 @@ export abstract class BaseAgent {
    * Validates the API is connected to the expected chain type.
    */
   protected async getApiForChain(chain: 'assetHub' | 'relay'): Promise<ApiPromise> {
-    let api: ApiPromise;
-    
-    if (chain === 'assetHub') {
-      if (!this.assetHubApi) {
-        // Try to reconnect if we have the manager
-        if (this.assetHubManager) {
-          try {
-            this.assetHubApi = await this.assetHubManager.getReadApi();
-          } catch (error) {
-            throw new AgentError(
-              `Asset Hub API not available. Failed to connect to any Asset Hub endpoint: ${error instanceof Error ? error.message : 'Unknown error'}`,
-              'ASSET_HUB_NOT_AVAILABLE'
-            );
-          }
-        } else {
-          throw new AgentError(
-            'Asset Hub API not available. Please ensure Asset Hub connection is initialized.',
-            'ASSET_HUB_NOT_AVAILABLE'
-          );
-        }
-      }
-      api = this.assetHubApi;
-    } else {
-      // Relay chain
-      api = this.getApi();
-    }
+    const api = chain === 'assetHub' 
+      ? await this.getAssetHubApi()
+      : this.getApi();
 
-    if (!api || !api.isReady) {
-      await api.isReady;
-    }
-
-    const runtimeChain = api.runtimeChain?.toString() || 'Unknown';
-    const specName = api.runtimeVersion?.specName?.toString() || 'unknown';
-
-    const isAssetHub =
-      runtimeChain.toLowerCase().includes('asset') ||
-      runtimeChain.toLowerCase().includes('statemint') ||
-      specName.toLowerCase().includes('asset') ||
-      specName.toLowerCase().includes('statemint');
-
-    const isRelayChain =
-      runtimeChain.toLowerCase().includes('polkadot') &&
-      !isAssetHub &&
-      specName.toLowerCase().includes('polkadot');
-
-    if (chain === 'assetHub' && !isAssetHub) {
-      throw new AgentError(
-        `API chain mismatch: Requested Asset Hub but API is connected to "${runtimeChain}" (${specName}). ` +
-        `This would cause extrinsic construction on the wrong runtime. ` +
-        `Please reconnect to Asset Hub.`,
-        'API_CHAIN_MISMATCH',
-        {
-          requested: 'assetHub',
-          actual: runtimeChain,
-          specName,
-          isAssetHub,
-          isRelayChain,
-        }
-      );
-    }
+    await this.ensureApiReady(api);
+    this.validateChainMatch(api, chain);
     
     return api;
+  }
+
+  /**
+   * Get Asset Hub API, reconnecting if needed
+   */
+  private async getAssetHubApi(): Promise<ApiPromise> {
+    if (this.assetHubApi && await this.isValidAssetHubApi(this.assetHubApi)) {
+      return this.assetHubApi;
+    }
+
+    this.assetHubApi = null;
+    
+    if (!this.assetHubManager) {
+      throw new AgentError(
+        'Asset Hub API not available. Please ensure Asset Hub connection is initialized.',
+        'ASSET_HUB_NOT_AVAILABLE'
+      );
+    }
+
+    try {
+      this.assetHubApi = await this.assetHubManager.getReadApi();
+      await this.assetHubApi.isReady;
+      
+      if (!(await this.isValidAssetHubApi(this.assetHubApi))) {
+        this.assetHubApi = null;
+        throw new AgentError(
+          `Asset Hub manager returned wrong chain. Expected Asset Hub but got relay chain.`,
+          'ASSET_HUB_WRONG_CHAIN'
+        );
+      }
+
+      return this.assetHubApi;
+    } catch (error) {
+      this.assetHubApi = null;
+      if (error instanceof AgentError) {
+        throw error;
+      }
+      throw new AgentError(
+        `Asset Hub API not available. Failed to connect: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'ASSET_HUB_NOT_AVAILABLE'
+      );
+    }
+  }
+
+  /**
+   * Check if API is valid Asset Hub
+   */
+  private async isValidAssetHubApi(api: ApiPromise): Promise<boolean> {
+    try {
+      await api.isReady;
+      return this.isAssetHubChain(api);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if API is connected to Asset Hub chain
+   */
+  private isAssetHubChain(api: ApiPromise): boolean {
+    const runtimeChain = api.runtimeChain?.toString() || 'Unknown';
+    const specName = api.runtimeVersion?.specName?.toString() || 'unknown';
+    
+    return runtimeChain.toLowerCase().includes('asset') ||
+           runtimeChain.toLowerCase().includes('statemint') ||
+           specName.toLowerCase().includes('asset') ||
+           specName.toLowerCase().includes('statemint');
+  }
+
+  /**
+   * Validate API matches requested chain
+   */
+  private validateChainMatch(api: ApiPromise, requestedChain: 'assetHub' | 'relay'): void {
+    if (requestedChain === 'assetHub' && !this.isAssetHubChain(api)) {
+      const runtimeChain = api.runtimeChain?.toString() || 'Unknown';
+      const specName = api.runtimeVersion?.specName?.toString() || 'unknown';
+      
+      throw new AgentError(
+        `API chain mismatch: Requested Asset Hub but API is connected to "${runtimeChain}" (${specName}). ` +
+        `This would cause extrinsic construction on the wrong runtime.`,
+        'API_CHAIN_MISMATCH',
+        { requested: 'assetHub', actual: runtimeChain, specName }
+      );
+    }
   }
 
   /**
