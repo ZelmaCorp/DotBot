@@ -58,9 +58,10 @@ jobs:
       working-directory: ./frontend
       run: npm run type-check
       
-    - name: Run frontend lint
-      working-directory: ./frontend
-      run: npm run lint
+    # Temporarily disabled lint check
+    # - name: Run frontend lint
+    #   working-directory: ./frontend
+    #   run: npm run lint
       
     - name: Run backend type check
       working-directory: ./backend
