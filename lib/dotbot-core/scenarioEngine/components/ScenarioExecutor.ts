@@ -908,8 +908,9 @@ export class ScenarioExecutor {
             ? `Agent ${expectedAgent} appears to be mentioned in response`
             : `Agent ${expectedAgent} was not detected`,
         };
+      }
 
-      case 'check-extrinsic-creation':
+      case 'check-extrinsic-creation': {
         // Check if an extrinsic was created (ExecutionPlan with steps)
         if (!lastChatResult) {
           return { passed: false, message: 'No chat result available' };
@@ -1001,8 +1002,9 @@ export class ScenarioExecutor {
             message: `Balance check failed: ${error}` 
           };
         }
+      }
 
-      case 'check-error':
+      case 'check-error': {
         // Check if an error was thrown/mentioned
         const hasError = response.toLowerCase().includes('error') || 
                         response.toLowerCase().includes('failed') ||
