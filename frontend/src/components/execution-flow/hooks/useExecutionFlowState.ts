@@ -5,19 +5,16 @@
  * Subscribes to local DotBot ExecutionArray updates
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, startTransition } from 'react';
 import { ExecutionArrayState } from '@dotbot/core/executionEngine/types';
 import { ExecutionMessage, DotBot } from '@dotbot/core';
-import { hasStateChanged, updateStateDeferred } from '../stateUtils';
 
 /**
  * Hook to manage execution flow state with local subscription
  * 
- * SIMPLE: Only handles stateful mode (client does simulation)
  * - Subscribes to local ExecutionArray updates
- * - No WebSocket polling
- * - No backend session tracking
- * - Uses debounced updates to prevent UI freezing
+ * - React 18 automatically batches state updates
+ * - All updates (including progress) propagate immediately
  */
 export function useExecutionFlowState(
   executionMessage: ExecutionMessage | undefined,
@@ -26,7 +23,6 @@ export function useExecutionFlowState(
 ): ExecutionArrayState | null {
   const [liveExecutionState, setLiveExecutionState] = useState<ExecutionArrayState | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
-  const lastStateRef = useRef<ExecutionArrayState | null>(null);
 
   // Subscribe to local ExecutionArray updates
   useEffect(() => {
@@ -46,7 +42,6 @@ export function useExecutionFlowState(
       // No ExecutionArray yet, use snapshot from message if available
       if (executionMessage.executionArray) {
         setLiveExecutionState(executionMessage.executionArray);
-        lastStateRef.current = executionMessage.executionArray;
       }
       return;
     }
@@ -54,20 +49,16 @@ export function useExecutionFlowState(
     // Set initial state from ExecutionArray
     const initialState = executionArray.getState();
     setLiveExecutionState(initialState);
-    lastStateRef.current = initialState;
     
-    // Subscribe to updates with change detection and deferred updates to prevent UI freezing
+    // Subscribe to updates - React 18 will automatically batch rapid updates
     const unsubscribe = dotbot.currentChat.onExecutionUpdate(
       executionMessage.executionId,
       (state) => {
-        // Only update if state actually changed (prevent unnecessary re-renders)
-        if (hasStateChanged(state, lastStateRef.current)) {
-          lastStateRef.current = state;
-          // Use deferred update to prevent UI blocking during rapid simulation updates
-          updateStateDeferred(() => {
-            setLiveExecutionState(state);
-          }, 50);
-        }
+        // Use startTransition to mark as non-urgent, allowing React to batch
+        // This prevents blocking while still showing all updates
+        startTransition(() => {
+          setLiveExecutionState(state);
+        });
       }
     );
 

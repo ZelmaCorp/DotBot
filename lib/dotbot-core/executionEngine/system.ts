@@ -567,9 +567,11 @@ export class ExecutionSystem {
    * Mark item as successful
    */
   private markItemAsSuccessful(item: ExecutionItem, executionArray: ExecutionArray, itemResult: any): void {
+    const realEstimatedFee = itemResult.result.estimatedFee;
+    
     const convertedResult = {
       success: itemResult.result.success,
-      estimatedFee: itemResult.result.estimatedFee,
+      estimatedFee: realEstimatedFee,
       validationMethod: 'chopsticks' as const,
       balanceChanges: itemResult.result.balanceChanges.map((bc: any) => ({
         value: bc.value.toString(),
@@ -584,6 +586,12 @@ export class ExecutionSystem {
       message: 'Simulation completed successfully',
       result: convertedResult,
     });
+    
+    // Update item.estimatedFee with the REAL fee from simulation (replaces guessed fee from agent)
+    if (realEstimatedFee) {
+      executionArray.updateEstimatedFee(item.id, realEstimatedFee);
+    }
+    
     executionArray.updateStatus(item.id, 'ready');
   }
   
