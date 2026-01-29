@@ -22,6 +22,7 @@ import { ExecutionArrayState } from './executionEngine/types';
 import { ExecutionArray } from './executionEngine/executionArray';
 import { BrowserWalletSigner } from './executionEngine/signers/browserSigner';
 import { buildSystemPrompt } from './prompts/system/loader';
+import { extractExecutionPlan } from './prompts/system/utils';
 import { ExecutionPlan } from './prompts/system/execution/types';
 import { SigningRequest, BatchSigningRequest, ExecutionOptions } from './executionEngine/types';
 import { WalletAccount } from './types/wallet';
@@ -1040,109 +1041,39 @@ export class DotBot {
   async chat(message: string, options?: ChatOptions): Promise<ChatResult> {
     this.dotbotLogger.info({ 
       messagePreview: message.substring(0, 100),
-      messageLength: message.length,
-      hasCurrentChat: !!this.currentChat,
-      chatId: this.currentChat?.id || null
+      hasCurrentChat: !!this.currentChat
     }, 'chat: Starting chat request');
     
-    // Emit chat started event
     this.emit({ type: DotBotEventType.CHAT_STARTED, message });
     
     try {
-      // Save user message
+      // Add user message to chat
       if (this.currentChat) {
         await this.currentChat.addUserMessage(message);
         this.emit({ type: DotBotEventType.USER_MESSAGE_ADDED, message, timestamp: Date.now() });
       }
       
-      // Get LLM response
-      this.dotbotLogger.debug({ 
-        messagePreview: message.substring(0, 100)
-      }, 'chat: Getting LLM response');
+      // Get LLM response (delegates to AIService via getLLMResponse -> callLLM)
       const llmResponse = await this.getLLMResponse(message, options);
       
-      this.dotbotLogger.debug({ 
-        responseLength: llmResponse.length,
-        responsePreview: llmResponse.substring(0, 200)
-      }, 'chat: LLM response received');
-      
-      // Extract execution plan
-      // Log that we expect a plan for transfer/action commands
-      const messageLower = message.toLowerCase();
-      const shouldHavePlan = messageLower.includes('send') || 
-                            messageLower.includes('transfer') || 
-                            messageLower.includes('execute') ||
-                            messageLower.includes('create') ||
-                            messageLower.includes('stake') ||
-                            messageLower.includes('unstake');
-      
-      if (shouldHavePlan) {
-        console.log('[DotBot] ExecutionPlan should be created for message:', message.substring(0, 100));
-        this.dotbotLogger.info({ 
-          messagePreview: message.substring(0, 100)
-        }, 'ExecutionPlan should be created');
-      }
-      
-      const plan = this.extractExecutionPlan(llmResponse);
+      // Extract execution plan (uses extracted function from prompts/system/utils)
+      const plan = extractExecutionPlan(llmResponse);
       
       if (plan) {
-        console.log('[DotBot] ExecutionPlan was created:', {
-          planId: plan.id,
-          stepsCount: plan.steps.length,
-          originalRequest: plan.originalRequest
-        });
-        this.dotbotLogger.info({ 
-          planId: plan.id,
-          stepsCount: plan.steps.length,
-          originalRequest: plan.originalRequest
-        }, 'ExecutionPlan was created');
-      } else {
-        if (shouldHavePlan) {
-          console.warn('[DotBot] ExecutionPlan was not created (expected for this message)');
-          this.dotbotLogger.warn({ 
-            messagePreview: message.substring(0, 100)
-          }, 'ExecutionPlan was not created (expected for this message)');
-        }
-        this.dotbotLogger.info({ 
-          hasPlan: false,
-          planId: null,
-          stepsCount: 0,
-          originalRequest: null
-        }, 'chat: Execution plan extraction result (no plan)');
-      }
-      
-      let result: ChatResult;
-      
-      // No execution needed - just a conversation
-      if (!plan || plan.steps.length === 0) {
-        this.dotbotLogger.info({ 
-          responseLength: llmResponse.length
-        }, 'chat: Handling as conversation (no execution plan)');
-        result = await this.handleConversationResponse(llmResponse);
-      } else {
-        // Execute blockchain operations
         this.dotbotLogger.info({ 
           planId: plan.id,
           stepsCount: plan.steps.length
-        }, 'chat: Handling as execution (plan found)');
-        result = await this.handleExecutionResponse(llmResponse, plan, options);
+        }, 'chat: ExecutionPlan extracted');
       }
       
-      this.dotbotLogger.info({ 
-        executed: result.executed,
-        success: result.success,
-        completed: result.completed,
-        failed: result.failed,
-        hasPlan: !!result.plan,
-        responseLength: result.response.length
-      }, 'chat: Chat request completed');
+      // Route response based on plan presence
+      const result = (!plan || plan.steps.length === 0)
+        ? await this.handleConversationResponse(llmResponse)
+        : await this.handleExecutionResponse(llmResponse, plan, options);
       
-      // Emit chat complete event
       this.emit({ type: DotBotEventType.CHAT_COMPLETE, result });
-      
       return result;
     } catch (error) {
-      // Always emit chat-error or chat-complete, even on failures
       const errorMsg = error instanceof Error ? error.message : String(error);
       const errorObj = error instanceof Error ? error : new Error(errorMsg);
       
@@ -1151,7 +1082,6 @@ export class DotBot {
         stack: error instanceof Error ? error.stack : undefined
       }, 'chat: Error during chat request');
       
-      // Create error result
       const errorResult: ChatResult = {
         response: `I encountered an error while processing your request: ${errorMsg}`,
         executed: false,
@@ -1165,18 +1095,13 @@ export class DotBot {
         try {
           await this.currentChat.addBotMessage(errorResult.response);
         } catch (saveError) {
-          // If saving fails, log but continue
           this.dotbotLogger.warn({ 
             error: saveError instanceof Error ? saveError.message : String(saveError)
           }, 'chat: Failed to save error message to chat');
         }
       }
       
-      // Emit error event
       this.emit({ type: DotBotEventType.CHAT_ERROR, error: errorObj });
-      
-      // Also emit chat-complete with error result to ensure ScenarioExecutor doesn't hang
-      // This is a fallback - chat-error should be sufficient, but this ensures compatibility
       this.emit({ type: DotBotEventType.CHAT_COMPLETE, result: errorResult });
       
       return errorResult;
@@ -2290,173 +2215,5 @@ export class DotBot {
     );
   }
   
-  private extractExecutionPlan(llmResponse: string): ExecutionPlan | null {
-    if (!llmResponse || typeof llmResponse !== 'string') {
-      return null;
-    }
-
-    const normalized = llmResponse.trim();
-
-    try {
-      // Strategy 1: JSON in ```json code block (most common LLM format)
-      const jsonMatch = normalized.match(/```json\s*([\s\S]*?)\s*```/i);
-      if (jsonMatch) {
-        try {
-          const plan = JSON.parse(jsonMatch[1].trim());
-          if (this.isValidExecutionPlan(plan)) {
-            return plan;
-          }
-        } catch (parseError) {
-          // Try to fix common JSON issues (trailing commas, etc.)
-          const fixed = this.tryFixJson(jsonMatch[1].trim());
-          if (fixed) {
-            try {
-              const plan = JSON.parse(fixed);
-              if (this.isValidExecutionPlan(plan)) {
-                this.dotbotLogger.warn({ original: jsonMatch[1].substring(0, 100) }, 'Fixed JSON parsing issue in code block');
-                return plan;
-              }
-            } catch {
-              // Still failed after fix attempt
-            }
-          }
-        }
-      }
-
-      // Strategy 2: JSON in generic ``` code block
-      const codeBlockMatch = normalized.match(/```\s*([\s\S]*?)\s*```/);
-      if (codeBlockMatch) {
-        try {
-          const plan = JSON.parse(codeBlockMatch[1].trim());
-          if (this.isValidExecutionPlan(plan)) {
-            return plan;
-          }
-        } catch {
-          // Try to fix common JSON issues
-          const fixed = this.tryFixJson(codeBlockMatch[1].trim());
-          if (fixed) {
-            try {
-              const plan = JSON.parse(fixed);
-              if (this.isValidExecutionPlan(plan)) {
-                this.dotbotLogger.warn({ original: codeBlockMatch[1].substring(0, 100) }, 'Fixed JSON parsing issue in generic code block');
-                return plan;
-              }
-            } catch {
-              // Still failed after fix attempt
-            }
-          }
-        }
-      }
-
-      // Strategy 3: Plain JSON string (LLM returns just JSON)
-      try {
-        const plan = JSON.parse(normalized);
-        if (this.isValidExecutionPlan(plan)) {
-          return plan;
-        }
-      } catch {
-        // Try to fix common JSON issues
-        const fixed = this.tryFixJson(normalized);
-        if (fixed) {
-          try {
-            const plan = JSON.parse(fixed);
-            if (this.isValidExecutionPlan(plan)) {
-              this.dotbotLogger.warn({ original: normalized.substring(0, 100) }, 'Fixed JSON parsing issue in plain JSON');
-              return plan;
-            }
-          } catch {
-            // Still failed after fix attempt
-          }
-        }
-      }
-
-      // Strategy 4: Find JSON object anywhere in the response (even with text before/after)
-      // Look for patterns like { "id": "exec_", "steps": [...] }
-      const jsonObjectMatch = normalized.match(/\{\s*"id"\s*:\s*"exec_[^"]*"[\s\S]*?"steps"\s*:\s*\[[\s\S]*?\]/);
-      if (jsonObjectMatch) {
-        // Try to extract the complete JSON object
-        const jsonStart = normalized.indexOf('{');
-        if (jsonStart !== -1) {
-          // Find matching closing brace
-          let braceCount = 0;
-          let jsonEnd = -1;
-          for (let i = jsonStart; i < normalized.length; i++) {
-            if (normalized[i] === '{') braceCount++;
-            if (normalized[i] === '}') {
-              braceCount--;
-              if (braceCount === 0) {
-                jsonEnd = i + 1;
-                break;
-              }
-            }
-          }
-          
-          if (jsonEnd > jsonStart) {
-            const jsonCandidate = normalized.substring(jsonStart, jsonEnd);
-            try {
-              const plan = JSON.parse(jsonCandidate);
-              if (this.isValidExecutionPlan(plan)) {
-                this.dotbotLogger.info({ extracted: jsonCandidate.substring(0, 100) }, 'Extracted JSON from response with surrounding text');
-                return plan;
-              }
-            } catch {
-              // Try to fix common JSON issues
-              const fixed = this.tryFixJson(jsonCandidate);
-              if (fixed) {
-                try {
-                  const plan = JSON.parse(fixed);
-                  if (this.isValidExecutionPlan(plan)) {
-                    this.dotbotLogger.warn({ original: jsonCandidate.substring(0, 100) }, 'Fixed and extracted JSON from response with surrounding text');
-                    return plan;
-                  }
-                } catch {
-                  // Still failed after fix attempt
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // No plan found in response
-      return null;
-    } catch (error) {
-      console.error('[DotBot] ExecutionPlan was not created - extraction error:', error instanceof Error ? error.message : String(error));
-      this.dotbotLogger.error({ 
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      }, 'ExecutionPlan was not created - extraction error');
-      return null;
-    }
-  }
-
-  /**
-   * Try to fix common JSON parsing issues (trailing commas, etc.)
-   */
-  private tryFixJson(jsonString: string): string | null {
-    try {
-      // Remove trailing commas before closing braces/brackets
-      let fixed = jsonString.replace(/,(\s*[}\]])/g, '$1');
-      
-      // Try parsing to see if it's valid now
-      JSON.parse(fixed);
-      return fixed;
-    } catch {
-      return null;
-    }
-  }
-  
-  /**
-   * Validate execution plan structure
-   */
-  private isValidExecutionPlan(obj: any): obj is ExecutionPlan {
-    return (
-      obj &&
-      typeof obj === 'object' &&
-      'id' in obj &&
-      'steps' in obj &&
-      Array.isArray(obj.steps)
-    );
-  }
 }
 
