@@ -13,16 +13,17 @@ import type {
   ExecutionMessage,
   Environment,
   CreateChatInstanceParams,
-} from './types/chatInstance';
-import { toConversationHistory } from './types/chatInstance';
-import type { ConversationMessage } from './dotbot';
+} from './types';
+import { toConversationHistory } from './types';
+import type { ConversationMessage } from '../dotbot';
 import { ChatInstanceManager } from './chatInstanceManager';
-import { ExecutionArray } from './executionEngine/executionArray';
-import type { ExecutionArrayState } from './executionEngine/types';
-import type { ExecutionOrchestrator } from './executionEngine/orchestrator';
-import type { ExecutionPlan, ExecutionStep } from './prompts/system/execution/types';
-import type { ExecutionSession, RpcManager } from './rpcManager';
-import { createSubsystemLogger, Subsystem } from './services/logger';
+import { ExecutionArray } from '../executionEngine/executionArray';
+import type { ExecutionArrayState } from '../executionEngine/types';
+import type { ExecutionOrchestrator } from '../executionEngine/orchestrator';
+import type { ExecutionPlan } from '../prompts/system/execution/types';
+import type { RpcManager } from '../rpcManager';
+import { ExecutionStateManager } from './executionState';
+import { ExecutionSessionManager } from './sessionManager';
 
 /**
  * ChatInstance - A conversation with built-in methods and execution state
@@ -36,28 +37,14 @@ export class ChatInstance {
   private data: ChatInstanceData;
   private manager: ChatInstanceManager;
   private persistenceEnabled: boolean;
-  
-  // Track multiple ExecutionArrays by their ID
-  private executionArrays: Map<string, ExecutionArray> = new Map();
-  private executionCallbacks: Map<string, Set<(state: ExecutionArrayState) => void>> = new Map();
-  private chatLogger = createSubsystemLogger(Subsystem.CHAT);
-  // Track subscription cleanup functions per execution array
-  private executionSubscriptions: Map<string, () => void> = new Map();
-  
-  // Execution sessions - locked API instances for the entire chat
-  // These are created once per chat and reused for all executions
-  private relayChainSession: ExecutionSession | null = null;
-  private assetHubSession: ExecutionSession | null = null;
-  private sessionsInitialized = false;
+  private executionStateManager: ExecutionStateManager;
+  private sessionManager: ExecutionSessionManager;
   
   // Legacy: most recent execution (for backward compatibility)
   public get currentExecution(): ExecutionArray | null {
     // Return the most recent ExecutionArray
     const executionMessages = this.data.messages.filter(m => m.type === 'execution') as ExecutionMessage[];
-    if (executionMessages.length === 0) return null;
-    
-    const lastExecution = executionMessages[executionMessages.length - 1];
-    return this.executionArrays.get(lastExecution.executionId) || null;
+    return this.executionStateManager.getCurrentExecution(executionMessages);
   }
 
   constructor(
@@ -69,36 +56,15 @@ export class ChatInstance {
     this.manager = manager;
     this.persistenceEnabled = persistenceEnabled;
     
+    // Initialize managers
+    this.executionStateManager = new ExecutionStateManager();
+    this.sessionManager = new ExecutionSessionManager(data.id);
+    
     // Restore ExecutionArray instances from execution messages
-    this.restoreExecutionArrays();
-  }
-
-  /**
-   * Restore ExecutionArray instances from execution messages
-   * This is called when loading a chat instance
-   */
-  private restoreExecutionArrays(): void {
     const executionMessages = this.data.messages.filter(
       m => m.type === 'execution'
     ) as ExecutionMessage[];
-    
-    for (const execMessage of executionMessages) {
-      try {
-        // Skip if executionArray is not yet available (still being prepared)
-        if (!execMessage.executionArray) {
-          // Probably this is the reason it is not rendering
-          continue;
-        }
-        const executionArray = ExecutionArray.fromState(execMessage.executionArray);
-        this.executionArrays.set(execMessage.executionId, executionArray);
-      } catch (error) {
-        this.chatLogger.error({ 
-          executionId: execMessage.executionId,
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined
-        }, `Failed to restore execution array ${execMessage.executionId}`);
-      }
-    }
+    this.executionStateManager.restoreExecutionArrays(executionMessages);
   }
 
   /**
@@ -110,143 +76,7 @@ export class ChatInstance {
       m => m.type === 'execution'
     ) as ExecutionMessage[];
     
-    for (const execMessage of executionMessages) {
-      try {
-        // Skip if executionArray is not yet available (still being prepared)
-        if (!execMessage.executionArray) {
-          continue;
-        }
-        
-        // Use stored execution plan if available, otherwise try to extract from state
-        let plan: ExecutionPlan | undefined = execMessage.executionPlan;
-        if (!plan) {
-          const extractedPlan = this.extractExecutionPlanFromState(execMessage.executionArray);
-          if (!extractedPlan) {
-            this.chatLogger.warn({ executionId: execMessage.executionId }, `Could not extract execution plan for ${execMessage.executionId}`);
-            continue;
-          }
-          plan = extractedPlan;
-        }
-        
-        // Re-orchestrate to get fresh ExecutionArray with working extrinsics
-        const result = await orchestrator.orchestrate(plan, {
-          stopOnError: false,
-          validateFirst: false, // Skip validation since we're restoring
-        });
-        
-        if (result.success && result.executionArray) {
-          // Preserve the original ID and state
-          const restoredArray = result.executionArray;
-          // Copy over status information from saved state
-          this.restoreExecutionArrayState(restoredArray, execMessage.executionArray);
-          this.executionArrays.set(execMessage.executionId, restoredArray);
-        } else {
-          this.chatLogger.error({ 
-            executionId: execMessage.executionId,
-            errors: result.errors
-          }, `Failed to re-orchestrate execution ${execMessage.executionId}`);
-        }
-      } catch (error) {
-        this.chatLogger.error({ 
-          executionId: execMessage.executionId,
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined
-        }, `Failed to rebuild execution array ${execMessage.executionId}`);
-      }
-    }
-  }
-
-  /**
-   * Extract ExecutionPlan from saved ExecutionArrayState
-   */
-  private extractExecutionPlanFromState(state: ExecutionArrayState): ExecutionPlan | null {
-    try {
-      const steps: ExecutionStep[] = [];
-      
-      for (const item of state.items) {
-        // Extract step information from metadata
-        const metadata = item.agentResult?.metadata || item.metadata || {};
-        const agentClassName = metadata.agentClassName || metadata.agentClass;
-        const functionName = metadata.functionName || metadata.function;
-        const parameters = metadata.parameters || {};
-        
-        if (!agentClassName || !functionName) {
-          this.chatLogger.warn({ metadata }, 'Missing agentClassName or functionName in metadata');
-          continue;
-        }
-        
-        steps.push({
-          id: item.id,
-          stepNumber: item.index + 1,
-          agentClassName,
-          functionName,
-          parameters,
-          executionType: item.executionType || 'extrinsic',
-          status: this.mapStatusToPromptStatus(item.status),
-          description: item.description,
-          requiresConfirmation: item.agentResult?.requiresConfirmation ?? true,
-          createdAt: item.createdAt,
-        });
-      }
-      
-      if (steps.length === 0) {
-        return null;
-      }
-      
-      return {
-        id: state.id,
-        originalRequest: steps[0]?.description || 'Restored execution',
-        steps,
-        status: 'pending',
-        requiresApproval: true,
-        createdAt: state.items[0]?.createdAt || Date.now(),
-      };
-    } catch (error) {
-      this.chatLogger.error({ 
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      }, 'Failed to extract execution plan from state');
-      return null;
-    }
-  }
-
-  /**
-   * Map runtime execution status to prompt system status
-   */
-  private mapStatusToPromptStatus(status: string): 'pending' | 'ready' | 'executing' | 'completed' | 'failed' | 'cancelled' {
-    if (status === 'completed' || status === 'finalized') return 'completed';
-    if (status === 'failed') return 'failed';
-    if (status === 'cancelled') return 'cancelled';
-    if (status === 'executing' || status === 'signing' || status === 'broadcasting') return 'executing';
-    if (status === 'ready') return 'ready';
-    return 'pending';
-  }
-
-  /**
-   * Restore execution state (status, results, etc.) to rebuilt ExecutionArray
-   */
-  private restoreExecutionArrayState(executionArray: ExecutionArray, savedState: ExecutionArrayState): void {
-    const items = executionArray.getItems();
-    
-    for (let i = 0; i < items.length && i < savedState.items.length; i++) {
-      const savedItem = savedState.items[i];
-      const currentItem = items[i];
-      
-      // Restore status if execution was already started/completed
-      if (savedItem.status !== 'ready' && savedItem.status !== 'pending') {
-        executionArray.updateStatus(currentItem.id, savedItem.status as any, savedItem.error);
-      }
-      
-      // Restore results if execution completed
-      if (savedItem.result) {
-        executionArray.updateResult(currentItem.id, savedItem.result);
-      }
-    }
-    
-    // Restore execution state
-    if (savedState.isExecuting) {
-      executionArray.setCurrentIndex(savedState.currentIndex);
-    }
+    await this.executionStateManager.rebuildExecutionArrays(executionMessages, orchestrator);
   }
 
   /**
@@ -418,111 +248,21 @@ export class ChatInstance {
    * Set ExecutionArray instance for a specific execution ID
    */
   setExecutionArray(executionId: string, executionArray: ExecutionArray): void {
-    this.executionArrays.set(executionId, executionArray);
-    
-    // Clean up any existing subscription for this execution
-    const existingUnsubscribe = this.executionSubscriptions.get(executionId);
-    if (existingUnsubscribe) {
-      existingUnsubscribe();
-    }
-    
-    // Notify any existing callbacks immediately with current state (deferred to avoid blocking)
-    const callbacks = this.executionCallbacks.get(executionId);
-    if (callbacks && callbacks.size > 0) {
-      const state = executionArray.getState();
-      // Defer initial callback to avoid blocking UI during setup
-      setTimeout(() => {
-        callbacks.forEach(cb => {
-          try {
-            cb(state);
-          } catch (error) {
-            // Ignore errors in initial callback
-          }
-        });
-      }, 0);
-    }
-    
-    // Set up subscription to notify callbacks on future updates
-    // Only subscribe to onProgress - it fires on ALL state changes (status updates, progress, etc.)
-    // Subscribing to both onStatusUpdate AND onProgress causes duplicate callbacks since
-    // updateStatus() calls both notifyStatus() and notifyProgress()
-    
-    // Throttle callback invocations to prevent UI blocking
-    let lastStateHash: string | null = null;
-    let pendingUpdate: NodeJS.Timeout | null = null;
-    
-    // Helper to create a simple hash of state for change detection
-    const getStateHash = (state: ExecutionArrayState): string => {
-      // Create a hash from key state properties that change during execution
-      const itemsHash = state.items.map(item => `${item.id}:${item.status}`).join('|');
-      return `${state.isExecuting}:${state.completedItems}:${state.failedItems}:${itemsHash}`;
-    };
-    
-    const notifyCallbacks = () => {
-      const updatedState = executionArray.getState();
-      const stateHash = getStateHash(updatedState);
-      
-      // Skip if state hasn't actually changed (content check, not reference)
-      if (stateHash === lastStateHash) {
-        return;
-      }
-      
-      // Clear any pending update
-      if (pendingUpdate) {
-        clearTimeout(pendingUpdate);
-        pendingUpdate = null;
-      }
-      
-      // Defer callback invocation to avoid blocking UI thread
-      // Use a small delay to batch rapid updates (16ms = ~60fps)
-      pendingUpdate = setTimeout(() => {
-        lastStateHash = stateHash;
-        const callbacks = this.executionCallbacks.get(executionId);
-        if (callbacks) {
-          callbacks.forEach((cb) => {
-            try {
-              cb(updatedState);
-            } catch (error) {
-              this.chatLogger.error({ 
-                error: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined
-              }, 'Error in callback');
-            }
-          });
-        }
-        pendingUpdate = null;
-      }, 16); // ~60fps - batches updates within a frame
-    };
-    
-    // Only subscribe to onProgress - it covers all state changes
-    const unsubscribeProgress = executionArray.onProgress(notifyCallbacks);
-    
-    // Store unsubscribe function
-    const unsubscribe = () => {
-      unsubscribeProgress();
-      // Clear any pending update
-      if (pendingUpdate) {
-        clearTimeout(pendingUpdate);
-        pendingUpdate = null;
-      }
-      lastStateHash = null;
-    };
-    
-    this.executionSubscriptions.set(executionId, unsubscribe);
+    this.executionStateManager.setExecutionArray(executionId, executionArray);
   }
   
   /**
    * Get ExecutionArray instance by execution ID
    */
   getExecutionArray(executionId: string): ExecutionArray | undefined {
-    return this.executionArrays.get(executionId);
+    return this.executionStateManager.getExecutionArray(executionId);
   }
   
   /**
    * Get all ExecutionArray instances
    */
   getAllExecutionArrays(): Map<string, ExecutionArray> {
-    return this.executionArrays;
+    return this.executionStateManager.getAllExecutionArrays();
   }
 
   /**
@@ -833,53 +573,13 @@ export class ChatInstance {
     
     const state = execution.getState();
     this.setExecutionArray(state.id, execution);
-    
-    // Notify subscribers for this execution
-    const callbacks = this.executionCallbacks.get(state.id);
-    if (callbacks) {
-      callbacks.forEach(cb => cb(state));
-    }
   }
 
   /**
    * Subscribe to execution state changes for a specific execution
    */
   onExecutionUpdate(executionId: string, callback: (state: ExecutionArrayState) => void): () => void {
-    // Get or create callback set for this execution
-    if (!this.executionCallbacks.has(executionId)) {
-      this.executionCallbacks.set(executionId, new Set());
-    }
-    const callbacks = this.executionCallbacks.get(executionId)!;
-    callbacks.add(callback);
-
-    // If execution array exists, call callback with current state (deferred to avoid blocking)
-    // Subscription is already set up in setExecutionArray, so we don't need to set it up here
-    const executionArray = this.executionArrays.get(executionId);
-    if (executionArray) {
-      const state = executionArray.getState();
-      // Defer to avoid blocking UI during subscription setup
-      setTimeout(() => {
-        try {
-          callback(state);
-        } catch (error) {
-          // Ignore errors in callback
-        }
-      }, 0);
-    }
-
-    // Return cleanup function
-    return () => {
-      callbacks.delete(callback);
-      if (callbacks.size === 0) {
-        this.executionCallbacks.delete(executionId);
-        // Clean up subscription if no more callbacks
-        const unsubscribe = this.executionSubscriptions.get(executionId);
-        if (unsubscribe) {
-          unsubscribe();
-          this.executionSubscriptions.delete(executionId);
-        }
-      }
-    };
+    return this.executionStateManager.onExecutionUpdate(executionId, callback);
   }
   
   /**
@@ -890,80 +590,21 @@ export class ChatInstance {
     relayChainManager: RpcManager,
     assetHubManager: RpcManager
   ): Promise<void> {
-    // Note: Logger not available in ChatInstance, but these are informational logs
-    // They're not critical for debugging, so we'll keep console.info for now
-    // TODO: Add logger to ChatInstance if needed
-    if (this.sessionsInitialized) {
-      // Execution sessions already initialized - no need to log
-      return;
-    }
-    
-    try {
-      // Create Relay Chain session
-      this.relayChainSession = await relayChainManager.createExecutionSession();
-      // Note: Logging moved to RpcManager.createExecutionSession if needed
-      
-      // Create Asset Hub session (optional)
-      try {
-        this.assetHubSession = await assetHubManager.createExecutionSession();
-        // Note: Logging moved to RpcManager.createExecutionSession if needed
-      } catch (error) {
-        // Asset Hub session creation failed - this is expected in some cases
-        this.assetHubSession = null;
-      }
-      
-      this.sessionsInitialized = true;
-    } catch (error) {
-      this.cleanupExecutionSessions();
-      throw error;
-    }
+    await this.sessionManager.initialize(relayChainManager, assetHubManager);
   }
   
   /**
    * Get execution sessions for this chat
    */
-  getExecutionSessions(): { relayChain: ExecutionSession | null; assetHub: ExecutionSession | null } {
-    return {
-      relayChain: this.relayChainSession,
-      assetHub: this.assetHubSession,
-    };
+  getExecutionSessions() {
+    return this.sessionManager.getSessions();
   }
   
   /**
    * Validate that execution sessions are still active and connected
-   * 
-   * CRITICAL: This ensures sessions are valid before simulation/execution.
-   * With lazy-loaded RPC connections, sessions may be created but APIs may not be connected yet.
    */
   async validateExecutionSessions(): Promise<boolean> {
-    if (!this.sessionsInitialized || !this.relayChainSession) {
-      this.chatLogger.debug({ chatId: this.data.id }, 'Execution sessions not initialized');
-      return false;
-    }
-    
-    // Check if session API is connected
-    const isConnected = await this.relayChainSession.isConnected();
-    if (!isConnected) {
-      this.chatLogger.warn({ 
-        chatId: this.data.id,
-        endpoint: this.relayChainSession.endpoint
-      }, 'Execution session API is not connected');
-      return false;
-    }
-    
-    // Also check if the API instance itself is connected (double-check)
-    const api = this.relayChainSession.api;
-    if (!api || !api.isConnected) {
-      this.chatLogger.warn({ 
-        chatId: this.data.id,
-        endpoint: this.relayChainSession.endpoint,
-        hasApi: !!api,
-        apiConnected: api?.isConnected
-      }, 'Execution session API instance is not connected');
-      return false;
-    }
-    
-    return true;
+    return this.sessionManager.validate();
   }
   
   /**
@@ -971,16 +612,7 @@ export class ChatInstance {
    * Called when chat is closed or destroyed
    */
   cleanupExecutionSessions(): void {
-    if (this.relayChainSession) {
-      this.relayChainSession.markInactive();
-      this.relayChainSession = null;
-    }
-    if (this.assetHubSession) {
-      this.assetHubSession.markInactive();
-      this.assetHubSession = null;
-    }
-    this.sessionsInitialized = false;
-    this.chatLogger.debug({ chatId: this.data.id }, 'Cleaned up execution sessions for chat');
+    this.sessionManager.cleanup();
+    this.executionStateManager.cleanup();
   }
 }
-

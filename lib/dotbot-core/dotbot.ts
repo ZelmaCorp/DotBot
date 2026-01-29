@@ -29,9 +29,9 @@ import { processSystemQueries, areSystemQueriesEnabled } from './prompts/system/
 import { RpcManager, createRpcManagersForNetwork, Network, ExecutionSession } from './rpcManager';
 import { SimulationStatusCallback } from './agents/types';
 import { detectNetworkFromChainName } from './prompts/system/knowledge';
-import { ChatInstanceManager } from './chatInstanceManager';
-import { ChatInstance } from './chatInstance';
-import type { Environment, ConversationItem } from './types/chatInstance';
+import { ChatInstanceManager } from './chat/chatInstanceManager';
+import { ChatInstance } from './chat/chatInstance';
+import type { Environment, ConversationItem } from './chat/types';
 import { createSubsystemLogger, Subsystem } from './services/logger';
 import {
   getSimulationConfig,

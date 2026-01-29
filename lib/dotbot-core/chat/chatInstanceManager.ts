@@ -19,11 +19,11 @@ import type {
   ValidationResult,
   ExecutionMessage,
   ConversationItem
-} from './types/chatInstance';
-import { ENVIRONMENT_NETWORKS } from './types/chatInstance';
-import type { Network } from './rpcManager';
-import type { IChatStorage } from './storage/chatStorage';
-import { LocalStorageChatStorage } from './storage/chatStorage';
+} from './types';
+import { ENVIRONMENT_NETWORKS } from './types';
+import type { Network } from '../rpcManager';
+import type { IChatStorage } from '../storage/chatStorage';
+import { LocalStorageChatStorage } from '../storage/chatStorage';
 
 /**
  * Chat Instance Manager Configuration

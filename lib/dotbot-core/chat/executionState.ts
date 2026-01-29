@@ -8,7 +8,7 @@ import { ExecutionArray } from '../executionEngine/executionArray';
 import type { ExecutionArrayState } from '../executionEngine/types';
 import type { ExecutionOrchestrator } from '../executionEngine/orchestrator';
 import type { ExecutionPlan, ExecutionStep } from '../prompts/system/execution/types';
-import type { ExecutionMessage } from '../types/chatInstance';
+import type { ExecutionMessage } from './types';
 import { createSubsystemLogger, Subsystem } from '../services/logger';
 
 /**

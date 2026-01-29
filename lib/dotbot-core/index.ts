@@ -163,9 +163,9 @@ export type {
 // ============================================================================
 // Chat Instance System (Environment-bound conversations)
 // ============================================================================
-export { ChatInstance } from './chatInstance';
-export { ChatInstanceManager } from './chatInstanceManager';
-export type { ChatInstanceManagerConfig } from './chatInstanceManager';
+export { ChatInstance } from './chat';
+export { ChatInstanceManager } from './chat';
+export type { ChatInstanceManagerConfig } from './chat';
 
 export type {
   Environment,
@@ -183,7 +183,7 @@ export type {
   ChatInstanceFilter,
   ValidationResult,
   ParsedKnowledgeQuery,
-} from './types/chatInstance';
+} from './chat/types';
 export {
   ENVIRONMENT_NETWORKS,
   toConversationMessage,
@@ -192,7 +192,7 @@ export {
   parseKnowledgeQuery,
   validateKnowledgeQuery,
   detectKnowledgeRequest,
-} from './types/chatInstance';
+} from './chat/types';
 
 // Chat Storage Abstraction (for backend integration)
 export type { IChatStorage } from './storage/chatStorage';
