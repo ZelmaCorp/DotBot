@@ -9,22 +9,6 @@ import { detectNetworkFromChainName } from '../prompts/system/knowledge';
 
 type DotBotInstance = any;
 
-/** Connect to asset hub and set dotbot.assetHubApi; throw on failure. */
-export async function initializeAssetHub(dotbot: DotBotInstance): Promise<void> {
-  try {
-    dotbot.assetHubApi = await dotbot.assetHubManager.getReadApi();
-    const assetHubEndpoint = dotbot.assetHubManager.getCurrentEndpoint();
-    dotbot.rpcLogger.info({ endpoint: assetHubEndpoint, chain: 'asset-hub' }, `Asset Hub connected via: ${assetHubEndpoint}`);
-  } catch (error) {
-    dotbot.rpcLogger.error(
-      { error: error instanceof Error ? error.message : String(error), endpoints: dotbot.assetHubManager.getHealthStatus() },
-      'Asset Hub connection failed on all endpoints'
-    );
-    dotbot.assetHubApi = null;
-    throw error;
-  }
-}
-
 /** Connect relay + optional asset hub, init execution system and signer if not yet done. */
 export async function ensureRpcConnectionsReady(dotbot: DotBotInstance): Promise<void> {
   if (dotbot.executionSystemInitialized && dotbot.api) return;
