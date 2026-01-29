@@ -108,7 +108,7 @@ export async function startExecutionStateless(
   const relayChainValid = await validateExecutionSession(sessions.relayChain);
   const assetHubValid = !sessions.assetHub || (await validateExecutionSession(sessions.assetHub));
   if (!relayChainValid || !assetHubValid) {
-    dotbot.cleanupExecutionSessions(executionId);
+    cleanupExecutionSessions(dotbot, executionId);
     throw new Error(`Execution ${executionId} has expired. Sessions are no longer valid. Please prepare the execution again.`);
   }
 
@@ -123,5 +123,33 @@ export async function startExecutionStateless(
 
   const executioner = dotbot.executionSystem.getExecutioner();
   await executioner.execute(executionArray, options);
-  dotbot.cleanupExecutionSessions(executionId); // free session/plan/state for this execution
+  cleanupExecutionSessions(dotbot, executionId);
+}
+
+/** Clean up one execution's sessions/plan/state (stateless). */
+export function cleanupExecutionSessions(dotbot: DotBotInstance, executionId: string): void {
+  const sessions = dotbot.executionSessions.get(executionId);
+  if (sessions) {
+    dotbot.executionSessions.delete(executionId);
+    dotbot.executionPlans.delete(executionId);
+    dotbot.executionStates.delete(executionId);
+    dotbot.executionArrays.delete(executionId);
+    dotbot.dotbotLogger.debug({ executionId }, 'Cleaned up execution sessions, plan, state, and ExecutionArray');
+  }
+}
+
+/** Clean up expired execution sessions (call periodically). Returns count cleaned. */
+export function cleanupExpiredExecutions(dotbot: DotBotInstance): number {
+  const now = Date.now();
+  const SESSION_TTL_MS = dotbot.SESSION_TTL_MS ?? 15 * 60 * 1000;
+  let cleaned = 0;
+  for (const [executionId, sessions] of dotbot.executionSessions.entries()) {
+    const age = now - sessions.createdAt;
+    if (age > SESSION_TTL_MS) {
+      cleanupExecutionSessions(dotbot, executionId);
+      cleaned++;
+      dotbot.dotbotLogger.info({ executionId, ageMinutes: Math.round(age / 60000) }, 'Cleaned up expired execution session');
+    }
+  }
+  return cleaned;
 }
