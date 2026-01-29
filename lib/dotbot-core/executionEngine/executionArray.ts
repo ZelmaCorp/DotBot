@@ -247,6 +247,22 @@ export class ExecutionArray {
     this.notifyStatusDeferred(item);
     this.notifyProgressDeferred();
   }
+
+  /**
+   * Update estimated fee for an item (typically from simulation results)
+   * This updates the item's estimatedFee with the real fee from simulation
+   */
+  updateEstimatedFee(id: string, estimatedFee: string): void {
+    const item = this.getItem(id);
+    if (!item) {
+      console.warn('[ExecutionArray] ⚠️ Cannot update estimated fee - item not found:', id);
+      return;
+    }
+    
+    item.estimatedFee = estimatedFee;
+    this.notifyStatusDeferred(item);
+    this.notifyProgressDeferred();
+  }
   
   /**
    * Set current execution index
