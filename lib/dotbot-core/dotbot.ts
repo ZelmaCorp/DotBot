@@ -70,15 +70,15 @@ export class DotBot {
   private relayChainManager: RpcManager;
   private assetHubManager: RpcManager;
   
-  // AI Service for LLM communication (optional - can be used in any context, current frontend not using it)
+  // AI Service for LLM communication (optional). Used by dotbot/llm when no custom llm in chat options.
   private aiService?: AIServiceType;
   
-  // Chat instance management (built-in) - execution lives here!
-  // NOTE: Execution sessions are now stored in ChatInstance, not here
+  // Chat instance management (built-in); execution sessions live in ChatInstance. chatPersistenceEnabled used by dotbot/chatLifecycle.
   private chatManager: ChatInstanceManager;
   public currentChat: ChatInstance | null = null;
   private chatPersistenceEnabled: boolean;
   private _stateful: boolean;
+  // Used by dotbot/executionPreparation and dotbot/chatHandlers for simulation/options.
   private _backendSimulation: boolean;
   
   /**
@@ -99,9 +99,8 @@ export class DotBot {
   }> = new Map();
   private executionPlans: Map<string, ExecutionPlan> = new Map();
   private executionStates: Map<string, ExecutionArrayState> = new Map();
-  private executionArrays: Map<string, ExecutionArray> = new Map(); // Store ExecutionArray directly for WebSocket subscriptions
-  
-  // Session TTL: 15 minutes (900000ms) - after this time, sessions expire
+  private executionArrays: Map<string, ExecutionArray> = new Map();
+
   private readonly SESSION_TTL_MS = 15 * 60 * 1000;
   
   // Event emitter for external observers (e.g., ScenarioEngine)
@@ -184,9 +183,7 @@ export class DotBot {
     this.dotbotLogger.info({}, 'Simulation enabled');
   }
 
-  /**
-   * Disable transaction simulation
-   */
+  /** Disable transaction simulation. */
   disableSimulation(): void {
     disableSimulation();
     this.dotbotLogger.info({}, 'Simulation disabled');
@@ -427,7 +424,7 @@ export class DotBot {
     return cleanupExpiredExecutionsImpl(this);
   }
 
-  /** Update an execution message and emit event for UI. */
+  /** Update execution message in chat and emit event for UI. */
   async updateExecutionMessage(
     messageId: string, 
     executionId: string,
@@ -474,7 +471,7 @@ export class DotBot {
     return this.assetHubApi;
   }
 
-  /** @internal Set Asset Hub API (used during init). */
+  /** @internal Set Asset Hub API during init. */
   _setAssetHubApi(api: ApiPromise | null): void {
     this.assetHubApi = api;
   }
@@ -484,9 +481,7 @@ export class DotBot {
     return this.wallet;
   }
   
-  /**
-   * Disconnect and cleanup
-   */
+  /** Disconnect and cleanup. */
   async disconnect(): Promise<void> {
     if (this.api) {
       await this.api.disconnect();
@@ -500,6 +495,4 @@ export class DotBot {
   getNetwork(): Network {
     return this.network;
   }
-
 }
-

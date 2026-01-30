@@ -1,8 +1,6 @@
 /**
- * Balance and chain: relay + asset hub balance, chain/version, friendly message from plan.
+ * Balance and chain: relay + asset hub balance, chain/version.
  */
-
-import type { ExecutionPlan } from '../prompts/system/execution/types';
 
 type DotBotInstance = any;
 
@@ -43,15 +41,4 @@ export async function getChainInfo(dotbot: DotBotInstance): Promise<{ chain: str
   await dotbot.ensureRpcConnectionsReady();
   const [chain, version] = await Promise.all([dotbot.api!.rpc.system.chain(), dotbot.api!.rpc.system.version()]);
   return { chain: chain.toString(), version: version.toString() };
-}
-
-/** User-friendly message from execution plan (single or multi-step). */
-export function generateFriendlyMessage(plan: ExecutionPlan, _completed: number, _failed: number): string {
-  const totalSteps = plan.steps.length;
-  if (totalSteps === 0) return 'Transaction prepared, but no operations to execute.';
-  if (totalSteps === 1) {
-    return `Transaction ready:\n\n**${plan.steps[0].description}**\n\nReview the details below and approve when ready.`;
-  }
-  const stepsList = plan.steps.map((s, i) => `${i + 1}. ${s.description}`).join('\n');
-  return `${totalSteps} transactions ready:\n\n${stepsList}\n\nReview the details below and approve when ready.`;
 }
