@@ -147,9 +147,9 @@ agent.initialize(
 const executionSystem = new ExecutionSystem();
 // ... initialize executionSystem with api, account, signer, assetHubApi, managers
 
-// 6. Use agents directly
+// 6. Use agents directly (TransferParams uses address from BaseAgentParams)
 const result = await agent.transfer({
-  sender: accountInfo.address,
+  address: accountInfo.address,
   recipient: 'alice-address',
   amount: '5',
   chain: 'assetHub'
@@ -2466,12 +2466,12 @@ async transfer(params: TransferParams): Promise<AgentResult>
 **Parameters:**
 
 ```typescript
-interface TransferParams {
-  sender: string;           // Sender's Polkadot address
+interface TransferParams extends BaseAgentParams {
+  address: string;          // Sender's Polkadot address (from BaseAgentParams)
   recipient: string;        // Recipient's Polkadot address
   amount: string | number;  // Amount in DOT (e.g., "10.5" or 10.5)
-  chain: 'assetHub' | 'relay';  // Target chain (required!)
-  keepAlive?: boolean;      // Keep account above ED? (default: true)
+  chain?: 'assetHub' | 'relay';  // Target chain (default: 'assetHub')
+  keepAlive?: boolean;      // Keep account above ED? (default: false)
   validateBalance?: boolean; // Check sufficient balance? (default: true)
 }
 ```
@@ -2489,7 +2489,7 @@ interface TransferParams {
 **Example:**
 ```typescript
 const result = await agent.transfer({
-  sender: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+  address: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
   recipient: '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
   amount: '10.5',
   chain: 'assetHub',
@@ -2502,7 +2502,7 @@ const result = await agent.transfer({
 ```
 
 **Important Notes:**
-- `chain` parameter is **required** - never inferred from balance
+- `address` is the sender (from BaseAgentParams); `chain` is required for explicit chain selection - never inferred from balance
 - Amount can be string ("10.5") or number (10.5)
 - Address can be any SS58 format (automatically re-encoded for target chain)
 - If `keepAlive: true`, validates sender won't go below existential deposit
@@ -2521,13 +2521,13 @@ async batchTransfer(params: BatchTransferParams): Promise<AgentResult>
 **Parameters:**
 
 ```typescript
-interface BatchTransferParams {
-  sender: string;
+interface BatchTransferParams extends BaseAgentParams {
+  address: string;          // Sender's Polkadot address (from BaseAgentParams)
   transfers: Array<{
     recipient: string;
     amount: string | number;
   }>;
-  chain: 'assetHub' | 'relay';
+  chain?: 'assetHub' | 'relay';
   keepAlive?: boolean;
   validateBalance?: boolean;
 }
@@ -2538,7 +2538,7 @@ interface BatchTransferParams {
 **Example:**
 ```typescript
 const result = await agent.batchTransfer({
-  sender: senderAddress,
+  address: senderAddress,
   transfers: [
     { recipient: 'address1', amount: '5' },
     { recipient: 'address2', amount: '3.5' },
@@ -3091,10 +3091,9 @@ function buildSafeTransferExtrinsic(
 **Parameters:**
 ```typescript
 interface SafeTransferParams {
-  sender: string;
   recipient: string;
   amount: string | number | BN;
-  keepAlive: boolean;
+  keepAlive?: boolean;
 }
 
 interface SafeExtrinsicResult {
@@ -3113,7 +3112,6 @@ import { buildSafeTransferExtrinsic } from '@dotbot/core';
 const result = buildSafeTransferExtrinsic(
   api,
   {
-    sender: senderAddress,
     recipient: recipientAddress,
     amount: '10.5',
     keepAlive: true
@@ -3139,32 +3137,23 @@ function buildSafeBatchExtrinsic(
 ```
 
 **Parameters:**
-```typescript
-interface SafeBatchTransferParams {
-  sender: string;
-  transfers: Array<{
-    recipient: string;
-    amount: string | number | BN;
-  }>;
-  keepAlive: boolean;
-}
-```
+- `api`: Polkadot API instance
+- `transfers`: Array of `{ recipient: string; amount: string | number | BN }`
+- `capabilities`: TransferCapabilities from detectTransferCapabilities
+- `useAtomicBatch` (optional, default true): Use utility.batchAll
 
-**Returns:** Single `utility.batchAll` extrinsic containing all transfers
+**Returns:** SafeExtrinsicResult with single `utility.batchAll` extrinsic
 
 **Example:**
 ```typescript
 const result = buildSafeBatchExtrinsic(
   api,
-  {
-    sender: senderAddress,
-    transfers: [
-      { recipient: 'addr1', amount: '5' },
-      { recipient: 'addr2', amount: '3' }
-    ],
-    keepAlive: true
-  },
-  capabilities
+  [
+    { recipient: 'addr1', amount: '5' },
+    { recipient: 'addr2', amount: '3' }
+  ],
+  capabilities,
+  true
 );
 ```
 
@@ -3732,7 +3721,7 @@ async function transferDot() {
   
   // 4. Create transfer
   const result = await agent.transfer({
-    sender: userAddress,
+    address: userAddress,
     recipient: recipientAddress,
     amount: '10',
     chain: 'assetHub',
@@ -3785,7 +3774,7 @@ async function batchTransfer() {
   // ...
   
   const result = await agent.batchTransfer({
-    sender: userAddress,
+    address: userAddress,
     transfers: [
       { recipient: 'addr1', amount: '5' },
       { recipient: 'addr2', amount: '3' },
@@ -4110,7 +4099,7 @@ const result = await agent.transfer(params);
 ```typescript
 // ✅ Good - Explicit chain
 await agent.transfer({
-  sender,
+  address,  // sender (from BaseAgentParams)
   recipient,
   amount: '10',
   chain: 'assetHub'  // Clear intent

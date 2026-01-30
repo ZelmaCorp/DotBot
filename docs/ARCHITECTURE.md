@@ -24,31 +24,31 @@ DotBot is a distributed system with frontend and backend components, designed fo
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         FRONTEND                            │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │  React Application                                 │    │
-│  │  - UI Components                                   │    │
-│  │  - Wallet Integration                              │    │
-│  │  - @dotbot/core (client-side operations)           │    │
-│  └────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │  React Application                                 │     │
+│  │  - UI Components                                   │     │
+│  │  - Wallet Integration                              │     │
+│  │  - @dotbot/core (client-side operations)           │     │
+│  └────────────────────────────────────────────────────┘     │
 │                          ↓ HTTP API                         │
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │                         BACKEND                             │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │  Express.js Server (TypeScript)                     │    │
-│  │  - @dotbot/express (routes & middleware)           │    │
-│  │  - @dotbot/core (server-side operations)           │    │
-│  │  - Secure API key management                       │    │
-│  │  - OpenAPI specification (base truth)               │    │
-│  │  - Prism mock server for testing                   │    │
-│  └────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │  Express.js Server (TypeScript)                    │     │
+│  │  - @dotbot/express (routes & middleware)           │     │
+│  │  - @dotbot/core (server-side operations)           │     │
+│  │  - Secure API key management                       │     │
+│  │  - OpenAPI specification (base truth)              │     │
+│  │  - Prism mock server for testing                   │     │
+│  └────────────────────────────────────────────────────┘     │
 │                          ↓                                  │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │  AI Providers                                      │    │
-│  │  - ASI-One (Fetch.ai)                             │    │
-│  │  - Claude (Anthropic)                             │    │
-│  └────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │  AI Providers                                      │     │
+│  │  - ASI-One (Fetch.ai)                              │     │
+│  │  - Claude (Anthropic)                              │     │
+│  └────────────────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -658,8 +658,8 @@ lib/dotbot-core/scenarioEngine/
 
 2. **StateAllocator**
    - Sets up initial state for scenario execution
-   - **Synthetic mode**: Tracks balances/assets in memory
-   - **Emulated mode**: Uses Chopsticks to set chain state (requires backend server, currently disabled)
+   - **Synthetic mode**: TODO (disabled) – would track balances/assets in memory
+   - **Emulated mode**: TODO (disabled) – would use Chopsticks to set chain state (requires backend server)
    - **Live mode**: Creates real transactions (with warnings)
    - Integrates with RpcManager for reliable connections
    - Restores chat history from snapshots
@@ -681,8 +681,8 @@ lib/dotbot-core/scenarioEngine/
 **Key Concepts:**
 
 1. **Execution Modes**
-   - **Synthetic**: Fully mocked, no chain interaction (fastest, for unit tests)
-   - **Emulated**: Uses Chopsticks for realistic simulation via backend server (balanced, requires backend)
+   - **Synthetic**: TODO (disabled) – would be fully mocked, no chain interaction
+   - **Emulated**: TODO (disabled) – would use Chopsticks via backend server
    - **Live**: Real chain interaction (most realistic, requires testnet)
 
 2. **Scenario Structure**
