@@ -112,8 +112,17 @@ export async function buildContextualSystemPrompt(dotbot: DotBotInstance): Promi
         symbol: tokenSymbol,
       },
     });
-  } catch {
-    // Fallback to basic prompt if balance/chain fetch fails
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    dotbot.dotbotLogger.warn(
+      {
+        error: errorMessage,
+        network: dotbot.network,
+        walletAddress: dotbot.wallet?.address ?? '(unknown)',
+      },
+      'Context build failed (RPC/balance/chain). Falling back to prompt WITHOUT wallet/context. ' +
+        'Execution plans may lack sender → "Invalid sender address: Address is required" when user prepares execution.'
+    );
     return await buildSystemPrompt();
   }
 }
