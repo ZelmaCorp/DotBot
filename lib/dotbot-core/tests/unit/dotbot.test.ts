@@ -462,7 +462,6 @@ describe('DotBot', () => {
 
       dotbot = await DotBot.create(config);
       mockCustomLLM = jest.fn();
-      // buildContextualSystemPrompt is mocked at module level to return 'Mock system prompt'
     });
 
     it('should return text response when no ExecutionPlan is found', async () => {
@@ -471,6 +470,7 @@ describe('DotBot', () => {
 
       const result = await dotbot.chat('What is staking?', {
         llm: mockCustomLLM,
+        systemPrompt: 'Mock system prompt', // skip buildContextualSystemPrompt (would need RPC/balance in test)
       });
 
       expect(result.executed).toBe(false);
@@ -664,9 +664,10 @@ describe('DotBot', () => {
       await dotbot.chat('What did we talk about?', {
         llm: mockCustomLLM,
         conversationHistory,
+        systemPrompt: 'Mock system prompt', // skip buildContextualSystemPrompt (would need RPC/balance in test)
       });
 
-      // System prompt may be 'Default system prompt' (real buildContextualSystemPrompt) or mock; accept any string
+      // System prompt is the one we passed (mock); LLM receives conversationHistory
       expect(mockCustomLLM).toHaveBeenCalledWith(
         'What did we talk about?',
         expect.any(String),
@@ -862,7 +863,8 @@ describe('DotBot', () => {
     });
 
     it('should return error result if no LLM is provided', async () => {
-      const result = await dotbot.chat('Test message');
+      // Pass systemPrompt so we skip buildContextualSystemPrompt and reach callLLM, which throws when no LLM
+      const result = await dotbot.chat('Test message', { systemPrompt: 'Mock system prompt' });
       expect(result.success).toBe(false);
       expect(result.executed).toBe(false);
       expect(result.response).toContain('No LLM configured');
@@ -1390,17 +1392,15 @@ describe('DotBot', () => {
       expect(typeof prompt).toBe('string');
     });
 
-    it('should fallback to basic prompt if context fetch fails', async () => {
+    it('should throw when context fetch fails (no fallback)', async () => {
       // Make getBalance fail
       jest.spyOn(dotbot, 'getBalance').mockRejectedValue(new Error('Balance fetch failed'));
-      (buildSystemPrompt as jest.Mock).mockResolvedValue('Fallback system prompt');
 
-      const prompt = await actualLlm.buildContextualSystemPrompt(dotbot);
-
-      // Should still return a prompt (fallback)
-      expect(buildSystemPrompt).toHaveBeenCalled();
-      expect(typeof prompt).toBe('string');
-      expect(prompt.length).toBeGreaterThan(0);
+      await expect(actualLlm.buildContextualSystemPrompt(dotbot)).rejects.toThrow(
+        'Failed to build system prompt: Balance fetch failed'
+      );
+      // Should NOT call buildSystemPrompt (we throw instead of falling back)
+      expect(buildSystemPrompt).not.toHaveBeenCalled();
     });
 
     it('should handle missing Asset Hub balance gracefully', async () => {

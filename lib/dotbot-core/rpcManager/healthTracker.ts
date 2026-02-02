@@ -102,7 +102,7 @@ export class HealthTracker {
         this.rpcLogger.info({ 
           availableEndpoints: availableEndpoints.length,
           totalEndpoints: this.endpoints.length
-        }, `Resetting health data - only ${availableEndpoints.length}/${this.endpoints.length} endpoints available`);
+        }, `Resetting stale RPC health data (${availableEndpoints.length}/${this.endpoints.length} marked available); will try all endpoints again`);
         
         // Reset health data - clear failures and response times for a fresh start
         this.endpoints.forEach(endpoint => {
