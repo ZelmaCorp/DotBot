@@ -497,12 +497,13 @@ export class RpcManager {
         }
       }
       if (api) {
+        const connectedApi = api;
         this.currentEndpoint = endpoint;
-        this.currentReadApi = api;
-        api.on('disconnected', () => this.clearReadApiIf(api));
-        api.on('error', () => this.clearReadApiIf(api));
+        this.currentReadApi = connectedApi;
+        connectedApi.on('disconnected', () => this.clearReadApiIf(connectedApi));
+        connectedApi.on('error', () => this.clearReadApiIf(connectedApi));
         this.rpcLogger.info({ endpoint }, `Successfully connected to endpoint: ${endpoint}`);
-        return api;
+        return connectedApi;
       }
       this.rpcLogger.warn({ 
         endpoint,
