@@ -241,6 +241,19 @@ export class RpcManager {
             return;
           }
           
+          // Short delay after 'connected' so the WebSocket is fully ready for RPC (reduces "WebSocket is not connected" during getMetadata)
+          const STABILITY_DELAY_MS = 150;
+          await new Promise<void>((r) => setTimeout(r, STABILITY_DELAY_MS));
+          if (isResolved) return;
+          if (!provider.isConnected) {
+            cleanup();
+            safeDisconnect();
+            const error = new Error(`Provider disconnected during stability delay. The system will try the next endpoint.`);
+            this.rpcLogger.debug({ endpoint }, `Disconnected during ${STABILITY_DELAY_MS}ms stability delay - forcing failover`);
+            reject(error);
+            return;
+          }
+          
           let apiPromise: Promise<ApiPromise>;
           try {
             apiPromise = ApiPromise.create({ provider });
@@ -465,25 +478,39 @@ export class RpcManager {
         total: orderedEndpoints.length
       }, `Trying endpoint ${i + 1}/${orderedEndpoints.length}: ${endpoint}`);
       
-      try {
-        const api = await this.tryConnect(endpoint);
+      let api: ApiPromise | null = null;
+      for (let retry = 0; retry < 2 && !api; retry++) {
+        try {
+          api = await this.tryConnect(endpoint);
+        } catch (error) {
+          const err = error as Error;
+          const msg = err?.message ?? String(error);
+          const isWsNotConnected =
+            msg.includes('WebSocket is not connected') ||
+            msg.includes('Unable to initialize the API');
+          if (retry === 0 && isWsNotConnected) {
+            this.rpcLogger.debug({ endpoint }, 'WebSocket not connected on first attempt - retrying once');
+            continue;
+          }
+          lastError = err;
+          break;
+        }
+      }
+      if (api) {
         this.currentEndpoint = endpoint;
         this.currentReadApi = api;
         api.on('disconnected', () => this.clearReadApiIf(api));
         api.on('error', () => this.clearReadApiIf(api));
         this.rpcLogger.info({ endpoint }, `Successfully connected to endpoint: ${endpoint}`);
         return api;
-      } catch (error) {
-        lastError = error as Error;
-        this.rpcLogger.warn({ 
-          endpoint,
-          error: lastError.message,
-          attempt: i + 1,
-          total: orderedEndpoints.length
-        }, `Failed to connect to endpoint ${i + 1}/${orderedEndpoints.length}, trying next endpoint`);
-        this.healthTracker.markEndpointFailed(endpoint);
-        // Continue to next endpoint
       }
+      this.rpcLogger.warn({ 
+        endpoint,
+        error: lastError?.message ?? 'Unknown',
+        attempt: i + 1,
+        total: orderedEndpoints.length
+      }, `Failed to connect to endpoint ${i + 1}/${orderedEndpoints.length}, trying next endpoint`);
+      this.healthTracker.markEndpointFailed(endpoint);
     }
 
     // All endpoints failed
@@ -542,33 +569,42 @@ export class RpcManager {
         total: orderedEndpoints.length
       }, `Trying endpoint ${i + 1}/${orderedEndpoints.length} for execution session: ${endpoint}`);
       
-      try {
-        const api = await this.tryConnect(endpoint);
+      let api: ApiPromise | null = null;
+      for (let retry = 0; retry < 2 && !api; retry++) {
+        try {
+          api = await this.tryConnect(endpoint);
+        } catch (error) {
+          const { message } = this.normalizeError(error);
+          const isWsNotConnected =
+            message.includes('WebSocket is not connected') ||
+            message.includes('Unable to initialize the API');
+          if (retry === 0 && isWsNotConnected) {
+            this.rpcLogger.debug({ endpoint }, 'WebSocket not connected on first attempt - retrying once');
+            continue;
+          }
+          lastError = error instanceof Error ? error : new Error(message);
+          break;
+        }
+      }
+      if (api) {
         const session = new ExecutionSession(api, endpoint);
         this.activeSessions.add(session);
-        
         this.rpcLogger.info({ endpoint }, `Execution session created with endpoint: ${endpoint}`);
-        
-        // Monitor session health
         api.on('disconnected', () => {
           session.markInactive();
           this.activeSessions.delete(session);
         });
-        
         return session;
-      } catch (error) {
-        const { message, error: errorObj } = this.normalizeError(error);
-        lastError = errorObj;
-        
-        this.rpcLogger.warn({ 
-          endpoint,
-          error: message,
-          attempt: i + 1,
-          total: orderedEndpoints.length
-        }, `Failed to connect to endpoint ${i + 1}/${orderedEndpoints.length}${i < orderedEndpoints.length - 1 ? ', trying next' : ''}`);
-        this.healthTracker.markEndpointFailed(endpoint);
-        // Continue loop to try next endpoint (automatic failover)
       }
+      const { message, error: errorObj } = this.normalizeError(lastError);
+      lastError = errorObj;
+      this.rpcLogger.warn({ 
+        endpoint,
+        error: message,
+        attempt: i + 1,
+        total: orderedEndpoints.length
+      }, `Failed to connect to endpoint ${i + 1}/${orderedEndpoints.length}${i < orderedEndpoints.length - 1 ? ', trying next' : ''}`);
+      this.healthTracker.markEndpointFailed(endpoint);
     }
 
     // All endpoints failed - log and throw final error
