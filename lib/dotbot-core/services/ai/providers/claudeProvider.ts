@@ -100,13 +100,9 @@ export class ClaudeProvider implements AIProvider {
     // Get conversation history from context (provided by frontend)
     const conversationHistory = context?.conversationHistory || [];
 
-    // Add conversation history (from context/frontend)
+    // Add conversation history (from context/frontend). Already limited by core (CHAT_HISTORY_MESSAGE_LIMIT).
     if (conversationHistory.length > 0) {
-      // Limit to last 20 messages to avoid token limits
-      const recentHistory = conversationHistory.slice(-20);
-      
-      // Convert AIMessage format to ClaudeMessage format
-      for (const msg of recentHistory) {
+      for (const msg of conversationHistory) {
         // Claude doesn't support system messages in the messages array, skip them
         if (msg.role !== 'system') {
           messages.push({
