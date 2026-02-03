@@ -207,9 +207,9 @@ export class ExecutionArray {
       item.completedAt = Date.now();
     }
     
-    // Notify callbacks
-    this.notifyStatus(item);
-    this.notifyProgress();
+    // Notify callbacks (deferred to prevent blocking and enable batching)
+    this.notifyStatusDeferred(item);
+    this.notifyProgressDeferred();
     
     // If status changed to failed, notify error callbacks
     if (status === 'failed' && previousStatus !== 'failed' && error) {
@@ -444,33 +444,28 @@ export class ExecutionArray {
       const items = Array.from(this.pendingStatusNotifications);
       this.pendingStatusNotifications.clear();
       
-      // Use requestIdleCallback if available, otherwise setTimeout
+      // Use setTimeout for immediate next-tick notification
+      // (Removed requestIdleCallback to reduce delay - it can defer up to 50ms)
       const notify = () => {
         items.forEach((item) => {
           this.notifyStatus(item);
         });
       };
 
-      if (typeof requestIdleCallback !== 'undefined') {
-        requestIdleCallback(notify, { timeout: 50 });
-      } else {
-        setTimeout(notify, 0);
-      }
+      setTimeout(notify, 0);
     }
 
     // Flush progress notification
     if (this.pendingProgressNotification) {
       this.pendingProgressNotification = false;
       
+      // Use setTimeout for immediate next-tick notification
+      // (Removed requestIdleCallback to reduce delay - it can defer up to 50ms)
       const notify = () => {
         this.notifyProgress();
       };
 
-      if (typeof requestIdleCallback !== 'undefined') {
-        requestIdleCallback(notify, { timeout: 50 });
-      } else {
-        setTimeout(notify, 0);
-      }
+      setTimeout(notify, 0);
     }
 
     this.notificationTimeout = null;
