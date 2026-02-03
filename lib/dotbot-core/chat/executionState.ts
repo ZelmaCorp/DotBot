@@ -198,24 +198,10 @@ export class ExecutionStateManager {
     
     // Set up subscription to notify callbacks on future updates
     // Throttle callback invocations to prevent UI blocking
-    let lastStateHash: string | null = null;
     let pendingUpdate: NodeJS.Timeout | null = null;
-    
-    // Helper to create a simple hash of state for change detection
-    const getStateHash = (state: ExecutionArrayState): string => {
-      // Create a hash from key state properties that change during execution
-      const itemsHash = state.items.map(item => `${item.id}:${item.status}`).join('|');
-      return `${state.isExecuting}:${state.completedItems}:${state.failedItems}:${itemsHash}`;
-    };
     
     const notifyCallbacks = () => {
       const updatedState = executionArray.getState();
-      const stateHash = getStateHash(updatedState);
-      
-      // Skip if state hasn't actually changed (content check, not reference)
-      if (stateHash === lastStateHash) {
-        return;
-      }
       
       // Clear any pending update
       if (pendingUpdate) {
@@ -226,7 +212,6 @@ export class ExecutionStateManager {
       // Defer callback invocation to avoid blocking UI thread
       // Use a small delay to batch rapid updates (16ms = ~60fps)
       pendingUpdate = setTimeout(() => {
-        lastStateHash = stateHash;
         const callbacks = this.executionCallbacks.get(executionId);
         if (callbacks) {
           callbacks.forEach((cb) => {
@@ -255,7 +240,6 @@ export class ExecutionStateManager {
         clearTimeout(pendingUpdate);
         pendingUpdate = null;
       }
-      lastStateHash = null;
     };
     
     this.executionSubscriptions.set(executionId, unsubscribe);
