@@ -213,6 +213,7 @@ export class ExecutionStateManager {
       // Use a small delay to batch rapid updates (16ms = ~60fps)
       pendingUpdate = setTimeout(() => {
         const callbacks = this.executionCallbacks.get(executionId);
+        
         if (callbacks) {
           callbacks.forEach((cb) => {
             try {
@@ -297,6 +298,7 @@ export class ExecutionStateManager {
     // Return cleanup function
     return () => {
       callbacks.delete(callback);
+      
       if (callbacks.size === 0) {
         this.executionCallbacks.delete(executionId);
         // Clean up subscription if no more callbacks

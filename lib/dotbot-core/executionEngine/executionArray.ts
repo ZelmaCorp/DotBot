@@ -383,6 +383,7 @@ export class ExecutionArray {
    */
   onProgress(callback: ProgressCallback): () => void {
     this.progressCallbacks.add(callback);
+    
     return () => {
       this.progressCallbacks.delete(callback);
     };
@@ -486,11 +487,12 @@ export class ExecutionArray {
    */
   private notifyProgress(): void {
     const state = this.getState();
+    
     this.progressCallbacks.forEach((callback) => {
       try {
         callback(state);
       } catch (error) {
-        console.error('[ExecutionArray] ❌ Error in progress callback:', error);
+        console.error('[ExecutionArray] Error in progress callback:', error);
       }
     });
   }
