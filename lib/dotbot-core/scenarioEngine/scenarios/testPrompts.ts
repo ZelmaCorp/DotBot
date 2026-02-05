@@ -72,13 +72,13 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     ],
   },
   
-  // Phase 3: Comparison operators demo
+  // Comparison operators: Range validation
   {
     id: 'happy-path-004',
-    name: 'Transfer with Amount Range Check (Phase 3 Demo)',
-    description: 'Demonstrates Phase 3 comparison operators: amount must be between 0.1 and 1.0',
+    name: 'Transfer with Amount Range Check',
+    description: 'Demonstrates comparison operators: amount must be between 0.1 and 1.0',
     category: 'happy-path',
-    tags: ['comparison-operators', 'phase3', 'demo'],
+    tags: ['comparison-operators', 'range-check', 'demo'],
     steps: [
       {
         id: 'step-1',
@@ -92,7 +92,7 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
         expectedAgent: 'AssetTransferAgent',
         expectedFunction: 'transfer',
         expectedParams: {
-          // Phase 3: Comparison operator - amount must be between 0.1 and 1.0
+          // Comparison operator - amount must be between 0.1 and 1.0
           amount: { gte: '0.1', lte: '1.0' },
           recipient: 'Alice',
         },
@@ -100,13 +100,13 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     ],
   },
 
-  // Phase 3: Logical AND (all) operator demo
+  // Logical AND (all) operator
   {
     id: 'happy-path-005',
-    name: 'Transfer with ALL Checks (Phase 3 Logical AND)',
-    description: 'Demonstrates Phase 3 logical AND: all conditions must be true',
+    name: 'Transfer with ALL Checks (Logical AND)',
+    description: 'Demonstrates logical AND operator: all conditions must be true',
     category: 'happy-path',
-    tags: ['logical-operators', 'phase3', 'demo', 'all', 'and'],
+    tags: ['logical-operators', 'all', 'and', 'demo'],
     steps: [
       {
         id: 'step-1',
@@ -116,7 +116,7 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     ],
     expectations: [
       {
-        // Phase 3: ALL (AND) - every sub-expectation must pass
+        // ALL (AND) - every sub-expectation must pass
         all: [
           { responseType: 'execution' },
           { expectedAgent: 'AssetTransferAgent' },
@@ -127,13 +127,13 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     ],
   },
 
-  // Phase 3: Logical OR (any) operator demo
+  // Logical OR (any) operator
   {
     id: 'happy-path-006',
-    name: 'Flexible Error Message Detection (Phase 3 Logical OR)',
-    description: 'Demonstrates Phase 3 logical OR: at least one condition must be true',
+    name: 'Flexible Error Message Detection (Logical OR)',
+    description: 'Demonstrates logical OR operator: at least one condition must be true',
     category: 'happy-path',
-    tags: ['logical-operators', 'phase3', 'demo', 'any', 'or'],
+    tags: ['logical-operators', 'any', 'or', 'demo'],
     steps: [
       {
         id: 'step-1',
@@ -143,8 +143,8 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     ],
     expectations: [
       {
-        // Phase 3: ANY (OR) - at least one must pass
-        // This is useful for flexible text matching (multiple valid phrasings)
+        // ANY (OR) - at least one must pass
+        // Useful for flexible text matching (multiple valid phrasings)
         any: [
           { expectedParams: { recipient: 'Alice' } },
           { expectedParams: { recipient: 'alice' } },
@@ -154,13 +154,13 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     ],
   },
 
-  // Phase 3: Logical NOT operator demo
+  // Logical NOT operator
   {
     id: 'happy-path-007',
-    name: 'No Error Messages (Phase 3 Logical NOT)',
-    description: 'Demonstrates Phase 3 logical NOT: condition must NOT be true',
+    name: 'No Error Messages (Logical NOT)',
+    description: 'Demonstrates logical NOT operator: condition must NOT be true',
     category: 'happy-path',
-    tags: ['logical-operators', 'phase3', 'demo', 'not', 'negation'],
+    tags: ['logical-operators', 'not', 'negation', 'demo'],
     steps: [
       {
         id: 'step-1',
@@ -173,7 +173,7 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
         responseType: 'execution',
       },
       {
-        // Phase 3: NOT - ensure response does NOT contain error messages
+        // NOT - ensure response does NOT contain error messages
         not: {
           shouldContain: ['error', 'failed', 'rejected'],
         },

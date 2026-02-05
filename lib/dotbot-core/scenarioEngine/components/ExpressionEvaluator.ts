@@ -1,14 +1,12 @@
 /**
- * ExpressionEvaluator - Phase 3: Expression System
+ * ExpressionEvaluator
  * 
  * Evaluates comparison operators and logical expressions in scenario expectations.
  * 
  * Features:
  * - Comparison operators: eq, ne, gt, gte, lt, lte, between, matches, in, notIn
- * - Logical operators: all (AND), any (OR), not (NOT)
- * - Conditional logic: when/then/else (IF-THEN-ELSE)
  * - Type coercion for flexible comparisons
- * - Short-circuit evaluation for performance
+ * - Performance-optimized evaluation
  * 
  * @example
  * ```typescript
@@ -17,11 +15,6 @@
  * // Comparison operators
  * evaluator.evaluateComparison('5.5', { gte: '5', lte: '10' }); // true
  * evaluator.evaluateComparison('Alice', { matches: /^[A-Z]/ }); // true
- * 
- * // Logical operators
- * evaluator.evaluateAll([...expectations], context); // AND
- * evaluator.evaluateAny([...expectations], context); // OR
- * evaluator.evaluateNot(expectation, context); // NOT
  * ```
  */
 
@@ -73,194 +66,210 @@ export interface LogicalEvaluationResult {
 }
 
 /**
- * Expression Evaluator for comparison and logical operators
+ * Expression Evaluator for comparison operators
  */
 export class ExpressionEvaluator {
   /**
    * Evaluate a comparison operator against an actual value
-   * 
-   * @param actual - The actual value to check
-   * @param expected - The expected value (simple or comparison operator)
-   * @returns Comparison result with pass/fail and message
    */
-  evaluateComparison(
-    actual: unknown,
-    expected: ParamValue
-  ): ComparisonResult {
+  evaluateComparison(actual: unknown, expected: ParamValue): ComparisonResult {
     // Handle simple values (exact match - backward compatible)
-    if (typeof expected === 'string' || typeof expected === 'number' || typeof expected === 'boolean') {
-      const passed = String(actual) === String(expected);
-      return {
-        passed,
-        message: passed 
-          ? `Value matches ${expected}` 
-          : `Expected ${expected}, got ${actual}`,
-        actualValue: actual,
-        expectedValue: expected,
-      };
+    if (this.isSimpleValue(expected)) {
+      return this.evaluateSimpleMatch(actual, expected);
     }
     
     // Handle comparison operators
     const comp = expected as ComparisonOperator;
-    const actualStr = String(actual);
-    const actualNum = this.parseNumber(actual);
-    
-    // Try each operator
-    if (comp.eq !== undefined) {
-      const passed = String(actual) === String(comp.eq);
-      return {
-        passed,
-        message: passed ? `Value equals ${comp.eq}` : `Expected ${comp.eq}, got ${actual}`,
-        actualValue: actual,
-        expectedValue: comp.eq,
-      };
-    }
-    
-    if (comp.ne !== undefined) {
-      const passed = String(actual) !== String(comp.ne);
-      return {
-        passed,
-        message: passed ? `Value is not ${comp.ne}` : `Value should not be ${comp.ne}`,
-        actualValue: actual,
-        expectedValue: comp.ne,
-      };
-    }
-    
-    // Numeric comparisons
-    if (comp.gt !== undefined) {
-      const expected = this.parseNumber(comp.gt);
-      const passed = actualNum > expected;
-      return {
-        passed,
-        message: passed 
-          ? `Value ${actualNum} > ${expected}` 
-          : `Expected > ${expected}, got ${actualNum}`,
-        actualValue: actualNum,
-        expectedValue: expected,
-      };
-    }
-    
-    if (comp.gte !== undefined) {
-      const expected = this.parseNumber(comp.gte);
-      const passed = actualNum >= expected;
-      return {
-        passed,
-        message: passed 
-          ? `Value ${actualNum} >= ${expected}` 
-          : `Expected >= ${expected}, got ${actualNum}`,
-        actualValue: actualNum,
-        expectedValue: expected,
-      };
-    }
-    
-    if (comp.lt !== undefined) {
-      const expected = this.parseNumber(comp.lt);
-      const passed = actualNum < expected;
-      return {
-        passed,
-        message: passed 
-          ? `Value ${actualNum} < ${expected}` 
-          : `Expected < ${expected}, got ${actualNum}`,
-        actualValue: actualNum,
-        expectedValue: expected,
-      };
-    }
-    
-    if (comp.lte !== undefined) {
-      const expected = this.parseNumber(comp.lte);
-      const passed = actualNum <= expected;
-      return {
-        passed,
-        message: passed 
-          ? `Value ${actualNum} <= ${expected}` 
-          : `Expected <= ${expected}, got ${actualNum}`,
-        actualValue: actualNum,
-        expectedValue: expected,
-      };
-    }
-    
-    // Range check
-    if (comp.between && Array.isArray(comp.between) && comp.between.length === 2) {
-      const min = this.parseNumber(comp.between[0]);
-      const max = this.parseNumber(comp.between[1]);
-      const passed = actualNum >= min && actualNum <= max;
-      return {
-        passed,
-        message: passed 
-          ? `Value ${actualNum} is between ${min} and ${max}` 
-          : `Expected between ${min} and ${max}, got ${actualNum}`,
-        actualValue: actualNum,
-        expectedValue: comp.between,
-      };
-    }
-    
-    // Regex match
-    if (comp.matches) {
-      const regex = typeof comp.matches === 'string' 
-        ? new RegExp(comp.matches) 
-        : comp.matches;
-      const passed = regex.test(actualStr);
-      return {
-        passed,
-        message: passed 
-          ? `Value matches pattern ${regex}` 
-          : `Value does not match pattern ${regex}`,
-        actualValue: actualStr,
-        expectedValue: comp.matches,
-      };
-    }
-    
-    // List membership (in)
-    if (comp.in && Array.isArray(comp.in)) {
-      const passed = comp.in.some(v => String(actual) === String(v));
-      return {
-        passed,
-        message: passed 
-          ? `Value ${actual} is in [${comp.in.join(', ')}]` 
-          : `Value ${actual} is not in [${comp.in.join(', ')}]`,
-        actualValue: actual,
-        expectedValue: comp.in,
-      };
-    }
-    
-    // List exclusion (notIn)
-    if (comp.notIn && Array.isArray(comp.notIn)) {
-      const passed = !comp.notIn.some(v => String(actual) === String(v));
-      return {
-        passed,
-        message: passed 
-          ? `Value ${actual} is not in [${comp.notIn.join(', ')}]` 
-          : `Value ${actual} should not be in [${comp.notIn.join(', ')}]`,
-        actualValue: actual,
-        expectedValue: comp.notIn,
-      };
-    }
-    
-    // No valid operator found
+    return this.evaluateComparisonOperator(actual, comp);
+  }
+  
+  /**
+   * Check if expected is a simple value (not a comparison operator)
+   */
+  private isSimpleValue(expected: ParamValue): expected is string | number | boolean {
+    return typeof expected === 'string' || typeof expected === 'number' || typeof expected === 'boolean';
+  }
+  
+  /**
+   * Evaluate simple exact match
+   */
+  private evaluateSimpleMatch(actual: unknown, expected: string | number | boolean): ComparisonResult {
+    const passed = String(actual) === String(expected);
     return {
-      passed: false,
-      message: 'No valid comparison operator found',
+      passed,
+      message: passed ? `Value matches ${expected}` : `Expected ${expected}, got ${actual}`,
       actualValue: actual,
       expectedValue: expected,
     };
   }
   
   /**
-   * Parse a value as a number, handling strings and edge cases
-   * 
-   * @param value - Value to parse
-   * @returns Parsed number (or 0 if invalid)
+   * Evaluate comparison operator
    */
-  private parseNumber(value: unknown): number {
-    if (typeof value === 'number') {
-      return value;
+  private evaluateComparisonOperator(actual: unknown, comp: ComparisonOperator): ComparisonResult {
+    const actualStr = String(actual);
+    const actualNum = this.parseNumber(actual);
+    
+    // Equality operators
+    if (comp.eq !== undefined) return this.evaluateEquals(actual, comp.eq);
+    if (comp.ne !== undefined) return this.evaluateNotEquals(actual, comp.ne);
+    
+    // Numeric comparisons
+    if (comp.gt !== undefined) return this.evaluateGreaterThan(actualNum, comp.gt);
+    if (comp.gte !== undefined) return this.evaluateGreaterThanOrEqual(actualNum, comp.gte);
+    if (comp.lt !== undefined) return this.evaluateLessThan(actualNum, comp.lt);
+    if (comp.lte !== undefined) return this.evaluateLessThanOrEqual(actualNum, comp.lte);
+    
+    // Range and pattern matching
+    if (comp.between) return this.evaluateBetween(actualNum, comp.between);
+    if (comp.matches) return this.evaluateMatches(actualStr, comp.matches);
+    
+    // List operations
+    if (comp.in) return this.evaluateIn(actual, comp.in);
+    if (comp.notIn) return this.evaluateNotIn(actual, comp.notIn);
+    
+    // No valid operator found
+    return { passed: false, message: 'No valid comparison operator found', actualValue: actual };
+  }
+  
+  private evaluateEquals(actual: unknown, expected: unknown): ComparisonResult {
+    const passed = String(actual) === String(expected);
+    return {
+      passed,
+      message: passed ? `Value equals ${expected}` : `Expected ${expected}, got ${actual}`,
+      actualValue: actual,
+      expectedValue: expected,
+    };
+  }
+  
+  private evaluateNotEquals(actual: unknown, expected: unknown): ComparisonResult {
+    const passed = String(actual) !== String(expected);
+    return {
+      passed,
+      message: passed ? `Value is not ${expected}` : `Value should not be ${expected}`,
+      actualValue: actual,
+      expectedValue: expected,
+    };
+  }
+  
+  private evaluateGreaterThan(actualNum: number, expectedValue: unknown): ComparisonResult {
+    const expected = this.parseNumber(expectedValue);
+    const passed = actualNum > expected;
+    return {
+      passed,
+      message: passed ? `Value ${actualNum} > ${expected}` : `Expected > ${expected}, got ${actualNum}`,
+      actualValue: actualNum,
+      expectedValue: expected,
+    };
+  }
+  
+  private evaluateGreaterThanOrEqual(actualNum: number, expectedValue: unknown): ComparisonResult {
+    const expected = this.parseNumber(expectedValue);
+    const passed = actualNum >= expected;
+    return {
+      passed,
+      message: passed ? `Value ${actualNum} >= ${expected}` : `Expected >= ${expected}, got ${actualNum}`,
+      actualValue: actualNum,
+      expectedValue: expected,
+    };
+  }
+  
+  private evaluateLessThan(actualNum: number, expectedValue: unknown): ComparisonResult {
+    const expected = this.parseNumber(expectedValue);
+    const passed = actualNum < expected;
+    return {
+      passed,
+      message: passed ? `Value ${actualNum} < ${expected}` : `Expected < ${expected}, got ${actualNum}`,
+      actualValue: actualNum,
+      expectedValue: expected,
+    };
+  }
+  
+  private evaluateLessThanOrEqual(actualNum: number, expectedValue: unknown): ComparisonResult {
+    const expected = this.parseNumber(expectedValue);
+    const passed = actualNum <= expected;
+    return {
+      passed,
+      message: passed ? `Value ${actualNum} <= ${expected}` : `Expected <= ${expected}, got ${actualNum}`,
+      actualValue: actualNum,
+      expectedValue: expected,
+    };
+  }
+  
+  private evaluateBetween(actualNum: number, range: [unknown, unknown]): ComparisonResult {
+    if (!Array.isArray(range) || range.length !== 2) {
+      return { passed: false, message: 'Invalid range format', actualValue: actualNum };
     }
     
+    const min = this.parseNumber(range[0]);
+    const max = this.parseNumber(range[1]);
+    const passed = actualNum >= min && actualNum <= max;
+    
+    return {
+      passed,
+      message: passed 
+        ? `Value ${actualNum} is between ${min} and ${max}` 
+        : `Expected between ${min} and ${max}, got ${actualNum}`,
+      actualValue: actualNum,
+      expectedValue: range,
+    };
+  }
+  
+  private evaluateMatches(actualStr: string, pattern: RegExp | string): ComparisonResult {
+    const regex = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
+    const passed = regex.test(actualStr);
+    
+    return {
+      passed,
+      message: passed 
+        ? `Value matches pattern ${regex}` 
+        : `Value does not match pattern ${regex}`,
+      actualValue: actualStr,
+      expectedValue: pattern,
+    };
+  }
+  
+  private evaluateIn(actual: unknown, list: unknown[]): ComparisonResult {
+    if (!Array.isArray(list)) {
+      return { passed: false, message: 'Invalid list format', actualValue: actual };
+    }
+    
+    const passed = list.some(v => String(actual) === String(v));
+    return {
+      passed,
+      message: passed 
+        ? `Value ${actual} is in [${list.join(', ')}]` 
+        : `Value ${actual} is not in [${list.join(', ')}]`,
+      actualValue: actual,
+      expectedValue: list,
+    };
+  }
+  
+  private evaluateNotIn(actual: unknown, list: unknown[]): ComparisonResult {
+    if (!Array.isArray(list)) {
+      return { passed: false, message: 'Invalid list format', actualValue: actual };
+    }
+    
+    const passed = !list.some(v => String(actual) === String(v));
+    return {
+      passed,
+      message: passed 
+        ? `Value ${actual} is not in [${list.join(', ')}]` 
+        : `Value ${actual} should not be in [${list.join(', ')}]`,
+      actualValue: actual,
+      expectedValue: list,
+    };
+  }
+  
+  /**
+   * Parse a value as a number, handling strings and edge cases
+   */
+  private parseNumber(value: unknown): number {
+    if (typeof value === 'number') return value;
     if (typeof value === 'string') {
       const parsed = parseFloat(value);
       return isNaN(parsed) ? 0 : parsed;
     }
-    
     return 0;
   }
 }
