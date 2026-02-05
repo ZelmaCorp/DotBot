@@ -80,6 +80,15 @@ const AppContent: React.FC = () => {
   // Environment preference (for when wallet is not connected yet)
   const [preferredEnvironment, setPreferredEnvironment] = useState<Environment>('mainnet');
   
+  // Cleanup ScenarioEngine on unmount to prevent subscription leaks
+  useEffect(() => {
+    return () => {
+      console.log('[App] Cleaning up ScenarioEngine on unmount');
+      scenarioEngine.unsubscribeFromDotBot();
+      scenarioEngine.destroy();
+    };
+  }, [scenarioEngine]);
+  
   // Preloaded RPC managers removed - DotBot handles connections directly
   
   // Signing
@@ -464,8 +473,8 @@ const AppContent: React.FC = () => {
       }
     }
     
-    // Return error result for scenario engine
-    return {
+    // Create error result for scenario engine
+    const errorResult = {
       response: errorMessage,
       plan: undefined,
       executionArrayState: undefined,
@@ -475,6 +484,15 @@ const AppContent: React.FC = () => {
       completed: 0,
       failed: 1,
     };
+    
+    // Emit CHAT_COMPLETE with error result for ScenarioEngine
+    if (dotbot) {
+      dotbot.emit({ type: DotBotEventType.CHAT_COMPLETE, result: errorResult });
+      console.log('[App] CHAT_COMPLETE event emitted for ScenarioEngine (error case)');
+    }
+    
+    // Return error result
+    return errorResult;
   };
 
   // Main handler: Orchestrates the message sending flow
@@ -513,6 +531,13 @@ const AppContent: React.FC = () => {
 
       // Step 5: Update UI
       updateUIAfterMessages(persistencePromises);
+
+      // Step 6: Emit CHAT_COMPLETE event for ScenarioEngine
+      // This allows ScenarioEngine to capture the response and evaluate it
+      if (dotbot) {
+        dotbot.emit({ type: DotBotEventType.CHAT_COMPLETE, result: chatResult });
+        console.log('[App] CHAT_COMPLETE event emitted for ScenarioEngine');
+      }
 
       // Return the chat result for scenario engine
       return chatResult;
