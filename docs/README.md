@@ -73,7 +73,7 @@ npm run dev:frontend
 
 That's it! DotBot handles the complexity behind the scenes.
 
-**Note:** Transactions use a two-step pattern: after the LLM suggests a plan, the UI shows an ExecutionFlow; the user clicks "Accept & Start" to approve, then signs in the wallet. RPC connections and the browser wallet signer are **lazy-loaded** on first use (e.g. first `chat()` or `getBalance()`).
+**Note:** Transactions use a two-step pattern: after the LLM suggests a plan, the UI shows an ExecutionFlow; the user clicks "Accept & Start" to approve, then signs in the wallet. RPC connections and the browser wallet signer are **lazy-loaded** on first use (e.g. first `chat()` or `getBalance()`). If the LLM returns prose instead of a transaction plan, DotBot retries once and shows a clear error if no plan is extracted. Restored chats show **historical** execution flows (frozen); you can **Rerun** (new flow) or **Restore** (resume). Balance context is kept up-to-date in chat history for the LLM.
 
 ## Architecture Overview
 
@@ -297,12 +297,14 @@ Smart endpoint management:
 
 ### 6. ScenarioEngine Testing Framework
 
-**NEW** in v0.2.0: Systematic testing framework for DotBot:
+**NEW** in v0.2.0; **enhanced** with expression system:
 - Deterministic test entity creation
+- **Expression system**: Comparison operators (`gte`, `lte`, `between`, `matches`, `in`, etc.) and logical operators (`all`, `any`, `not`, `when`/`then`/`else`) in expectations; backward compatible with existing scenarios
+- **ExpressionValidator**: Validates expectations at scenario load time (circular refs, nesting depth, invalid operators)
 - Execution modes: live (synthetic and emulated currently disabled)
 - UI-integrated testing (tests through actual UI)
 - LLM-consumable evaluation logs
-- Comprehensive test scenarios (happy-path, adversarial, jailbreak, etc.)
+- Comprehensive test scenarios (happy-path, adversarial, jailbreak, ambiguity, edge-case, stress; 20+ converted to expression format)
 
 ## Environment Modes
 

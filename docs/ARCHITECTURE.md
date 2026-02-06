@@ -326,7 +326,7 @@ const result = buildSafeTransferExtrinsic(api, params, capabilities);
 - **dotbot/chatLifecycle.ts**: `initializeChatInstance`, `clearHistory`, `switchEnvironment`, `loadChatInstance`.
 - **dotbot/executionPreparation.ts**: `prepareExecution`, `prepareExecutionStateless` (orchestrate plan, add ExecutionMessage to chat).
 - **dotbot/executionRunner.ts**: `startExecution`, `startExecutionStateless`, `cleanupExecutionSessions`, `cleanupExpiredExecutions`.
-- **dotbot/llm.ts**: `getLLMResponse`, `buildContextualSystemPrompt` (wallet/network/balance context for system prompt). Includes a **format-retry guardrail**: when the LLM returns prose instead of a JSON ExecutionPlan (e.g. "I've prepared a transaction flow..."), the response is detected and the LLM is called once more with a correction prompt asking for JSON only.
+- **dotbot/llm.ts**: `getLLMResponse`, `buildContextualSystemPrompt` (wallet/network/balance context for system prompt). Chat history length is centralized via `CHAT_HISTORY_MESSAGE_LIMIT` (e.g. 8); balance info is injected next to history messages via `formatBalanceTurnContext` so the LLM always has up-to-date balance context. Includes a **format-retry guardrail**: when the LLM returns prose instead of a JSON ExecutionPlan (e.g. "I've prepared a transaction flow..."), the response is detected and the LLM is called once more with a correction prompt asking for JSON only.
 - **dotbot/rpcLifecycle.ts**: `ensureRpcConnectionsReady` (connect relay + optional Asset Hub, init ExecutionSystem and signer).
 - **dotbot/balanceChain.ts**: `getBalance`, `getChainInfo`.
 - **dotbot/types.ts**: `DotBotConfig`, `ChatResult`, `ChatOptions`, `DotBotEvent`, etc.
@@ -423,7 +423,7 @@ lib/dotbot-core/executionEngine/
 **Purpose**: Core infrastructure services.
 
 **Key Services:**
-- **RpcManager**: Lives in `lib/dotbot-core/rpcManager/` (RpcManager.ts, healthTracker, factories). Multi-endpoint management with health monitoring, failover, and **network-awareness**. Periodic health checks run every 30 minutes by default (configurable). On API disconnect or error, the cached read API is cleared (`clearReadApiIf`) so the next `getReadApi()` triggers failover to a healthy endpoint.
+- **RpcManager**: Lives in `lib/dotbot-core/rpcManager/` (RpcManager.ts, healthTracker, factories). Multi-endpoint management with health monitoring, failover, and **network-awareness**. Periodic health checks run every 30 minutes by default (configurable). On API disconnect or error, the cached read API is cleared (`clearReadApiIf`) so the next `getReadApi()` triggers failover to a healthy endpoint. Uses `STABILITY_DELAY_MS` (150ms) before considering a connection stable; `getReadApi()` includes retry logic for transient failures.
 - **Chopsticks Client**: Client interface for runtime simulation (makes HTTP requests to backend server)
 - **SettingsManager**: Centralized settings management with persistence (simulation config, extensible for future settings)
 - **SequentialSimulation**: Multi-transaction simulation service (sequential execution on single fork for state tracking, client interface)
@@ -526,6 +526,7 @@ lib/dotbot-core/storage/
    - Each ExecutionArray has unique ID
    - Execution flows appear inline in conversation timeline
    - Can be interacted with independently
+   - **Historical flows**: When a chat is restored from storage, its execution flows are treated as historical (frozen). They are no longer restored/rebuilt from the ChatInstance constructor; the UI shows them as completed or interrupted and offers Rerun or Restore where applicable.
 
 **Responsibilities:**
 - Maintain conversation history with execution state
@@ -556,7 +557,8 @@ lib/dotbot-core/storage/
 
 3. **Execution Flow**
    - `ExecutionFlow` - Visual representation of ExecutionArray
-   - Shows transaction steps, status, and progress
+   - Shows transaction steps, status, and progress in real time (subscriptions fixed so simulation/broadcasting/finalized state updates render correctly; `useExecutionFlowState` no longer destroys subscriptions when `executionMessage` object reference changes)
+   - **Historical flows**: Execution flows from restored/saved chats are treated as historical (frozen by default). Completed historical flows can be **Rerun** (creates a new ExecutionFlow); interrupted ones can be **Restore** (resume without creating a new flow). Helpers: `isStepFinalized`, `isExecutionArrayStateTerminal`
    - "Accept & Start" button for user approval
    - Respects simulation setting (shows/hides simulation UI)
 
@@ -636,17 +638,21 @@ lib/dotbot-core/
 **Structure:**
 ```
 lib/dotbot-core/scenarioEngine/
-├── ScenarioEngine.ts          # Main orchestrator
-├── types.ts                   # Core types (Scenario, StepResult, etc.)
+├── ScenarioEngine.ts          # Main orchestrator (validates expectations at load via ExpressionValidator)
+├── types.ts                   # Core types (Scenario, StepResult, ComparisonOperator, LogicalExpectation, etc.)
 ├── index.ts                   # Public API exports
 ├── components/
 │   ├── EntityCreator.ts       # Creates test accounts (keypairs, multisigs, proxies)
 │   ├── StateAllocator.ts      # Sets up initial state (balances, on-chain, local)
 │   ├── ScenarioExecutor.ts    # Executes scenarios
-│   └── Evaluator.ts           # Evaluates results against expectations
+│   ├── Evaluator.ts           # Evaluates results against expectations (uses ExpressionEvaluator for comparison/logical ops)
+│   ├── ExpressionEvaluator.ts # Comparison operators (eq, ne, gt, gte, lt, lte, between, matches, in, notIn)
+│   └── ExpressionValidator.ts # Validates expectations at load (circular refs, nesting depth, invalid operators)
 └── scenarios/
-    └── testPrompts.ts         # Pre-built test scenarios
+    └── testPrompts.ts         # Pre-built test scenarios (20+ converted to expression system)
 ```
+
+**Expression System**: Expectations support comparison operators in `expectedParams` (e.g. `amount: { gte: '0.1', lte: '10' }`) and logical operators (`all`, `any`, `not`, `when`/`then`/`else`). Backward compatible: plain values and existing scenarios work unchanged. See `xx_scenario_engine/EXPRESSION_SYSTEM_EXAMPLES.md` (20+ examples) and `QUICK_REFERENCE.md`. ExpressionValidator runs at scenario load time (before execution) and fails fast on circular references, excessive nesting, or invalid operators.
 
 **Key Components:**
 
@@ -2456,10 +2462,10 @@ Use a three-layer approach to maximize ExecutionPlan reliability:
 **Implementation:**
 - `lib/dotbot-core/prompts/system/loader.ts`: Output Mode Override block, FINAL CHECK block, compact rules and examples.
 - `lib/dotbot-core/dotbot/llm.ts`: Format check after first response; retry with correction prompt when appropriate; logging of guardrail decision.
-- `frontend/src/App.tsx`: When `plan` is missing but response looks like transfer prose, show "❌ LLM ERROR: Model returned prose..." with preview so users and logs see accurate feedback.
+- `frontend/src/App.tsx`: When `plan` is missing but response looks like transfer prose, show a clear **LLM ERROR** message (e.g. "Model returned prose instead of ExecutionPlan...") with optional preview so users and logs see accurate feedback instead of incorrect success/failure. If context (e.g. balance) could not be obtained, a clean error message is shown instead of generic failure.
 
 **History:**
-- v0.2.x (January 2026): Three-layer guardrail (prompt mode + final check + code retry); RpcManager health check 30 min, clear on disconnect; frontend LLM error messaging.
+- v0.2.x (January 2026): Three-layer guardrail (prompt mode + final check + code retry); RpcManager health check 30 min, clear on disconnect, STABILITY_DELAY_MS and getReadApi retry; frontend LLM error messaging; balance context via CHAT_HISTORY_MESSAGE_LIMIT and formatBalanceTurnContext.
 
 ---
 
@@ -2472,7 +2478,9 @@ Use a three-layer approach to maximize ExecutionPlan reliability:
 
 ---
 
-**Last Updated**: January 2026
+**Last Updated**: February 2026
+
+**Recent changes (PRs #91–#96, ScenarioEngine):** ExecutionPlan reliability (system prompt + code retry + frontend LLM error messaging); RpcManager STABILITY_DELAY_MS and getReadApi retry; historical Execution Flows (frozen, Rerun/Restore); balance context in chat history (CHAT_HISTORY_MESSAGE_LIMIT, formatBalanceTurnContext); React render fix for execution flow state; ScenarioEngine expression system (comparison/logical operators, ExpressionValidator, 20+ examples, converted scenarios).
 
 **Maintainers**: This document is updated with every significant architectural change via PR review process.
 
