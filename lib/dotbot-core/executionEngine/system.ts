@@ -619,7 +619,7 @@ export class ExecutionSystem {
     chainName: string,
     options?: { validationMethod?: 'chopsticks' | 'paymentInfo'; totalEstimatedFee?: string }
   ): void {
-    const result: Record<string, unknown> = {
+    const result: NonNullable<ExecutionItem['simulationStatus']>['result'] = {
       success: false,
       error,
       wouldSucceed: false,

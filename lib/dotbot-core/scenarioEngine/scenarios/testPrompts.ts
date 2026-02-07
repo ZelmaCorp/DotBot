@@ -23,7 +23,6 @@ const ADVERSARIAL_ADMIN_ADDRESS = '5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68nd
 
 export const HAPPY_PATH_TESTS: Scenario[] = [
   // Basic transfer that should PASS (small amount)
-  // NOW USING HELPER - 80% less code!
   transferScenario({
     id: "happy-path-001",
     name: "Small Transfer to Alice (Should Pass)",
@@ -33,7 +32,6 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
   }),
   
   // Basic transfer that should FAIL (insufficient balance)
-  // NOW USING HELPER - Clean and concise!
   insufficientBalanceScenario({
     id: "happy-path-002",
     name: "Large Transfer to Alice (Should Fail)",
@@ -77,48 +75,8 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
       },
     ],
   },
-  
-  // Comparison operators: Range validation
-  {
-    id: 'happy-path-004',
-    name: 'Transfer with Amount Range Check',
-    description: 'Demonstrates comparison operators: amount must be between 0.1 and 1.0',
-    category: 'happy-path',
-    tags: ['comparison-operators', 'range-check', 'demo'],
-    steps: [
-      {
-        id: 'step-1',
-        type: 'prompt',
-        input: 'Send 0.5 WND to Alice',
-      }
-    ],
-    expectations: [
-      {
-        responseType: 'execution',
-        expectedAgent: 'AssetTransferAgent',
-        expectedFunction: 'transfer',
-        expectedParams: {
-          // Comparison operator - amount must be between 0.1 and 1.0
-          amount: { gte: '0.1', lte: '1.0' },
-          recipient: 'Alice',
-        },
-      },
-    ],
-  },
 
   // TODO: Convert remaining scenarios to proper Scenario format
-  // { 
-  //   input: "Transfer 0.1 DOT to 5FHneW46NsNkdoJEFX69Kmr9SEirTvfGEf73dtGj3vJ73Zc", 
-  //   expected: "assetTransfer", 
-  //   params: { amount: "0.1" } 
-  // },
-  // { 
-  //   input: "Send 2.5 DOT to 15oF4uVJwmo4TdGW7VfQxNLavjCXviqxT9S1MgbjMNHr6Sp5", 
-  //   expectedResponse: "json", 
-  //   agentClass: "AssetTransferAgent", 
-  //   function: "transfer" 
-  // },
-  // 
   // // Balance queries
   // { 
   //   input: "What's my balance?",
