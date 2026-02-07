@@ -422,8 +422,9 @@ export class ExecutionSystem {
     const itemStatusCallback = this.createItemStatusCallback(items, executionArray, onSimulationStatus);
     
     try {
+      const chainName = (await apiForExtrinsics.rpc.system.chain()).toString();
       const result = await simulateSequentialTransactions(apiForExtrinsics, rpcEndpoints, sequentialItems, itemStatusCallback);
-      this.processSequentialSimulationResults(items, executionArray, result);
+      this.processSequentialSimulationResults(items, executionArray, result, chainName);
       this.executionLogger.info({ totalItems: items.length, success: result.success }, 'Sequential simulation completed');
     } catch (error) {
       this.handleSequentialSimulationError(error, items, executionArray);
@@ -558,16 +559,19 @@ export class ExecutionSystem {
   /**
    * Process results from sequential simulation
    */
-  private processSequentialSimulationResults(items: ExecutionItem[], executionArray: ExecutionArray, result: any): void {
+  private processSequentialSimulationResults(items: ExecutionItem[], executionArray: ExecutionArray, result: any, chainName: string): void {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const itemResult = result.results[i];
-      
+
       if (itemResult && itemResult.result.success) {
-        this.markItemAsSuccessful(item, executionArray, itemResult);
+        this.markItemAsSuccessful(item, executionArray, itemResult, chainName);
       } else {
-        this.markItemAsFailed(item, executionArray, itemResult?.result.error || 'Simulation failed');
-        this.markRemainingItemsAsFailed(items, executionArray, i);
+        this.markItemAsFailed(item, executionArray, itemResult?.result.error || 'Simulation failed', chainName, {
+          validationMethod: 'chopsticks',
+          totalEstimatedFee: result.totalEstimatedFee,
+        });
+        this.markRemainingItemsAsFailed(items, executionArray, i, chainName);
         break;
       }
     }
@@ -576,9 +580,8 @@ export class ExecutionSystem {
   /**
    * Mark item as successful
    */
-  private markItemAsSuccessful(item: ExecutionItem, executionArray: ExecutionArray, itemResult: any): void {
+  private markItemAsSuccessful(item: ExecutionItem, executionArray: ExecutionArray, itemResult: any, chainName: string): void {
     const realEstimatedFee = itemResult.result.estimatedFee;
-    
     const convertedResult = {
       success: itemResult.result.success,
       estimatedFee: realEstimatedFee,
@@ -590,11 +593,12 @@ export class ExecutionSystem {
       error: itemResult.result.error || undefined,
       wouldSucceed: true,
     };
-    
+
     executionArray.updateSimulationStatus(item.id, {
       phase: 'complete',
       message: 'Simulation completed successfully',
       result: convertedResult,
+      chain: chainName,
     });
     
     // Update item.estimatedFee with the REAL fee from simulation (replaces guessed fee from agent)
@@ -608,23 +612,33 @@ export class ExecutionSystem {
   /**
    * Mark item as failed
    */
-  private markItemAsFailed(item: ExecutionItem, executionArray: ExecutionArray, error: string): void {
+  private markItemAsFailed(
+    item: ExecutionItem,
+    executionArray: ExecutionArray,
+    error: string,
+    chainName: string,
+    options?: { validationMethod?: 'chopsticks' | 'paymentInfo'; totalEstimatedFee?: string }
+  ): void {
+    const result: Record<string, unknown> = {
+      success: false,
+      error,
+      wouldSucceed: false,
+    };
+    if (options?.validationMethod) result.validationMethod = options.validationMethod;
+    if (options?.totalEstimatedFee) result.estimatedFee = options.totalEstimatedFee;
     executionArray.updateSimulationStatus(item.id, {
       phase: 'error',
       message: `Simulation failed: ${error}`,
-      result: {
-        success: false,
-        error,
-        wouldSucceed: false,
-      },
+      result,
+      chain: chainName,
     });
     executionArray.updateStatus(item.id, 'failed', error);
   }
-  
+
   /**
    * Mark remaining items as failed after a failure in sequence
    */
-  private markRemainingItemsAsFailed(items: ExecutionItem[], executionArray: ExecutionArray, failedIndex: number): void {
+  private markRemainingItemsAsFailed(items: ExecutionItem[], executionArray: ExecutionArray, failedIndex: number, chainName: string): void {
     for (let j = failedIndex + 1; j < items.length; j++) {
       const failedItem = items[j];
       executionArray.updateSimulationStatus(failedItem.id, {
@@ -634,7 +648,9 @@ export class ExecutionSystem {
           success: false,
           error: 'Previous transaction in sequence failed',
           wouldSucceed: false,
+          validationMethod: 'chopsticks' as const,
         },
+        chain: chainName,
       });
       executionArray.updateStatus(failedItem.id, 'failed', 'Previous transaction failed');
     }

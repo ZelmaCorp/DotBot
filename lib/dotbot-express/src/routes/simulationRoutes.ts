@@ -517,6 +517,15 @@ async function computeBalanceDeltas(
   return deltas;
 }
 
+function formatDispatchError(innerErr: any): string {
+  if (innerErr && typeof innerErr === 'object') {
+    if (innerErr.token === 'NoFunds') return 'Insufficient balance (NoFunds)';
+    if (innerErr.token) return `TokenError: ${innerErr.token}`;
+    if (innerErr.module) return `${innerErr.module.section}.${innerErr.module.name}`;
+  }
+  return typeof innerErr === 'object' ? JSON.stringify(innerErr) : String(innerErr);
+}
+
 function parseOutcome(
   api: ApiPromise,
   outcome: any,
@@ -529,10 +538,9 @@ function parseOutcome(
       const errStr = typeof err === 'object' ? JSON.stringify(err) : String(err);
       return { succeeded: false, failureReason: errStr };
     }
-    const inner = ok?.Ok ?? ok?.ok ?? ok;
     const innerErr = ok?.Err ?? ok?.err;
     if (innerErr !== undefined) {
-      const errStr = typeof innerErr === 'object' ? JSON.stringify(innerErr) : String(innerErr);
+      const errStr = formatDispatchError(innerErr);
       return { succeeded: false, failureReason: errStr };
     }
     return { succeeded: true, failureReason: null };
