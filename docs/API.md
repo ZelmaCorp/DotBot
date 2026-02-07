@@ -2969,7 +2969,7 @@ const manager = new RpcManager(
 
 #### `getReadApi()`
 
-Get API instance for read operations (uses best available endpoint).
+Get API instance for read operations (uses best available endpoint). Includes retry logic for transient failures. After disconnect or error, the cached read API is cleared so the next call triggers failover. A short stability delay (e.g. 150ms) is used before considering a connection stable.
 
 ```typescript
 async getReadApi(): Promise<ApiPromise>
@@ -3163,7 +3163,7 @@ const result = buildSafeBatchExtrinsic(
 
 ## ScenarioEngine API
 
-**NEW** in v0.2.0: Testing and evaluation framework for DotBot.
+**NEW** in v0.2.0: Testing and evaluation framework for DotBot. **Enhanced** with expression system and load-time validation.
 
 ### Overview
 
@@ -3172,7 +3172,11 @@ ScenarioEngine enables systematic testing of DotBot's LLM-driven behavior throug
 - **EntityCreator**: Creates deterministic test accounts
 - **StateAllocator**: Sets up initial state (balances, on-chain, local storage)
 - **ScenarioExecutor**: Executes scenarios through DotBot UI
-- **Evaluator**: Evaluates results and generates LLM-consumable logs
+- **Evaluator**: Evaluates results and generates LLM-consumable logs (uses ExpressionEvaluator for comparison/logical operators)
+- **ExpressionEvaluator**: Evaluates comparison operators in expectations (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between`, `matches`, `in`, `notIn`)
+- **ExpressionValidator**: Validates expectations at scenario load time (circular references, nesting depth, invalid operators); integrated into `runScenario()` so invalid scenarios fail before execution
+
+**Expression System:** Expectations support comparison operators in `expectedParams` (e.g. `amount: { gte: '0.1', lte: '10' }`) and logical operators (`all`, `any`, `not`, `when`/`then`/`else`). Existing scenarios remain valid (backward compatible). See `xx_scenario_engine/EXPRESSION_SYSTEM_EXAMPLES.md` and `QUICK_REFERENCE.md` for 20+ examples.
 
 **Execution Modes:**
 - `'synthetic'`: Fully mocked (fastest, for unit tests)
@@ -3224,6 +3228,8 @@ async runScenario(scenario: Scenario): Promise<ScenarioResult>
 **Returns:**
 - `ScenarioResult`: Result with evaluation, score, and recommendations
 
+**Validation:** Before execution, all scenario expectations are validated by ExpressionValidator (circular refs, max nesting depth, invalid comparison operators). Invalid scenarios throw with clear errors; warnings (e.g. type mismatches) are logged.
+
 **Example:**
 ```typescript
 const scenario: Scenario = {
@@ -3237,6 +3243,7 @@ const scenario: Scenario = {
   expectations: [
     { responseType: 'execution' },
     { shouldContain: ['transfer', 'Alice'] }
+    // Expression system: e.g. { expectedParams: { amount: { between: ['0.1', '10'] } } }
   ]
 };
 
@@ -3244,7 +3251,7 @@ const result = await engine.runScenario(scenario);
 console.log(`Score: ${result.evaluation.score}/100`);
 ```
 
-**Version Added:** v0.2.0 (January 2026)
+**Version Added:** v0.2.0 (January 2026). Expression system and ExpressionValidator: February 2026.
 
 ---
 
