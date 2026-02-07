@@ -222,6 +222,10 @@ export async function prepareExecutionStateless(
 
     const state = executionArray.getState();
     dotbot.executionStates.set(executionId, state);
+    if (dotbot.currentChat) {
+      dotbot.currentChat.setExecutionArray(executionId, executionArray);
+      dotbot.dotbotLogger.debug({ executionId }, 'prepareExecutionStateless: ExecutionArray set in chat for updates');
+    }
     dotbot.dotbotLogger.info({ executionId, planId: plan.id, itemsCount: state.items.length }, 'prepareExecutionStateless: Completed');
     return state;
   } catch (error) {

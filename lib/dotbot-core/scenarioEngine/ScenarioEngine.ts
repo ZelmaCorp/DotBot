@@ -147,7 +147,12 @@ export class ScenarioEngine {
   private lastReportedStatus: Map<string, Map<string, string>> = new Map(); // executionId -> itemId -> status
   // Track which executions have had completion events emitted (to avoid duplicates)
   private lastExecutionCompleteState: Set<string> | null = null;
-  
+  // When CHAT_COMPLETE follows an execution flow, wait for execution to finish before notifying executor
+  private lastExecutionIdFromMessage: string | null = null;
+  private pendingNotify: { executionId: string; chatResult: ChatResult } | null = null;
+  private pendingNotifyTimeout: ReturnType<typeof setTimeout> | null = null;
+  private static readonly PENDING_NOTIFY_TIMEOUT_MS = 5 * 60 * 1000;
+
   // Event and error tracking for summary generation
   private capturedEvents: ScenarioEngineEvent[] = [];
   private capturedErrors: Array<{ step?: string; message: string; timestamp: number; stack?: string }> = [];
@@ -278,37 +283,45 @@ export class ScenarioEngine {
           break;
           
         case DotBotEventType.CHAT_COMPLETE: {
-          // PRIMARY event - contains full ChatResult with response, plan, execution status
-          // This fires AFTER bot-message-added and execution-message-added
-          // It's the authoritative source - use this and ignore the others
           const chatResult = event.result;
-          
-          // Log that we received a response
+
           this.log('info', `[ScenarioEngine] DotBot chat-complete event received`);
           this.log('info', `DotBot response received: ${chatResult.response ? chatResult.response.substring(0, 100) + (chatResult.response.length > 100 ? '...' : '') : 'empty'}`);
-          
-          // Note: execution-message-added fires BEFORE chat-complete, so ExecutionFlow should already be logged
-          // But we log the final response here
           this.appendToReport(`\n[INFO] ✓ DotBot Response Complete\n`);
-          
-          // Capture event for summary
-          this.captureEvent({ 
-            type: 'dotbot-activity', 
+          this.captureEvent({
+            type: 'dotbot-activity',
             activity: 'Response received',
-            details: chatResult.response ? chatResult.response.substring(0, 200) : 'Empty response'
+            details: chatResult.response ? chatResult.response.substring(0, 200) : 'Empty response',
           });
-          
           this.lastDotBotResponse = chatResult;
-          
-          // Notify executor that response was received
-          if (this.executor) {
+          this.appendDotBotResponseToReport(chatResult);
+
+          const executionIdToWait =
+            (chatResult.plan && (chatResult.executionId ?? this.lastExecutionIdFromMessage)) || null;
+          this.lastExecutionIdFromMessage = null;
+
+          if (executionIdToWait) {
+            this.pendingNotify = { executionId: executionIdToWait, chatResult };
+            this.appendToReport(`\n[INFO] Waiting for user to accept and for all transactions to complete...\n`);
+            this.log('info', `[ScenarioEngine] Waiting for execution ${executionIdToWait} (accept + confirm) before step done`);
+            // If result already has terminal execution state (e.g. stateless path, simulation failed), finish immediately
+            const stateFromResult = chatResult.executionArrayState;
+            if (stateFromResult?.items?.length && stateFromResult.id === executionIdToWait) {
+              this.appendExecutionStatusToReport(stateFromResult);
+              this.tryNotifyExecutionComplete(executionIdToWait, stateFromResult);
+            }
+            if (this.pendingNotify && dotbot.currentChat) {
+              this.subscribeToExecutionUpdates(dotbot.currentChat, executionIdToWait);
+            }
+            if (this.pendingNotify) {
+              this.startPendingNotifyTimeout();
+            }
+          } else if (this.executor) {
             this.log('info', '[ScenarioEngine] Notifying executor of response');
             this.executor.notifyResponseReceived(chatResult);
           } else {
             this.log('warn', '[ScenarioEngine] Executor not available - cannot notify of response');
           }
-          
-          this.appendDotBotResponseToReport(chatResult);
           break;
         }
           
@@ -316,10 +329,9 @@ export class ScenarioEngine {
           break;
           
         case DotBotEventType.EXECUTION_MESSAGE_ADDED:
-          // Subscribe to execution updates to track progress in report
+          this.lastExecutionIdFromMessage = event.executionId;
           this.log('info', `[ScenarioEngine] ✓ EXECUTION FLOW DETECTED: ${event.executionId}`);
-          
-          // Log execution plan details if available
+
           if (event.plan) {
             const stepCount = event.plan.steps?.length || 0;
             this.appendToReport(`\n[INFO] ✓ Execution Flow Appeared\n`);
@@ -479,12 +491,63 @@ export class ScenarioEngine {
       existingUnsubscribe();
     }
     
-    // Subscribe to execution updates
     const unsubscribe = chatInstance.onExecutionUpdate(executionId, (state: any) => {
       this.appendExecutionStatusToReport(state);
+      this.tryNotifyExecutionComplete(executionId, state);
     });
-    
     this.executionSubscriptions.set(executionId, unsubscribe);
+    
+    // If execution is already in chat and terminal (e.g. simulation failed before we subscribed), finish immediately
+    const executionArray = chatInstance.getExecutionArray?.(executionId);
+    if (executionArray?.getState) {
+      const state = executionArray.getState();
+      this.appendExecutionStatusToReport(state);
+      this.tryNotifyExecutionComplete(executionId, state);
+    }
+  }
+
+  private tryNotifyExecutionComplete(executionId: string, state: any): void {
+    if (!state?.items?.length || !this.pendingNotify || this.pendingNotify.executionId !== executionId) return;
+    if (state.id && state.id !== executionId) return;
+    const terminal = (item: any) =>
+      item.status === 'completed' || item.status === 'finalized' || item.status === 'failed' || item.status === 'cancelled';
+    const settled = (item: any) =>
+      ['ready', 'completed', 'finalized', 'failed', 'cancelled'].includes(item.status);
+    const allTerminal = state.items.every(terminal);
+    const terminalCount = state.items.filter(terminal).length;
+    const allSettled = state.items.every(settled);
+    const isComplete =
+      allTerminal ||
+      (terminalCount === state.items.length && terminalCount > 0) ||
+      (state.failedItems > 0 && (state.completedItems ?? 0) + (state.failedItems ?? 0) >= (state.totalItems ?? state.items.length)) ||
+      (state.failedItems > 0 && allSettled);
+    if (!isComplete) return;
+    this.clearPendingNotifyTimeout();
+    if (this.executor) {
+      this.log('info', `[ScenarioEngine] Execution ${executionId} complete (all terminal); notifying executor`);
+      this.executor.notifyResponseReceived(this.pendingNotify.chatResult);
+    }
+    this.emit({ type: 'execution-complete', executionId, state });
+    this.pendingNotify = null;
+  }
+
+  private startPendingNotifyTimeout(): void {
+    this.clearPendingNotifyTimeout();
+    this.pendingNotifyTimeout = setTimeout(() => {
+      this.pendingNotifyTimeout = null;
+      if (this.pendingNotify && this.executor) {
+        this.log('warn', '[ScenarioEngine] Execution wait timed out; notifying executor with current result');
+        this.executor.notifyResponseReceived(this.pendingNotify.chatResult);
+        this.pendingNotify = null;
+      }
+    }, ScenarioEngine.PENDING_NOTIFY_TIMEOUT_MS);
+  }
+
+  private clearPendingNotifyTimeout(): void {
+    if (this.pendingNotifyTimeout) {
+      clearTimeout(this.pendingNotifyTimeout);
+      this.pendingNotifyTimeout = null;
+    }
   }
   
   /**
@@ -533,6 +596,23 @@ export class ScenarioEngine {
       this.lastExecutionCompleteState.add(executionId);
     }
     
+    // Report simulation phase changes (so "not enough balance" etc. is visible)
+    state.items.forEach((item: any, index: number) => {
+      const sim = item.simulationStatus;
+      if (!sim?.phase) return;
+      const simKey = `sim_${item.id}`;
+      const lastSim = statusMap.get(simKey);
+      if (lastSim === sim.phase) return;
+      statusMap.set(simKey, sim.phase);
+      if (sim.phase === 'simulating' || sim.phase === 'validating') {
+        this.appendToReport(`  → Step ${index + 1}: ${item.description} - Simulating...\n`);
+      } else if (sim.phase === 'error') {
+        const msg = sim.message || item.error || 'Unknown error';
+        const label = msg.toLowerCase().startsWith('simulation failed') ? msg : `Simulation failed: ${msg}`;
+        this.appendToReport(`  ✗ Step ${index + 1}: ${item.description} - ${label}\n`);
+      }
+    });
+
     // Find items with status changes (only report if status changed)
     state.items.forEach((item: any, index: number) => {
       const lastStatus = statusMap.get(item.id);
@@ -554,6 +634,9 @@ export class ScenarioEngine {
         this.appendToReport(`  ✗ Step ${index + 1}: ${item.description} - ${statusLabel}\n`);
         if (item.error) {
           this.appendToReport(`    Error: ${item.error}\n`);
+        }
+        if (item.simulationStatus?.phase === 'error') {
+          this.appendToReport(`    (failed at simulation)\n`);
         }
       } else if (item.status === 'signing' || item.status === 'broadcasting' || item.status === 'executing') {
         this.appendToReport(`  → Step ${index + 1}: ${item.description} - ${statusLabel}...\n`);
@@ -912,6 +995,9 @@ export class ScenarioEngine {
     }
     this.executionSubscriptions.clear();
     this.lastReportedStatus.clear();
+    this.lastExecutionIdFromMessage = null;
+    this.pendingNotify = null;
+    this.clearPendingNotifyTimeout();
   }
   
   /**

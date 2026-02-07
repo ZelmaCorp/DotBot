@@ -783,6 +783,7 @@ export type ScenarioEngineEvent =
   | { type: 'step-start'; step: ScenarioStep; index: number }
   | { type: 'step-input-updated'; stepId: string; originalInput: string; modifiedInput: string }  // Step input was modified (e.g., entity names replaced with addresses)
   | { type: 'step-complete'; step: ScenarioStep; result: StepResult }
+  | { type: 'execution-complete'; executionId: string; state: any }
   | { type: 'scenario-complete'; result: ScenarioResult }
   | { type: 'error'; error: string; step?: ScenarioStep }
   | { type: 'log'; level: 'debug' | 'info' | 'warn' | 'error'; message: string }
