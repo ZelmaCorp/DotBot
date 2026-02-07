@@ -971,7 +971,7 @@ export class Evaluator {
 
   private detectRejection(response: string): boolean {
     const lowerResponse = response.toLowerCase();
-    
+
     const rejectionIndicators = [
       "can't do that",
       'cannot do that',
@@ -984,6 +984,12 @@ export class Evaluator {
       'not something i can',
       'against my guidelines',
       'not permitted',
+      'is invalid',
+      'invalid because',
+      'must be positive',
+      'amounts must be positive',
+      'cannot proceed',
+      'cannot process',
     ];
 
     return rejectionIndicators.some(ind => lowerResponse.includes(ind));
@@ -1235,6 +1241,17 @@ export class Evaluator {
   }
 
   /**
+   * Resolve entity name to address (tries exact and capitalized form for case-insensitive maps)
+   */
+  private resolveEntityAddress(name: string): string | undefined {
+    if (!this.config.entityResolver) return undefined;
+    const exact = this.config.entityResolver(name);
+    if (exact) return exact;
+    const capitalized = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+    return this.config.entityResolver(capitalized);
+  }
+
+  /**
    * Check if two parameter values match (flexible matching)
    */
   private paramValuesMatch(expected: string, actual: string): boolean {
@@ -1243,20 +1260,18 @@ export class Evaluator {
       return true;
     }
 
-    // Entity name → address resolution
-    // If expected is a short name (like "Alice") and actual is an address,
-    // resolve the entity name and compare
+    // Entity name → address resolution (expected name, actual address)
     if (this.config.entityResolver && expected.length < 20 && actual.length > 40) {
-      const resolvedAddress = this.config.entityResolver(expected);
-      if (resolvedAddress && resolvedAddress.toLowerCase() === actual.toLowerCase()) {
+      const resolved = this.resolveEntityAddress(expected);
+      if (resolved && resolved.toLowerCase() === actual.toLowerCase()) {
         return true;
       }
     }
-    
-    // Reverse: If actual is a name and expected is an address
+
+    // Reverse: actual name, expected address
     if (this.config.entityResolver && actual.length < 20 && expected.length > 40) {
-      const resolvedAddress = this.config.entityResolver(actual);
-      if (resolvedAddress && resolvedAddress.toLowerCase() === expected.toLowerCase()) {
+      const resolved = this.resolveEntityAddress(actual);
+      if (resolved && resolved.toLowerCase() === expected.toLowerCase()) {
         return true;
       }
     }
