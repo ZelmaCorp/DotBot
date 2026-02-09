@@ -375,6 +375,10 @@ lib/dotbot-core/agents/
 
 **Purpose**: Execute extrinsics created by agents.
 
+**Execution layer (who does what):**
+- **Orchestrator** converts AI-generated plans (ExecutionPlan / ExecutionStep[]) into runtime-compatible transactions: it calls the appropriate agents, which create extrinsics, and builds the ExecutionArray. So the conversion from plan to extrinsics is done by the **Orchestrator** (via agents), not by the Executioner.
+- **Executioner** handles signing, submission, and monitoring of the prepared ExecutionArray, keeping the process deterministic and auditable.
+
 **Structure:**
 ```
 lib/dotbot-core/executionEngine/
