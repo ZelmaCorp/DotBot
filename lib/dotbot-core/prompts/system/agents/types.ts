@@ -80,7 +80,7 @@ export interface AgentDefinition {
   prerequisites?: string[];
   
   /** Network compatibility */
-  networks: ('polkadot' | 'kusama' | 'westend' | 'all')[];
+  networks: ('polkadot' | 'kusama' | 'westend' | 'paseo' | 'all')[];
   
   /** What this agent explicitly cannot do */
   limitations: string[];

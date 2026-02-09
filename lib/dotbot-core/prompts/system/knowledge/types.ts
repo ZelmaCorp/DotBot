@@ -10,7 +10,7 @@ import { RpcEndpoints } from '../../../rpcManager/endpoints';
 /**
  * Network types supported by DotBot
  */
-export type Network = 'polkadot' | 'kusama' | 'westend';
+export type Network = 'polkadot' | 'kusama' | 'westend' | 'paseo';
 
 /**
  * Network metadata and configuration
@@ -285,6 +285,17 @@ export const NETWORK_CONFIG: Record<Network, NetworkMetadata> = {
     rpcEndpoints: {
       relay: [...RpcEndpoints.WESTEND_RELAY_CHAIN],
       assetHub: [...RpcEndpoints.WESTEND_ASSET_HUB],
+    },
+  },
+  paseo: {
+    network: 'paseo',
+    nativeToken: 'PAS',
+    decimals: 10,
+    ss58Format: 42,
+    isTestnet: true,
+    rpcEndpoints: {
+      relay: [...RpcEndpoints.PASEO_RELAY_CHAIN],
+      assetHub: [...RpcEndpoints.PASEO_ASSET_HUB],
     },
   },
 };

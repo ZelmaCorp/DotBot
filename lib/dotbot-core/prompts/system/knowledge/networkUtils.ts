@@ -26,7 +26,9 @@ export function detectNetworkFromChainName(chainName: string): Network {
   if (name.includes('westend')) {
     return 'westend';
   }
-  
+  if (name.includes('paseo') || name.includes('pas')) {
+    return 'paseo';
+  }
   if (name.includes('kusama') || name.includes('ksm')) {
     return 'kusama';
   }
@@ -81,7 +83,7 @@ export function getAssetHubEndpoints(network: Network): string[] {
  * Get all supported networks
  */
 export function getSupportedNetworks(): Network[] {
-  return ['polkadot', 'kusama', 'westend'];
+  return ['polkadot', 'kusama', 'westend', 'paseo'];
 }
 
 /**
@@ -102,7 +104,7 @@ export function getTestnets(): Network[] {
  * Validate if a string is a valid network identifier
  */
 export function isValidNetwork(network: string): network is Network {
-  return network === 'polkadot' || network === 'kusama' || network === 'westend';
+  return network === 'polkadot' || network === 'kusama' || network === 'westend' || network === 'paseo';
 }
 
 /**
@@ -134,6 +136,8 @@ export function getNetworkDisplayName(network: Network): string {
       return 'Kusama';
     case 'westend':
       return 'Westend Testnet';
+    case 'paseo':
+      return 'Paseo Testnet';
   }
 }
 
@@ -148,6 +152,8 @@ export function getNetworkDescription(network: Network): string {
       return 'Kusama canary network - production environment with real KSM tokens and experimental features';
     case 'westend':
       return 'Westend testnet - test environment with free WND tokens (no real value)';
+    case 'paseo':
+      return 'Paseo testnet - community-run test environment with PAS tokens (no real value)';
   }
 }
 
