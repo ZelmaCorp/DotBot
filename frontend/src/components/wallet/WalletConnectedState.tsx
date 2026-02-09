@@ -8,9 +8,10 @@
 
 import React from 'react';
 import { Plus } from 'lucide-react';
-import { Environment } from '@dotbot/core';
+import type { Network } from '@dotbot/core';
 import { WalletAccount } from '../../types/wallet';
 import { useDebouncedClick } from '../../hooks/useDebounce';
+import { getEnvironmentFromNetwork } from '../../utils/appUtils';
 import WalletAccountCard from './WalletAccountCard';
 import WalletAccountItem from './WalletAccountItem';
 import EnvironmentSwitch from './EnvironmentSwitch';
@@ -19,26 +20,26 @@ interface WalletConnectedStateProps {
   accountName: string;
   address: string;
   source: string;
-  environment: Environment;
+  network: Network;
   allAccounts: WalletAccount[];
   isConnecting: boolean;
   onDisconnect: () => void;
   onConnectAccount: (account: WalletAccount) => void;
   onRefreshAccounts: () => void;
-  onEnvironmentSwitch: (environment: Environment) => void;
+  onNetworkSwitch: (network: Network) => void;
 }
 
 const WalletConnectedState: React.FC<WalletConnectedStateProps> = ({
   accountName,
   address,
   source,
-  environment,
+  network,
   allAccounts,
   isConnecting,
   onDisconnect,
   onConnectAccount,
   onRefreshAccounts,
-  onEnvironmentSwitch
+  onNetworkSwitch,
 }) => {
   // Filter out the currently connected account
   const otherAccounts = allAccounts.filter(
@@ -55,7 +56,7 @@ const WalletConnectedState: React.FC<WalletConnectedStateProps> = ({
         accountName={accountName}
         address={address}
         source={source}
-        environment={environment}
+        environment={getEnvironmentFromNetwork(network)}
       />
 
       {otherAccounts.length > 0 && (
@@ -83,8 +84,8 @@ const WalletConnectedState: React.FC<WalletConnectedStateProps> = ({
       </button>
 
       <EnvironmentSwitch
-        environment={environment}
-        onSwitch={onEnvironmentSwitch}
+        network={network}
+        onSwitch={onNetworkSwitch}
         variant="modal"
         explanatoryText={false}
       />

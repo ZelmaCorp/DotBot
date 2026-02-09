@@ -17,10 +17,17 @@ export interface WalletAccount {
 export type RpcManagers = ReturnType<typeof createRpcManagersForNetwork>;
 
 /**
- * Derive network from environment
+ * Derive network from environment (default testnet = westend)
  */
 export function getNetworkFromEnvironment(environment: Environment): Network {
   return environment === 'mainnet' ? 'polkadot' : 'westend';
+}
+
+/**
+ * Derive environment from network
+ */
+export function getEnvironmentFromNetwork(network: Network): Environment {
+  return network === 'polkadot' || network === 'kusama' ? 'mainnet' : 'testnet';
 }
 
 /**
@@ -47,19 +54,21 @@ export async function preloadNetworkConnections(
 
 /**
  * Create DotBot instance with configuration
+ * @param network - If provided, used for RPC/chat; otherwise derived from environment (testnet → westend)
  */
 export async function createDotBotInstance(
   account: WalletAccount,
   environment: Environment,
   preloadedManagers: RpcManagers | null,
-  onSigningRequest: (request: any) => void
+  onSigningRequest: (request: any) => void,
+  network?: Network
 ): Promise<DotBot> {
-  const network = getNetworkFromEnvironment(environment);
-  
+  const resolvedNetwork = network ?? getNetworkFromEnvironment(environment);
+
   const config: any = {
     wallet: account,
     environment,
-    network,
+    network: resolvedNetwork,
     onSigningRequest,
     onBatchSigningRequest: onSigningRequest
   };

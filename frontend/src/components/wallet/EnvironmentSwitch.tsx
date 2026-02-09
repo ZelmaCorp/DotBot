@@ -1,44 +1,59 @@
 /**
  * EnvironmentSwitch Component
- * 
- * Allows switching between mainnet and testnet environments.
- * 
+ *
+ * Allows switching between Mainnet and testnets (Westend, Paseo).
+ * Shows a 3-option control so the current selection is always visible.
+ *
  * Variants:
- * - "modal": Full explanation with text, used in WalletModal
- * - "compact": Small toggle button like ThemeToggle, for header/toolbar
+ * - "modal": Full 3-option segment + explanation, used in WalletModal
+ * - "compact": Small 3-option buttons for header/toolbar
  */
 
 import React, { useState } from 'react';
 import { Info, Loader2 } from 'lucide-react';
-import { Environment } from '@dotbot/core';
+import type { Network } from '@dotbot/core';
 import '../../styles/environment-switch.css';
 
+/** Networks offered in this switch (mainnet = Polkadot; testnets = Westend, Paseo) */
+type SwitchableNetwork = 'polkadot' | 'westend' | 'paseo';
+
+const SWITCH_NETWORKS: { network: SwitchableNetwork; label: string }[] = [
+  { network: 'polkadot', label: 'Mainnet' },
+  { network: 'westend', label: 'Westend' },
+  { network: 'paseo', label: 'Paseo' },
+];
+
+const FAUCET_URLS: Partial<Record<SwitchableNetwork, string>> = {
+  westend: 'https://faucet.polkadot.io/westend',
+  paseo: 'https://faucet.polkadot.io/paseo',
+};
+
 interface EnvironmentSwitchProps {
-  environment: Environment;
-  onSwitch: (environment: Environment) => Promise<void> | void;
+  /** Current network (polkadot, westend, or paseo for this switch) */
+  network: Network;
+  onSwitch: (network: Network) => Promise<void> | void;
   variant?: 'modal' | 'compact';
   disabled?: boolean;
   explanatoryText?: boolean;
 }
 
 const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
-  environment,
+  network,
   onSwitch,
   variant = 'modal',
   disabled = false,
-  explanatoryText = true
+  explanatoryText = true,
 }) => {
   const [isSwitching, setIsSwitching] = useState(false);
-  const isMainnet = environment === 'mainnet';
+  const currentNetwork: SwitchableNetwork = SWITCH_NETWORKS.some((o) => o.network === network)
+    ? (network as SwitchableNetwork)
+    : 'polkadot';
 
-  const handleSwitch = async () => {
-    if (isSwitching || disabled) return;
-
-    const newEnvironment: Environment = isMainnet ? 'testnet' : 'mainnet';
-    
+  const handleSelect = async (targetNetwork: SwitchableNetwork) => {
+    if (isSwitching || disabled || targetNetwork === currentNetwork) return;
     setIsSwitching(true);
     try {
-      await onSwitch(newEnvironment);
+      await onSwitch(targetNetwork as unknown as Network);
     } catch (error) {
       console.error('Environment switch failed:', error);
     } finally {
@@ -46,107 +61,93 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
     }
   };
 
-  // Compact variant - small button like ThemeToggle
+  // Compact variant - 3 small segment buttons
   if (variant === 'compact') {
     return (
-      <button
-        onClick={handleSwitch}
-        disabled={isSwitching || disabled}
-        className="environment-switch-compact"
-        title={`Switch to ${isMainnet ? 'Testnet' : 'Mainnet'}`}
-      >
-        {isSwitching ? (
-          <Loader2 className="environment-switch-icon animate-spin" size={18} />
-        ) : (
-          <span className="environment-switch-label">
-            {isMainnet ? 'T' : 'M'}
-          </span>
-        )}
-      </button>
+      <div className="environment-switch-compact-group" role="group" aria-label="Network">
+        {SWITCH_NETWORKS.map(({ network: n, label }) => {
+          const isActive = n === currentNetwork;
+          return (
+            <button
+              key={n}
+              type="button"
+              onClick={() => handleSelect(n)}
+              disabled={isSwitching || disabled}
+              className={`environment-switch-compact-option ${isActive ? 'active' : ''}`}
+              title={label}
+            >
+              {isSwitching && n === currentNetwork ? (
+                <Loader2 className="environment-switch-icon animate-spin" size={14} />
+              ) : (
+                <span className="environment-switch-compact-label">{label.slice(0, 1)}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
     );
   }
 
-  // Modal variant - full explanation section
+  // Modal variant - 3-option segment + description + faucet when testnet
+  const isTestnet = currentNetwork === 'westend' || currentNetwork === 'paseo';
+  const faucetUrl = isTestnet ? FAUCET_URLS[currentNetwork] ?? '' : '';
+
   return (
     <div className="environment-switch-modal">
-      {isMainnet ? (
-        // On Mainnet - encourage trying testnet
-        <div className="environment-switch-content">
-          <div className="environment-switch-header-row">
-            <div className="environment-switch-header">
-              <Info className="environment-switch-info-icon" size={18} />
-              <span className="environment-switch-title">Try out testnet?</span>
-            </div>
-            <button
-              onClick={handleSwitch}
-              disabled={isSwitching || disabled}
-              className="environment-switch-btn"
-            >
-              {isSwitching ? (
-                <>
-                  <Loader2 className="environment-switch-spinner" size={14} />
-                  <span>Switching...</span>
-                </>
-              ) : (
-                <span>Use Testnet</span>
-              )}
-            </button>
-          </div>
-          
-          {explanatoryText && (
-            <p className="environment-switch-description">
-              Testnet is perfect for experimenting with DotBot without using real tokens. 
-              It's a safe environment to learn and test blockchain operations.
-            </p>
-          )}
+      <div className="environment-switch-content">
+        <div className="environment-switch-header">
+          <Info className="environment-switch-info-icon" size={18} />
+          <span className="environment-switch-title">Network</span>
         </div>
-      ) : (
-        // On Testnet - option to switch back
-        <div className="environment-switch-content">
-          <div className="environment-switch-header-row">
-            <div className="environment-switch-header">
-              <Info className="environment-switch-info-icon testnet" size={18} />
-              <span className="environment-switch-title">Switch back to mainnet?</span>
-            </div>
-            <button
-              onClick={handleSwitch}
-              disabled={isSwitching || disabled}
-              className="environment-switch-btn mainnet"
-            >
-              {isSwitching ? (
-                <>
+
+        <div className="environment-switch-segment" role="group" aria-label="Network">
+          {SWITCH_NETWORKS.map(({ network: n, label }) => {
+            const isActive = n === currentNetwork;
+            return (
+              <button
+                key={n}
+                type="button"
+                onClick={() => handleSelect(n)}
+                disabled={isSwitching || disabled}
+                className={`environment-switch-segment-option ${isActive ? 'active' : ''} ${n === 'polkadot' ? 'mainnet' : 'testnet'}`}
+              >
+                {isSwitching && isActive ? (
                   <Loader2 className="environment-switch-spinner" size={14} />
-                  <span>Switching...</span>
-                </>
-              ) : (
-                <span>Use Mainnet</span>
-              )}
-            </button>
-          </div>
-          
-          {explanatoryText && (
-            <p className="environment-switch-description">
-              You're currently on testnet. Switch back to mainnet to use real tokens 
-              and interact with the live Polkadot network.
-            </p>
-          )}
-          
+                ) : (
+                  label
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {explanatoryText && (
+          <p className="environment-switch-description">
+            {currentNetwork === 'polkadot' &&
+              'Mainnet uses real DOT. Westend and Paseo are testnets with no real value.'}
+            {currentNetwork === 'westend' &&
+              'Westend testnet uses WND. Safe for testing without real tokens.'}
+            {currentNetwork === 'paseo' &&
+              'Paseo testnet uses PAS. Community-run testnet for development.'}
+          </p>
+        )}
+
+        {isTestnet && faucetUrl && (
           <div className="environment-switch-faucet">
             <span className="environment-switch-faucet-label">Need more testnet tokens?</span>
-            <a 
-              href="https://faucet.polkadot.io/westend" 
-              target="_blank" 
+            <a
+              href={faucetUrl}
+              target="_blank"
               rel="noopener noreferrer"
               className="environment-switch-faucet-link"
             >
-              faucet.polkadot.io/westend
+              {currentNetwork === 'westend' ? 'faucet.polkadot.io/westend' : 'faucet.polkadot.io/'}
             </a>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
 
 export default EnvironmentSwitch;
-
