@@ -7,7 +7,7 @@
 /**
  * Network type for multi-network support
  */
-export type Network = 'polkadot' | 'kusama' | 'westend';
+export type Network = 'polkadot' | 'kusama' | 'westend' | 'paseo';
 
 /**
  * Health status of an RPC endpoint

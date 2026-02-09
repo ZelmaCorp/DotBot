@@ -1929,6 +1929,9 @@ export class ScenarioEngine {
         return 2;
       case 'westend':
       case 'asset-hub-westend':
+      case 'paseo':
+      case 'asset-hub-paseo':
+        return 42;
       default:
         return 42;
     }

@@ -29,6 +29,8 @@ export const STORAGE_KEYS = {
   RPC_HEALTH_KUSAMA_ASSETHUB: 'dotbot_rpc_health_kusama_asset_hub',
   RPC_HEALTH_WESTEND_RELAY: 'dotbot_rpc_health_westend_relay',
   RPC_HEALTH_WESTEND_ASSETHUB: 'dotbot_rpc_health_westend_asset_hub',
+  RPC_HEALTH_PASEO_RELAY: 'dotbot_rpc_health_paseo_relay',
+  RPC_HEALTH_PASEO_ASSETHUB: 'dotbot_rpc_health_paseo_asset_hub',
   
   /** User preferences (future) */
   USER_PREFERENCES: 'dotbot_user_preferences',

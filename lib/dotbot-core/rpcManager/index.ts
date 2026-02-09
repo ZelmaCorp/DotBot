@@ -26,6 +26,8 @@ export {
   createKusamaAssetHubManager,
   createWestendRelayChainManager,
   createWestendAssetHubManager,
+  createPaseoRelayChainManager,
+  createPaseoAssetHubManager,
   createRelayChainManager,
   createAssetHubManager,
 } from './factories';

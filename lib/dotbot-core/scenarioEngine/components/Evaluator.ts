@@ -929,6 +929,7 @@ export class Evaluator {
       'dot': ['polkadot', 'dots'],
       'ksm': ['kusama'],
       'wnd': ['westend'],
+      'pas': ['paseo'],
     };
 
     const topicSynonyms = synonyms[lowerTopic] || [];
