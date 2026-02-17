@@ -60,12 +60,15 @@ export const RpcEndpoints = {
 
   // Paseo Testnet (community-run testnet, PAS token, SS58 42)
   PASEO_RELAY_CHAIN: [
-    'wss://paseo.rpc.amforc.com:443',                    // Amforc Paseo
-    'wss://rpc.ibp.network/paseo',                       // IBP network Paseo
+    'wss://paseo.rpc.amforc.com:443',                    // Amforc (widely referenced, Polkadot.js Apps)
+    'wss://paseo-rpc.dwellir.com',                       // Dwellir
+    'wss://rpc.ibp.network/paseo',                       // IBP network
+    'wss://paseo.dotters.network',                       // Dotters
+    'wss://pas-rpc.stakeworld.io',                       // StakeWorld
   ],
+  // Paseo Asset Hub / PassetHub
   PASEO_ASSET_HUB: [
-    'wss://pas-rpc.stakeworld.io/assethub',              // Stakeworld Paseo Asset Hub (PassetHub)
-    'wss://sys.ibp.network/passet',                      // IBP network PassetHub
+    'wss://sys.ibp.network/paseo-assethub',              // IBP PassetHub
   ],
 
   ROCSTAR_RELAY_CHAIN: [

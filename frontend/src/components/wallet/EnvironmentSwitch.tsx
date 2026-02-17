@@ -25,7 +25,7 @@ const SWITCH_NETWORKS: { network: SwitchableNetwork; label: string }[] = [
 
 const FAUCET_URLS: Partial<Record<SwitchableNetwork, string>> = {
   westend: 'https://faucet.polkadot.io/westend',
-  paseo: 'https://faucet.polkadot.io/paseo',
+  paseo: 'https://faucet.polkadot.io/',
 };
 
 interface EnvironmentSwitchProps {

@@ -62,7 +62,7 @@ describe('Network Utilities', () => {
       expect(metadata.network).toBe('paseo');
       expect(metadata.nativeToken).toBe('PAS');
       expect(metadata.decimals).toBe(10);
-      expect(metadata.ss58Format).toBe(42);
+      expect(metadata.ss58Format).toBe(0); // Polkadot address format
       expect(metadata.isTestnet).toBe(true);
     });
 
@@ -133,7 +133,7 @@ describe('Network Utilities', () => {
       expect(getNetworkSS58Format('polkadot')).toBe(0);
       expect(getNetworkSS58Format('kusama')).toBe(2);
       expect(getNetworkSS58Format('westend')).toBe(42);
-      expect(getNetworkSS58Format('paseo')).toBe(42);
+      expect(getNetworkSS58Format('paseo')).toBe(0); // Polkadot address format
     });
 
     it('should throw for invalid network', () => {

@@ -2,7 +2,7 @@
  * Paseo Knowledge Base
  *
  * Minimal knowledge about the Paseo testnet ecosystem (community-run testnet).
- * - Native token: PAS (10 decimals), SS58 format 42
+ * - Native token: PAS (10 decimals), SS58 format 0 (Polkadot address format)
  * - Parachains: Paseo Relay, Paseo Asset Hub (PassetHub, Para ID 1000)
  * - Tokens have no real-world value
  */
@@ -41,7 +41,7 @@ export const PASEO_KNOWLEDGE_BASE: PolkadotKnowledge = {
       ],
       xcmSupported: true,
       xcmVersion: 3,
-      rpcEndpoint: 'wss://pas-rpc.stakeworld.io/assethub',
+      rpcEndpoint: 'wss://sys.ibp.network/paseo-assethub',
       notes:
         'Paseo Asset Hub (PassetHub). Primary test environment for Asset Hub features on Paseo. Supports balances, assets, and polkadotXcm.',
     },
@@ -87,7 +87,7 @@ export const PASEO_KNOWLEDGE_BASE: PolkadotKnowledge = {
     simpleTransfer: {
       description: 'Transfer PAS between accounts on the same Paseo chain',
       steps: [
-        'Validate SS58 address (format 42)',
+        'Validate SS58 address (format 0, Polkadot - same as mainnet; e.g. 14Mh7...)',
         'Check balance (ensure > amount + fees + ED)',
         'Create transfer extrinsic (use transferKeepAlive to prevent account reaping)',
         'Sign and submit',
@@ -143,7 +143,7 @@ export const PASEO_KNOWLEDGE_BASE: PolkadotKnowledge = {
           note: 'Paseo relay endpoint',
         },
         assetHub: {
-          endpoint: 'wss://pas-rpc.stakeworld.io/assethub',
+          endpoint: 'wss://sys.ibp.network/paseo-assethub',
           checked: true,
           note: 'Paseo Asset Hub (PassetHub)',
         },
@@ -185,7 +185,7 @@ export async function buildPaseoKnowledgeBase(useLiveData = false): Promise<Polk
 export function formatPaseoKnowledgeBase(): string {
   const kb = PASEO_KNOWLEDGE_BASE;
   let output = '\n## Paseo Testnet Knowledge Base\n\n';
-  output += '⚠️ **IMPORTANT**: Paseo is a TESTNET. All tokens (PAS) have NO real-world value. Native token PAS has 10 decimals, SS58 format 42.\n\n';
+  output += '⚠️ **IMPORTANT**: Paseo is a TESTNET. All tokens (PAS) have NO real-world value. Native token PAS has 10 decimals. Paseo uses **Polkadot address format (SS58 0)** — addresses look like 14Mh7..., not 5F...\n\n';
 
   output += '### ⚠️ Important Testnet Information\n\n';
   Object.entries(kb.ecosystemChanges).forEach(([key, change]) => {

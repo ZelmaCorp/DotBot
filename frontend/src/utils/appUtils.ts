@@ -5,12 +5,27 @@
  * Extracted to follow single responsibility and keep functions under 40 lines.
  */
 
-import { DotBot, Environment, Network, createRpcManagersForNetwork, ScenarioEngine } from '@dotbot/core';
+import { decodeAddress, encodeAddress } from '@polkadot/util-crypto';
+import { DotBot, Environment, Network, createRpcManagersForNetwork, ScenarioEngine, getNetworkSS58Format } from '@dotbot/core';
 
 export interface WalletAccount {
   address: string;
   name?: string;
   source: string;
+}
+
+/**
+ * Return address encoded for the given network (SS58 format).
+ * Use when sending wallet to backend or displaying so Paseo shows 14Mh7... (Polkadot format), not 5F...
+ */
+export function getAddressForNetwork(address: string, network: Network): string {
+  try {
+    const format = getNetworkSS58Format(network);
+    const decoded = decodeAddress(address);
+    return encodeAddress(decoded, format);
+  } catch {
+    return address;
+  }
 }
 
 // Use the return type from createRpcManagersForNetwork to avoid type conflicts

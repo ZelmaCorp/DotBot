@@ -27,6 +27,7 @@ import {
   createDotBotInstance,
   setupScenarioEngineDependencies,
   getEnvironmentFromNetwork,
+  getAddressForNetwork,
 } from './utils/appUtils';
 import {
   createDotBotSession,
@@ -171,8 +172,9 @@ const AppContent: React.FC = () => {
     
     try {
       // Create backend session first (this creates DotBot instance on backend)
+      // Use network-canonical address (e.g. Paseo = SS58 0, 14Mh7... so bot and chain see correct form)
       const walletAccount: WalletAccount = {
-        address: selectedAccount!.address,
+        address: getAddressForNetwork(selectedAccount!.address, preferredNetwork),
         name: selectedAccount!.name,
         source: selectedAccount!.source,
       };
@@ -248,8 +250,9 @@ const AppContent: React.FC = () => {
     message: string,
     currentChat: any
   ): Promise<any> => {
+    // Use network-canonical address (e.g. Paseo = 14Mh7... so bot echoes correct form)
     const walletAccount: WalletAccount = {
-      address: selectedAccount!.address,
+      address: getAddressForNetwork(selectedAccount!.address, dotbot!.getNetwork()),
       name: selectedAccount!.name,
       source: selectedAccount!.source,
     };

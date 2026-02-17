@@ -291,7 +291,7 @@ export const NETWORK_CONFIG: Record<Network, NetworkMetadata> = {
     network: 'paseo',
     nativeToken: 'PAS',
     decimals: 10,
-    ss58Format: 42,
+    ss58Format: 0, // Polkadot address format (same as mainnet; addresses like 14Mh7... not 5F...)
     isTestnet: true,
     rpcEndpoints: {
       relay: [...RpcEndpoints.PASEO_RELAY_CHAIN],

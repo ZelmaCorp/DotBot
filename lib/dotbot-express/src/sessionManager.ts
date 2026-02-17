@@ -12,11 +12,26 @@
  * Redis-ready: Uses SessionStore interface for pluggable storage backends.
  */
 
-import { DotBot, DotBotConfig, Environment, Network, InMemoryChatStorage, ChatInstanceManager } from '@dotbot/core';
+import { DotBot, DotBotConfig, Environment, Network, InMemoryChatStorage, ChatInstanceManager, getEndpointsForNetwork } from '@dotbot/core';
 import type { WalletAccount } from '@dotbot/core/types/wallet';
 import { AIService, AIServiceConfig, AIProviderType } from '@dotbot/core/services/ai';
 import { ENVIRONMENT_NETWORKS } from '@dotbot/core';
 import { sessionLogger } from './utils/logger';
+
+let paseoSupportChecked = false;
+function ensurePaseoSupport(): void {
+  if (paseoSupportChecked) return;
+  paseoSupportChecked = true;
+  try {
+    getEndpointsForNetwork('paseo');
+  } catch (e: any) {
+    if (e?.message?.includes('Unknown network')) {
+      sessionLogger.error(
+        'Loaded @dotbot/core does not support network "paseo". Run: npm run build:core (from repo root) then restart the backend.'
+      );
+    }
+  }
+}
 
 /**
  * Session Store Interface
@@ -518,6 +533,7 @@ export class DotBotSessionManager {
  * This can be used as a singleton in the backend.
  */
 export function createSessionManager(config?: AIServiceConfig): DotBotSessionManager {
+  ensurePaseoSupport();
   return new DotBotSessionManager(undefined, config);
 }
 
@@ -540,6 +556,7 @@ export function createRedisSessionManager(
   config?: AIServiceConfig,
   keyPrefix = 'dotbot:session:'
 ): DotBotSessionManager {
+  ensurePaseoSupport();
   // Create a temporary manager to access recreateSession method
   const _tempManager = new DotBotSessionManager(undefined, config);
   const recreateSession = (data: SerializableSessionData, aiServiceConfig?: AIServiceConfig) => {
