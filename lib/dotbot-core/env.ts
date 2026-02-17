@@ -129,9 +129,10 @@ export function initFileStorage(storageDir: string): void {
   try {
     const fileStorage = new FileStorage(storageDir);
     setStorage(fileStorage);
-    console.log(`FileStorage initialized at: ${storageDir}`);
+    // Caller (e.g. backend) logs initialization so output is JSON when LOG_FORMAT=json
   } catch (error) {
-    console.error('Failed to initialize FileStorage, falling back to MemoryStorage:', error);
     setStorage(new MemoryStorage());
+    // Caller logs failure so output is JSON when LOG_FORMAT=json
+    throw error;
   }
 }
