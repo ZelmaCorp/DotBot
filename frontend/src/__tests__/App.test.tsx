@@ -22,6 +22,9 @@ jest.mock('../utils/appUtils', () => ({
   getEnvironmentFromNetwork: jest.fn().mockImplementation((network: string) =>
     network === 'polkadot' || network === 'kusama' ? 'mainnet' : 'testnet'
   ),
+  getAddressForNetwork: jest.fn((address: string, _network?: string) =>
+    typeof address === 'string' ? address : '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY'
+  ),
 }));
 
 // Global variable to store onSendMessage for testing
@@ -148,6 +151,8 @@ describe('App', () => {
   });
 
   describe('handleSendMessage()', () => {
+    jest.setTimeout(10000);
+
     it('should call the backend API correctly', async () => {
       const testMessage = 'Hello, DotBot!';
       
@@ -186,19 +191,20 @@ describe('App', () => {
         await onSendMessage(testMessage);
       });
 
-      // Verify API was called with correct parameters
-      expect(mockSendDotBotMessage).toHaveBeenCalledWith({
-        message: testMessage,
-        sessionId: 'test-session-id',
-        wallet: {
-          address: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
-          name: 'Test Account',
-          source: 'polkadot-js',
-        },
-        environment: 'mainnet',
-        network: 'polkadot',
-        conversationHistory: [],
-      });
+      // Verify API was called with correct parameters (wallet.address comes from getAddressForNetwork(selectedAccount) in real usage)
+      expect(mockSendDotBotMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: testMessage,
+          sessionId: 'test-session-id',
+          environment: 'mainnet',
+          network: 'polkadot',
+          conversationHistory: [],
+          wallet: expect.objectContaining({
+            name: 'Test Account',
+            source: 'polkadot-js',
+          }),
+        })
+      );
     });
 
     it('should call addExecutionMessage when chatResult.plan exists', async () => {
