@@ -188,6 +188,7 @@ jobs:
         NODE_ENV=production
         DEBUG=false
         LOG_LEVEL=warn
+        LOG_FORMAT=json
         
         # Domain Configuration
         DOMAIN_NAME=live.dotbot.zelmacorp.io
@@ -273,6 +274,7 @@ jobs:
               - AI_PROVIDER=${AI_PROVIDER:-asi-one}
               - CORS_ORIGINS=${CORS_ORIGINS:-*}
               - LOG_LEVEL=${LOG_LEVEL:-info}
+              - LOG_FORMAT=json
             restart: always
             networks:
               - dotbot-production
@@ -362,6 +364,7 @@ jobs:
               -e AI_PROVIDER="${AI_PROVIDER:-asi-one}" \
               -e CORS_ORIGINS="${CORS_ORIGINS:-*}" \
               -e LOG_LEVEL="${LOG_LEVEL:-info}" \
+              -e LOG_FORMAT=json \
               ${{ needs.build.outputs.backend-image }}
           fi
           
