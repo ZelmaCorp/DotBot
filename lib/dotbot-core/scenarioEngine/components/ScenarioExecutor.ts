@@ -46,7 +46,8 @@ import type { SubmittableExtrinsic } from '@polkadot/api/types';
 import { BN } from '@polkadot/util';
 import { KeyringSigner } from '../../executionEngine/signers/keyringSigner';
 import type { ExecutionPlan, ExecutionStep } from '../../prompts/system/execution/types';
-import { getNetworkTokenSymbol } from '../../prompts/system/knowledge/networkUtils';
+import { decodeAddress, encodeAddress } from '@polkadot/util-crypto';
+import { getNetworkTokenSymbol, getNetworkSS58Format } from '../../prompts/system/knowledge/networkUtils';
 import type { Network } from '../../prompts/system/knowledge/types';
 import type {
   Scenario,
@@ -474,13 +475,22 @@ export class ScenarioExecutor {
       // Continue with original input if processing fails
     }
 
-    // Replace entity names with addresses in the prompt
-    // Example: "Send 5 WND to Alice" -> "Send 5 WND to 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
+    // Replace entity names with addresses in the prompt, encoded for the current network's SS58 format
+    // e.g. "Send 5 PAS to Alice" -> "Send 5 PAS to 15ZtXMDh..." on Paseo (format 0), not 5Gdb... (format 42)
     if (this.deps?.getEntityAddress) {
-      // Find entity names in the prompt (simple pattern matching for common names)
+      const network = this.deps?.getNetwork?.();
+      const ss58Format = network !== undefined ? getNetworkSS58Format(network) : undefined;
       const entityNamePattern = /\b(Alice|Bob|Charlie|Dave|Eve|Ferdie|Grace|Heinz|Ida|Judith|Ken|Larry|Mary|Nina|Oscar|Peggy|Quinn|Rita|Steve|Trent|Ursula|Victor|Wendy|Xavier|Yvonne|Zoe)\b/gi;
       input = input.replace(entityNamePattern, (match) => {
-        const address = this.deps?.getEntityAddress?.(match);
+        let address = this.deps?.getEntityAddress?.(match);
+        if (address && ss58Format !== undefined) {
+          try {
+            const publicKey = decodeAddress(address);
+            address = encodeAddress(publicKey, ss58Format);
+          } catch {
+            // Keep original address if re-encoding fails
+          }
+        }
         if (address) {
           this.emit({ type: 'log', level: 'debug', message: `Replaced entity "${match}" with address ${address}` });
           return address;
