@@ -77,7 +77,7 @@ import { DotBot, createRpcManagersForNetwork } from '@dotbot/core';
 import type { Network } from '@dotbot/core';
 
 // 1. Select network
-const network: Network = 'polkadot'; // or 'kusama', 'westend'
+const network: Network = 'polkadot'; // or 'kusama', 'westend', 'paseo'
 
 // 2. Create network-specific RPC managers
 const { relayChainManager, assetHubManager } = createRpcManagersForNetwork(network);
@@ -124,7 +124,7 @@ import { AssetTransferAgent, ExecutionSystem, createRpcManagersForNetwork } from
 import type { Network } from '@dotbot/core';
 
 // 1. Select network
-const network: Network = 'polkadot'; // or 'kusama', 'westend'
+const network: Network = 'polkadot'; // or 'kusama', 'westend', 'paseo'
 
 // 2. Create network-specific RPC managers
 const { relayChainManager, assetHubManager } = createRpcManagersForNetwork(network);
@@ -172,6 +172,7 @@ DotBot has multi-network infrastructure:
 |---------|-------|----------|------|--------|----------|
 | Polkadot | DOT | 10 | Mainnet | ✅ **Full Support** | Production operations |
 | Westend | WND | 12 | Testnet | ✅ **Full Support** | Safe testing |
+| Paseo | PAS | 10 | Testnet | ✅ **Full Support** | Safe testing (SS58 format 0) |
 | Kusama | KSM | 12 | Canary | ⚠️ **Partial** | Kusama ecosystem (coming soon) |
 
 **Status Legend:**
@@ -999,12 +1000,12 @@ interface ExecutionResult {
 ### Network Type
 
 ```typescript
-type Network = 'polkadot' | 'kusama' | 'westend';
+type Network = 'polkadot' | 'kusama' | 'westend' | 'paseo';
 ```
 
 Type-safe network identifier used throughout DotBot.
 
-**Note:** Kusama type is included for infrastructure purposes, but full support (knowledge base) is not yet implemented. See [Network Configuration](#network-configuration) for details.
+**Note:** Kusama type is included for infrastructure purposes, but full support (knowledge base) is not yet implemented. Paseo has full support. See [Network Configuration](#network-configuration) for details.
 
 ---
 
@@ -1054,7 +1055,7 @@ function createRpcManagersForNetwork(
 ```
 
 **Parameters:**
-- `network` (Network): Network identifier ('polkadot', 'kusama', or 'westend')
+- `network` (Network): Network identifier ('polkadot', 'kusama', 'westend', or 'paseo')
 
 **Returns:**
 - Object containing:
@@ -1075,7 +1076,8 @@ const assetHubApi = await assetHubManager.getReadApi();
 Each network uses separate localStorage keys for health tracking:
 - Polkadot: `dotbot_rpc_health_polkadot_relay`, `dotbot_rpc_health_polkadot_assethub`
 - Kusama: `dotbot_rpc_health_kusama_relay`, `dotbot_rpc_health_kusama_assethub`
-- Westend: `dotbot_rpc_health_westend_relay`, `dotbot_rpc_health_westend_assethub`
+- Westend: `dotbot_rpc_health_westend_relay`, `dotbot_rpc_health_westend_asset_hub`
+- Paseo: `dotbot_rpc_health_paseo_relay`, `dotbot_rpc_health_paseo_asset_hub`
 
 **Version Added:** v0.2.0 (January 2026)
 
@@ -1160,7 +1162,7 @@ const api = await ApiPromise.create({ provider: wsProvider });
 const chainName = (await api.rpc.system.chain()).toString();
 
 const network = detectNetworkFromChainName(chainName);
-// Returns: 'polkadot', 'kusama', 'westend', or null
+// Returns: 'polkadot', 'kusama', 'westend', 'paseo', or null
 ```
 
 ---
@@ -1178,6 +1180,7 @@ function getNetworkTokenSymbol(network: Network): string
 getNetworkTokenSymbol('polkadot');  // 'DOT'
 getNetworkTokenSymbol('kusama');    // 'KSM'
 getNetworkTokenSymbol('westend');   // 'WND'
+getNetworkTokenSymbol('paseo');     // 'PAS'
 ```
 
 ---
@@ -2005,7 +2008,7 @@ interface CreateChatInstanceParams {
 
 **Parameters:**
 - `environment` ('mainnet' | 'testnet'): Environment for this chat
-- `network` (Network): Network ('polkadot', 'kusama', 'westend')
+- `network` (Network): Network ('polkadot', 'kusama', 'westend', 'paseo')
 - `walletAddress` (string): User's wallet address
 - `title` (string, optional): Chat title (auto-generated if not provided)
 
@@ -2402,6 +2405,8 @@ export const STORAGE_KEYS = {
   RPC_HEALTH_POLKADOT_ASSETHUB: 'rpc_health_polkadot_assethub',
   RPC_HEALTH_WESTEND_RELAY: 'rpc_health_westend_relay',
   RPC_HEALTH_WESTEND_ASSETHUB: 'rpc_health_westend_assethub',
+  RPC_HEALTH_PASEO_RELAY: 'rpc_health_paseo_relay',
+  RPC_HEALTH_PASEO_ASSETHUB: 'rpc_health_paseo_asset_hub',
   RPC_HEALTH_KUSAMA_RELAY: 'rpc_health_kusama_relay',
   RPC_HEALTH_KUSAMA_ASSETHUB: 'rpc_health_kusama_assethub',
   USER_PREFERENCES: 'dotbot_user_preferences',
@@ -2943,7 +2948,9 @@ Each network uses separate storage keys to prevent health data conflicts:
 - Kusama Relay: `dotbot_rpc_health_kusama_relay`
 - Kusama Asset Hub: `dotbot_rpc_health_kusama_assethub`
 - Westend Relay: `dotbot_rpc_health_westend_relay`
-- Westend Asset Hub: `dotbot_rpc_health_westend_assethub`
+- Westend Asset Hub: `dotbot_rpc_health_westend_asset_hub`
+- Paseo Relay: `dotbot_rpc_health_paseo_relay`
+- Paseo Asset Hub: `dotbot_rpc_health_paseo_asset_hub`
 
 **Version History:**
 - v0.2.x (January 2026): Default `healthCheckInterval` changed to 30 minutes (1800000 ms); cached read API cleared on disconnect/error for failover
@@ -3379,7 +3386,7 @@ function createStateAllocator(
 
 **Parameters:**
 - `mode` (ScenarioMode): Execution mode
-- `chain` (ScenarioChain): Target chain ('polkadot' | 'kusama' | 'westend' | 'asset-hub-polkadot' | 'asset-hub-westend')
+- `chain` (ScenarioChain): Target chain ('polkadot' | 'kusama' | 'westend' | 'paseo' | 'asset-hub-polkadot' | 'asset-hub-westend' | 'asset-hub-paseo')
 - `config.entityResolver` (function): Resolves entity by name
 - `config.rpcManagerProvider` (function, optional): Provides RPC managers for live/emulated modes
 
