@@ -19,6 +19,9 @@ jest.mock('../utils/appUtils', () => ({
   createDotBotInstance: jest.fn(),
   setupScenarioEngineDependencies: jest.fn().mockResolvedValue(undefined),
   getNetworkFromEnvironment: jest.fn().mockReturnValue('polkadot'),
+  getEnvironmentFromNetwork: jest.fn().mockImplementation((network: string) =>
+    network === 'polkadot' || network === 'kusama' ? 'mainnet' : 'testnet'
+  ),
 }));
 
 // Global variable to store onSendMessage for testing

@@ -2,12 +2,15 @@
  * Types for Polkadot Knowledge Base
  * 
  * Supports multi-network ecosystem (Polkadot, Kusama, Westend)
+ * RPC endpoint lists are centralized in rpcManager/endpoints.ts.
  */
+
+import { RpcEndpoints } from '../../../rpcManager/endpoints';
 
 /**
  * Network types supported by DotBot
  */
-export type Network = 'polkadot' | 'kusama' | 'westend';
+export type Network = 'polkadot' | 'kusama' | 'westend' | 'paseo';
 
 /**
  * Network metadata and configuration
@@ -258,16 +261,8 @@ export const NETWORK_CONFIG: Record<Network, NetworkMetadata> = {
     ss58Format: 0,
     isTestnet: false,
     rpcEndpoints: {
-      relay: [
-        'wss://polkadot.api.onfinality.io/public-ws',
-        'wss://polkadot-rpc.dwellir.com',
-        'wss://rpc.polkadot.io',
-      ],
-      assetHub: [
-        'wss://statemint.api.onfinality.io/public-ws',
-        'wss://statemint-rpc.dwellir.com',
-        'wss://polkadot-asset-hub-rpc.polkadot.io',
-      ],
+      relay: [...RpcEndpoints.POLKADOT_RELAY_CHAIN],
+      assetHub: [...RpcEndpoints.POLKADOT_ASSET_HUB],
     },
   },
   kusama: {
@@ -277,15 +272,8 @@ export const NETWORK_CONFIG: Record<Network, NetworkMetadata> = {
     ss58Format: 2,
     isTestnet: false,
     rpcEndpoints: {
-      relay: [
-        'wss://kusama.api.onfinality.io/public-ws',
-        'wss://kusama-rpc.dwellir.com',
-        'wss://kusama-rpc.polkadot.io',
-      ],
-      assetHub: [
-        'wss://statemine.api.onfinality.io/public-ws',
-        'wss://kusama-asset-hub-rpc.polkadot.io',
-      ],
+      relay: [...RpcEndpoints.KUSAMA_RELAY_CHAIN],
+      assetHub: [...RpcEndpoints.KUSAMA_ASSET_HUB],
     },
   },
   westend: {
@@ -295,15 +283,19 @@ export const NETWORK_CONFIG: Record<Network, NetworkMetadata> = {
     ss58Format: 42,
     isTestnet: true,
     rpcEndpoints: {
-      relay: [
-        'wss://westend-rpc.polkadot.io',
-        'wss://westend-rpc.dwellir.com',
-        'wss://westend.api.onfinality.io/public-ws',
-      ],
-      assetHub: [
-        'wss://westend-asset-hub-rpc.polkadot.io',
-        'wss://westmint-rpc.dwellir.com',
-      ],
+      relay: [...RpcEndpoints.WESTEND_RELAY_CHAIN],
+      assetHub: [...RpcEndpoints.WESTEND_ASSET_HUB],
+    },
+  },
+  paseo: {
+    network: 'paseo',
+    nativeToken: 'PAS',
+    decimals: 10,
+    ss58Format: 0, // Polkadot address format (same as mainnet; addresses like 14Mh7... not 5F...)
+    isTestnet: true,
+    rpcEndpoints: {
+      relay: [...RpcEndpoints.PASEO_RELAY_CHAIN],
+      assetHub: [...RpcEndpoints.PASEO_ASSET_HUB],
     },
   },
 };

@@ -46,19 +46,29 @@ export const RpcEndpoints = {
   ],
 
   // Westend Testnet
-  // Ordered by reliability: best endpoints first based on real-world testing
+  // Ordered by reliability; unhealthy/unreliable endpoints removed (IBP, Dwellir often fail)
   WESTEND_RELAY_CHAIN: [
-    'wss://rpc.ibp.network/westend',                     // IBP network Westend (fast & reliable)
     'wss://westend.api.onfinality.io/public-ws',         // OnFinality Westend (reliable)
-    'wss://westend-rpc-tn.dwellir.com',                  // Dwellir Westend Tunisia (backup)
-    'wss://westend-rpc.polkadot.io',                     // Parity Westend (official but can be slow)
-    'wss://westend-rpc.dwellir.com',                     // Dwellir Westend (often has issues)
+    'wss://westend-rpc.polkadot.io',                     // Parity Westend (official)
     'wss://westend.public.curie.radiumblock.co/ws',      // RadiumBlock Westend
   ],
   WESTEND_ASSET_HUB: [
     'wss://westend-asset-hub-rpc.polkadot.io',           // Parity Westend Asset Hub (official)
     'wss://westmint.api.onfinality.io/public-ws',        // OnFinality Westend Asset Hub
     'wss://sys.ibp.network/westmint',                    // IBP network Westend Asset Hub
+  ],
+
+  // Paseo Testnet (community-run testnet, PAS token, SS58 42)
+  PASEO_RELAY_CHAIN: [
+    'wss://paseo.rpc.amforc.com:443',                    // Amforc (widely referenced, Polkadot.js Apps)
+    'wss://paseo-rpc.dwellir.com',                       // Dwellir
+    'wss://rpc.ibp.network/paseo',                       // IBP network
+    'wss://paseo.dotters.network',                       // Dotters
+    'wss://pas-rpc.stakeworld.io',                       // StakeWorld
+  ],
+  // Paseo Asset Hub / PassetHub
+  PASEO_ASSET_HUB: [
+    'wss://sys.ibp.network/paseo-assethub',              // IBP PassetHub
   ],
 
   ROCSTAR_RELAY_CHAIN: [

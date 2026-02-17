@@ -736,6 +736,11 @@ describe('ChatInstanceManager', () => {
       expect(result.valid).toBe(true);
     });
 
+    it('should validate paseo for testnet', () => {
+      const result = manager.validateNetworkForEnvironment('paseo', 'testnet');
+      expect(result.valid).toBe(true);
+    });
+
     it('should reject westend for mainnet', () => {
       const result = manager.validateNetworkForEnvironment('westend', 'mainnet');
       expect(result.valid).toBe(false);
@@ -781,6 +786,10 @@ describe('ChatInstanceManager', () => {
 
     it('should return testnet for westend', () => {
       expect(manager.getEnvironmentForNetwork('westend')).toBe('testnet');
+    });
+
+    it('should return testnet for paseo', () => {
+      expect(manager.getEnvironmentForNetwork('paseo')).toBe('testnet');
     });
   });
 

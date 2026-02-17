@@ -65,6 +65,8 @@ import {
   createKusamaAssetHubManager,
   createWestendRelayChainManager,
   createWestendAssetHubManager,
+  createPaseoRelayChainManager,
+  createPaseoAssetHubManager,
 } from '../../rpcManager';
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import type { Registry } from '@polkadot/types/types';
@@ -625,6 +627,12 @@ describe('RpcManager', () => {
         expect(endpoints.assetHub).toEqual(RpcEndpoints.WESTEND_ASSET_HUB);
       });
 
+      it('should return correct endpoints for Paseo', () => {
+        const endpoints = getEndpointsForNetwork('paseo');
+        expect(endpoints.relayChain).toEqual(RpcEndpoints.PASEO_RELAY_CHAIN);
+        expect(endpoints.assetHub).toEqual(RpcEndpoints.PASEO_ASSET_HUB);
+      });
+
       it('should throw for unknown network', () => {
         expect(() => getEndpointsForNetwork('unknown' as Network)).toThrow('Unknown network: unknown');
       });
@@ -667,16 +675,32 @@ describe('RpcManager', () => {
         expect(assetHealth.length).toBe(RpcEndpoints.WESTEND_ASSET_HUB.length);
       });
 
+      it('should create managers for Paseo', () => {
+        const { relayChainManager, assetHubManager } = createRpcManagersForNetwork('paseo');
+        expect(relayChainManager).toBeInstanceOf(RpcManager);
+        expect(assetHubManager).toBeInstanceOf(RpcManager);
+        
+        const relayHealth = relayChainManager.getHealthStatus();
+        expect(relayHealth.length).toBe(RpcEndpoints.PASEO_RELAY_CHAIN.length);
+        
+        const assetHealth = assetHubManager.getHealthStatus();
+        expect(assetHealth.length).toBe(RpcEndpoints.PASEO_ASSET_HUB.length);
+      });
+
       it('should use correct storage keys per network', () => {
         const polkadot = createRpcManagersForNetwork('polkadot');
         const kusama = createRpcManagersForNetwork('kusama');
         const westend = createRpcManagersForNetwork('westend');
+        const paseo = createRpcManagersForNetwork('paseo');
 
         // Storage keys should be different to avoid conflicts
         // This test verifies that managers are properly isolated
         expect(polkadot.relayChainManager).not.toBe(kusama.relayChainManager);
         expect(polkadot.relayChainManager).not.toBe(westend.relayChainManager);
+        expect(polkadot.relayChainManager).not.toBe(paseo.relayChainManager);
         expect(kusama.relayChainManager).not.toBe(westend.relayChainManager);
+        expect(kusama.relayChainManager).not.toBe(paseo.relayChainManager);
+        expect(westend.relayChainManager).not.toBe(paseo.relayChainManager);
       });
     });
 
@@ -712,6 +736,17 @@ describe('RpcManager', () => {
         
         expect(relayManager.getHealthStatus().length).toBe(RpcEndpoints.WESTEND_RELAY_CHAIN.length);
         expect(assetManager.getHealthStatus().length).toBe(RpcEndpoints.WESTEND_ASSET_HUB.length);
+      });
+
+      it('should create Paseo managers', () => {
+        const relayManager = createPaseoRelayChainManager();
+        const assetManager = createPaseoAssetHubManager();
+        
+        expect(relayManager).toBeInstanceOf(RpcManager);
+        expect(assetManager).toBeInstanceOf(RpcManager);
+        
+        expect(relayManager.getHealthStatus().length).toBe(RpcEndpoints.PASEO_RELAY_CHAIN.length);
+        expect(assetManager.getHealthStatus().length).toBe(RpcEndpoints.PASEO_ASSET_HUB.length);
       });
     });
   });

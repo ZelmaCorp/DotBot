@@ -20,13 +20,14 @@ import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOve
 import { ScenarioEngineProvider } from './components/scenarioEngine/context/ScenarioEngineContext';
 import LoadingOverlay from './components/common/LoadingOverlay';
 import { DotBot, Environment, ScenarioEngine, SigningRequest, BatchSigningRequest, DotBotEventType } from '@dotbot/core';
-import type { ChatInstanceData, ExecutionMessage } from '@dotbot/core';
+import type { ChatInstanceData, ExecutionMessage, Network } from '@dotbot/core';
 import { useWalletStore } from './stores/walletStore';
 import { Settings } from 'lucide-react';
 import {
   createDotBotInstance,
   setupScenarioEngineDependencies,
-  getNetworkFromEnvironment
+  getEnvironmentFromNetwork,
+  getAddressForNetwork,
 } from './utils/appUtils';
 import {
   createDotBotSession,
@@ -77,8 +78,8 @@ const AppContent: React.FC = () => {
   const [isScenarioEngineReady, setIsScenarioEngineReady] = useState(false);
   const [isScenarioEngineInitializing, setIsScenarioEngineInitializing] = useState(false);
   
-  // Environment preference (for when wallet is not connected yet)
-  const [preferredEnvironment, setPreferredEnvironment] = useState<Environment>('mainnet');
+  // Network preference (mainnet = polkadot; testnet = westend | paseo)
+  const [preferredNetwork, setPreferredNetwork] = useState<Network>('polkadot');
   
   // Cleanup ScenarioEngine on unmount to prevent subscription leaks
   useEffect(() => {
@@ -171,17 +172,18 @@ const AppContent: React.FC = () => {
     
     try {
       // Create backend session first (this creates DotBot instance on backend)
+      // Use network-canonical address (e.g. Paseo = SS58 0, 14Mh7... so bot and chain see correct form)
       const walletAccount: WalletAccount = {
-        address: selectedAccount!.address,
+        address: getAddressForNetwork(selectedAccount!.address, preferredNetwork),
         name: selectedAccount!.name,
         source: selectedAccount!.source,
       };
       
-      const network = getNetworkFromEnvironment(preferredEnvironment);
+      const environment = getEnvironmentFromNetwork(preferredNetwork);
       const sessionResponse = await createDotBotSession(
         walletAccount,
-        preferredEnvironment,
-        network,
+        environment,
+        preferredNetwork,
         undefined // sessionId will be auto-generated
       );
       
@@ -193,9 +195,10 @@ const AppContent: React.FC = () => {
       // RPC connections are lazy-loaded (created but not connected during initialization)
       const dotbotInstance = await createDotBotInstance(
         selectedAccount!,
-        preferredEnvironment,
+        getEnvironmentFromNetwork(preferredNetwork),
         null, // No preloaded managers - DotBot handles connections directly
-        (request: any) => setSigningRequest(request)
+        (request: any) => setSigningRequest(request),
+        preferredNetwork
       );
       
       setDotbot(dotbotInstance);
@@ -247,8 +250,9 @@ const AppContent: React.FC = () => {
     message: string,
     currentChat: any
   ): Promise<any> => {
+    // Use network-canonical address (e.g. Paseo = 14Mh7... so bot echoes correct form)
     const walletAccount: WalletAccount = {
-      address: selectedAccount!.address,
+      address: getAddressForNetwork(selectedAccount!.address, dotbot!.getNetwork()),
       name: selectedAccount!.name,
       source: selectedAccount!.source,
     };
@@ -532,13 +536,10 @@ const AppContent: React.FC = () => {
     if (!dotbot) return;
     
     try {
-      const currentEnvironment = dotbot.getEnvironment();
-      
-      // If preferred environment is different, switch to it (creates new chat)
-      if (preferredEnvironment !== currentEnvironment) {
-        await dotbot.switchEnvironment(preferredEnvironment);
+      const currentNetwork = dotbot.getNetwork();
+      if (preferredNetwork !== currentNetwork) {
+        await dotbot.switchEnvironment(getEnvironmentFromNetwork(preferredNetwork), preferredNetwork);
       } else {
-        // Otherwise, just clear history in current environment
         await dotbot.clearHistory();
       }
       
@@ -555,29 +556,25 @@ const AppContent: React.FC = () => {
     }
   };
 
-  const handleEnvironmentSwitch = async (environment: Environment) => {
-    // Store preference (for when wallet is not connected yet)
-    setPreferredEnvironment(environment);
-    
-    // If DotBot is already initialized, switch environment (creates new chat)
+  const handleNetworkSwitch = async (network: Network) => {
+    setPreferredNetwork(network);
+    const environment = getEnvironmentFromNetwork(network);
+
     if (dotbot) {
       try {
-        console.log(`Switching to ${environment}...`);
-        await dotbot.switchEnvironment(environment);
+        console.log(`Switching to ${network} (${environment})...`);
+        await dotbot.switchEnvironment(environment, network);
         setShowWelcomeScreen(true);
-        // Update current chat ID to trigger re-render
         if (dotbot.currentChat) {
           setCurrentChatId(dotbot.currentChat.id);
         }
         setConversationRefresh(prev => prev + 1);
-        console.info(`Successfully switched to ${environment}`);
+        console.info(`Successfully switched to ${network}`);
       } catch (error) {
-        console.error('Failed to switch environment:', error);
-        // We might want to show an error toast/notification here
+        console.error('Failed to switch network:', error);
       }
     } else {
-      // If not connected yet, preference will be used when wallet connects
-      console.log(`Environment preference set to ${environment}. Will be applied when wallet connects.`);
+      console.log(`Network preference set to ${network}. Will be applied when wallet connects.`);
     }
   };
 
@@ -679,9 +676,9 @@ const AppContent: React.FC = () => {
             >
               <Settings className="w-5 h-5" />
             </button>
-            <WalletButton 
-                  environment={dotbot?.getEnvironment() || preferredEnvironment}
-                  onEnvironmentSwitch={handleEnvironmentSwitch}
+            <WalletButton
+                  network={dotbot?.getNetwork() ?? preferredNetwork}
+                  onNetworkSwitch={handleNetworkSwitch}
             />
           </div>
         </div>
@@ -745,7 +742,7 @@ const AppContent: React.FC = () => {
             onClose={() => setShowSettingsModal(false)}
             scenarioEngineEnabled={scenarioEngineEnabled}
             onToggleScenarioEngine={setScenarioEngineEnabled}
-            isMainnet={(dotbot?.getEnvironment() || preferredEnvironment) === 'mainnet'}
+            isMainnet={getEnvironmentFromNetwork(dotbot?.getNetwork() ?? preferredNetwork) === 'mainnet'}
       />
 
       {/* ScenarioEngine Overlay - Only on testnet */}

@@ -5,7 +5,8 @@
  * Extracted to follow single responsibility and keep functions under 40 lines.
  */
 
-import { DotBot, Environment, Network, createRpcManagersForNetwork, ScenarioEngine } from '@dotbot/core';
+import { decodeAddress, encodeAddress } from '@polkadot/util-crypto';
+import { DotBot, Environment, Network, createRpcManagersForNetwork, ScenarioEngine, getNetworkSS58Format } from '@dotbot/core';
 
 export interface WalletAccount {
   address: string;
@@ -13,14 +14,35 @@ export interface WalletAccount {
   source: string;
 }
 
+/**
+ * Return address encoded for the given network (SS58 format).
+ * Use when sending wallet to backend or displaying so Paseo shows 14Mh7... (Polkadot format), not 5F...
+ */
+export function getAddressForNetwork(address: string, network: Network): string {
+  try {
+    const format = getNetworkSS58Format(network);
+    const decoded = decodeAddress(address);
+    return encodeAddress(decoded, format);
+  } catch {
+    return address;
+  }
+}
+
 // Use the return type from createRpcManagersForNetwork to avoid type conflicts
 export type RpcManagers = ReturnType<typeof createRpcManagersForNetwork>;
 
 /**
- * Derive network from environment
+ * Derive network from environment (default testnet = westend)
  */
 export function getNetworkFromEnvironment(environment: Environment): Network {
   return environment === 'mainnet' ? 'polkadot' : 'westend';
+}
+
+/**
+ * Derive environment from network
+ */
+export function getEnvironmentFromNetwork(network: Network): Environment {
+  return network === 'polkadot' || network === 'kusama' ? 'mainnet' : 'testnet';
 }
 
 /**
@@ -47,19 +69,21 @@ export async function preloadNetworkConnections(
 
 /**
  * Create DotBot instance with configuration
+ * @param network - If provided, used for RPC/chat; otherwise derived from environment (testnet → westend)
  */
 export async function createDotBotInstance(
   account: WalletAccount,
   environment: Environment,
   preloadedManagers: RpcManagers | null,
-  onSigningRequest: (request: any) => void
+  onSigningRequest: (request: any) => void,
+  network?: Network
 ): Promise<DotBot> {
-  const network = getNetworkFromEnvironment(environment);
-  
+  const resolvedNetwork = network ?? getNetworkFromEnvironment(environment);
+
   const config: any = {
     wallet: account,
     environment,
-    network,
+    network: resolvedNetwork,
     onSigningRequest,
     onBatchSigningRequest: onSigningRequest
   };
