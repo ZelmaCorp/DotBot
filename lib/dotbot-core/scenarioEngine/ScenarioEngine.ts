@@ -83,6 +83,7 @@ import {
 } from './components';
 
 import type { ApiPromise } from '@polkadot/api';
+import type { Network } from '../prompts/system/knowledge/types';
 
 // =============================================================================
 // DEFAULT CONFIGURATION
@@ -1041,6 +1042,17 @@ export class ScenarioEngine {
   }
 
   /**
+   * Set the default environment (chain + mode) for scenario execution.
+   * Call this when the user switches network so {{TOKEN}} and chain-specific behavior use the correct network (e.g. PAS on Paseo, WND on Westend).
+   */
+  setDefaultEnvironment(environment: ScenarioEngineConfig['defaultEnvironment']): void {
+    if (environment) {
+      this.config.defaultEnvironment = { ...this.config.defaultEnvironment, ...environment };
+      this.log('debug', `Default environment set to chain=${this.config.defaultEnvironment.chain}, mode=${this.config.defaultEnvironment.mode}`);
+    }
+  }
+
+  /**
    * Clean up resources
    */
   async destroy(): Promise<void> {
@@ -1102,7 +1114,7 @@ export class ScenarioEngine {
               this.subscribeToDotBot(this.dotbot);
             }
 
-          // Ensure executor has wallet address resolver and Asset Hub API
+          // Ensure executor has wallet address resolver, Asset Hub API, and network for {{TOKEN}} resolution
           // Priority: walletAccount > dotbot wallet > undefined (will throw helpful error)
           if (this.executor && this.executorDeps) {
             // Try to get Asset Hub API from DotBot if not already in deps
@@ -1111,7 +1123,7 @@ export class ScenarioEngine {
               const dotbotAny = this.dotbot as any;
               assetHubApi = dotbotAny.assetHubApi || null;
             }
-            
+            const environment = scenario.environment || this.config.defaultEnvironment;
             const enhancedDeps = {
               ...this.executorDeps,
               assetHubApi: assetHubApi || this.executorDeps.assetHubApi, // Preserve or add Asset Hub API
@@ -1131,6 +1143,8 @@ export class ScenarioEngine {
                 // Return undefined - will trigger helpful error message
                 return undefined;
               },
+              // Prefer DotBot's current network so {{TOKEN}} matches the chain DotBot is actually using (e.g. PAS on Paseo)
+              getNetwork: () => (this.dotbot?.getNetwork() as Network | undefined) ?? this.getNetworkFromChain(environment.chain),
             };
             this.executor.setDependencies(enhancedDeps);
           }
@@ -1920,15 +1934,31 @@ export class ScenarioEngine {
     }
   }
 
+  private getNetworkFromChain(chain: ScenarioChain): Network {
+    const chainToNetwork: Record<ScenarioChain, Network> = {
+      'polkadot': 'polkadot',
+      'kusama': 'kusama',
+      'westend': 'westend',
+      'paseo': 'paseo',
+      'asset-hub-polkadot': 'polkadot',
+      'asset-hub-westend': 'westend',
+      'asset-hub-paseo': 'paseo',
+    };
+    return chainToNetwork[chain] || 'polkadot';
+  }
+
   private getSS58Format(chain: string): number {
     switch (chain) {
       case 'polkadot':
       case 'asset-hub-polkadot':
+      case 'paseo':
+      case 'asset-hub-paseo':
         return 0;
       case 'kusama':
         return 2;
       case 'westend':
       case 'asset-hub-westend':
+        return 42;
       default:
         return 42;
     }

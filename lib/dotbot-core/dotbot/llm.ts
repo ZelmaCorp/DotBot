@@ -122,7 +122,7 @@ export async function buildContextualSystemPrompt(dotbot: DotBotInstance): Promi
   try {
     const balance = await dotbot.getBalance();
     await dotbot.getChainInfo(); // ensure chain info available for prompt
-    const tokenSymbol = dotbot.network === 'westend' ? 'WND' : dotbot.network === 'kusama' ? 'KSM' : 'DOT';
+    const tokenSymbol = dotbot.network === 'westend' ? 'WND' : dotbot.network === 'kusama' ? 'KSM' : dotbot.network === 'paseo' ? 'PAS' : 'DOT';
     const relayChainDecimals = dotbot.api!.registry.chainDecimals?.[0];
     const assetHubDecimals = dotbot.assetHubApi?.registry.chainDecimals?.[0];
     const context = {
@@ -130,7 +130,7 @@ export async function buildContextualSystemPrompt(dotbot: DotBotInstance): Promi
       network: {
         network: dotbot.network,
         rpcEndpoint: dotbot.relayChainManager.getCurrentEndpoint() || '',
-        isTestnet: dotbot.network === 'westend',
+        isTestnet: dotbot.network === 'westend' || dotbot.network === 'paseo',
         relayChainDecimals,
         assetHubDecimals,
       },

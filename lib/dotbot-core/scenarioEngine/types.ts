@@ -34,7 +34,7 @@
 // =============================================================================
 
 /** Supported chains for scenario execution */
-export type ScenarioChain = 'polkadot' | 'kusama' | 'westend' | 'asset-hub-polkadot' | 'asset-hub-westend';
+export type ScenarioChain = 'polkadot' | 'kusama' | 'westend' | 'paseo' | 'asset-hub-polkadot' | 'asset-hub-westend' | 'asset-hub-paseo';
 
 /** Execution mode determines how state is managed */
 export type ScenarioMode = 

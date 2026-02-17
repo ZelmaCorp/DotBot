@@ -98,6 +98,7 @@ export type {
   XCMPattern,
   OperationPattern,
 } from './prompts/system/knowledge/types';
+export { getNetworkSS58Format } from './prompts/system/knowledge/networkUtils';
 export {
   SYSTEM_PROMPT_VERSION,
   isCompatibleVersion,

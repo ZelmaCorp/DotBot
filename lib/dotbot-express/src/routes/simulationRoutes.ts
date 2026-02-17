@@ -593,7 +593,7 @@ function parseOutcome(
 }
 
 router.get('/health', (_req: Request, res: Response) => {
-  console.log('[SimulationRoutes] Health check endpoint called');
+  simulationLogger.debug('Health check endpoint called');
   res.json({ status: 'ok', service: 'simulation-server' });
 });
 

@@ -110,16 +110,19 @@ function createDebouncedSummary(
   };
 }
 
+type LogInfoFn = (msg: string) => void;
+type LogWarnFn = (msg: string) => void;
+
 /**
  * Create RPC methods summary callback
  */
 function createRpcSummaryCallback(
   messages: ApiInitMessages,
-  originalConsoleInfo: typeof console.info
+  logInfo: LogInfoFn
 ): () => void {
   return () => {
     if (messages.rpcMethods.size > 0) {
-      originalConsoleInfo(
+      logInfo(
         `[Polkadot] API initialized (${messages.rpcMethods.size} RPC methods not decorated - expected)`
       );
       messages.rpcMethods.clear();
@@ -132,12 +135,12 @@ function createRpcSummaryCallback(
  */
 function createRuntimeApiSummaryCallback(
   messages: ApiInitMessages,
-  originalConsoleInfo: typeof console.info
+  logInfo: LogInfoFn
 ): () => void {
   return () => {
     messages.runtimeApis.forEach((apis, chain) => {
       const apiList = Array.from(apis).join(', ');
-      originalConsoleInfo(`[Polkadot] ${chain}: Runtime API version mismatches: ${apiList} (expected)`);
+      logInfo(`[Polkadot] ${chain}: Runtime API version mismatches: ${apiList} (expected)`);
     });
     messages.runtimeApis.clear();
   };
@@ -148,12 +151,12 @@ function createRuntimeApiSummaryCallback(
  */
 function createUnknownApiSummaryCallback(
   messages: ApiInitMessages,
-  originalConsoleInfo: typeof console.info
+  logInfo: LogInfoFn
 ): () => void {
   return () => {
     if (messages.unknownApis.size > 0) {
       const chains = Array.from(messages.unknownApis).join(', ');
-      originalConsoleInfo(`[Polkadot] ${chains}: Unknown runtime APIs (expected)`);
+      logInfo(`[Polkadot] ${chains}: Unknown runtime APIs (expected)`);
       messages.unknownApis.clear();
     }
   };
@@ -164,7 +167,7 @@ function createUnknownApiSummaryCallback(
  * Collects similar messages and shows a summary
  */
 function createApiInitShortener(
-  originalConsoleInfo: typeof console.info
+  logInfo: LogInfoFn
 ): (message: string) => string | null {
   const messages: ApiInitMessages = {
     rpcMethods: new Set(),
@@ -172,24 +175,34 @@ function createApiInitShortener(
     unknownApis: new Set(),
   };
   
-  const showRpcSummary = createDebouncedSummary(1000, createRpcSummaryCallback(messages, originalConsoleInfo));
-  const showRuntimeApiSummary = createDebouncedSummary(1000, createRuntimeApiSummaryCallback(messages, originalConsoleInfo));
-  const showUnknownApiSummary = createDebouncedSummary(1000, createUnknownApiSummaryCallback(messages, originalConsoleInfo));
+  const showRpcSummary = createDebouncedSummary(1000, createRpcSummaryCallback(messages, logInfo));
+  const showRuntimeApiSummary = createDebouncedSummary(1000, createRuntimeApiSummaryCallback(messages, logInfo));
+  const showUnknownApiSummary = createDebouncedSummary(1000, createUnknownApiSummaryCallback(messages, logInfo));
   
+  /** Returns '' when message was handled (suppress raw line), null to pass through */
   return (message: string): string | null => {
     const cleaned = cleanMessage(message);
     
     if (handleRpcMethodsMessage(cleaned, messages, showRpcSummary)) {
-      return null;
+      return ''; // Suppress raw line; summary will be logged via logInfo
     }
     if (handleRuntimeApiMessage(cleaned, messages, showRuntimeApiSummary)) {
-      return null;
+      return '';
     }
     if (handleUnknownApiMessage(cleaned, messages, showUnknownApiSummary)) {
-      return null;
+      return '';
+    }
+    // Suppress other Polkadot REGISTRY/API noise (single JSON line instead of raw)
+    if (cleaned.startsWith('REGISTRY:')) {
+      logInfo('[Polkadot] REGISTRY/signed extensions (expected, suppressed)');
+      return '';
+    }
+    if (cleaned.startsWith('API/INIT:') && !cleaned.includes('RPC methods not decorated') && !cleaned.includes('Not decorating runtime apis') && !cleaned.includes('Not decorating unknown')) {
+      logInfo('[Polkadot] API/INIT (expected, suppressed)');
+      return '';
     }
     
-    return null;
+    return null; // Pass through to console
   };
 }
 
@@ -198,13 +211,13 @@ function createApiInitShortener(
  * Collects multiple version warnings and shows a single summary
  */
 function createVersionWarningHandler(
-  originalConsoleWarn: typeof console.warn
+  logWarn: LogWarnFn
 ): (message: string) => boolean {
   const versionWarnings = new Set<string>();
   const showSummary = createDebouncedSummary(1000, () => {
     if (versionWarnings.size > 0) {
       const packages = Array.from(versionWarnings).sort().join(', ');
-      originalConsoleWarn(
+      logWarn(
         `[Polkadot] Version conflicts: ${packages} (${versionWarnings.size} packages). Run 'npm dedupe' to resolve.`
       );
       versionWarnings.clear();
@@ -218,68 +231,83 @@ function createVersionWarningHandler(
       showSummary();
       return true; // Suppress individual message
     }
+    // Suppress wasm deprecation noise (one JSON line instead)
+    if (message.includes('using deprecated parameters') && message.includes('initSync')) {
+      logWarn('[Polkadot] wasm: deprecated initSync() parameters (suppressed)');
+      return true;
+    }
     return false;
   };
 }
 
 /**
  * Shorten noisy Polkadot.js console messages
- * Instead of filtering them out, condense them to one line with just the essence
+ * Instead of filtering them out, condense them to one line with just the essence.
+ * When logInfo/logWarn are provided (from pino), summaries go out as JSON in LOG_FORMAT=json.
  */
-function setupConsoleShortener() {
+function setupConsoleShortener(logInfo?: LogInfoFn, logWarn?: LogWarnFn) {
   // Only set up once
   if ((console as any).__dotbotShortened) {
     return;
   }
-  
+
   const originalConsoleLog = console.log;
   const originalConsoleInfo = console.info;
   const originalConsoleWarn = console.warn;
-  
-  const shortenApiInit = createApiInitShortener(originalConsoleInfo);
-  const handleVersionWarning = createVersionWarningHandler(originalConsoleWarn);
-  
+
+  const infoFn: LogInfoFn = logInfo ?? ((msg) => originalConsoleInfo(msg));
+  const warnFn: LogWarnFn = logWarn ?? ((msg) => originalConsoleWarn(msg));
+
+  const shortenApiInit = createApiInitShortener(infoFn);
+  const handleVersionWarning = createVersionWarningHandler(warnFn);
+
   console.log = (...args: any[]) => {
     const message = String(args[0] || '');
     const shortened = shortenApiInit(message);
+    if (shortened === '') {
+      return;
+    }
     if (shortened) {
       originalConsoleLog(shortened);
     } else {
       originalConsoleLog.apply(console, args);
     }
   };
-  
+
   console.info = (...args: any[]) => {
     const message = String(args[0] || '');
     const shortened = shortenApiInit(message);
+    if (shortened === '') {
+      return; // Suppressed; summary will be logged via logInfo (JSON when LOG_FORMAT=json)
+    }
     if (shortened) {
       originalConsoleInfo(shortened);
     } else {
       originalConsoleInfo.apply(console, args);
     }
   };
-  
+
   console.warn = (...args: any[]) => {
     const message = String(args[0] || '');
-    
+
     if (handleVersionWarning(message)) {
       return; // Suppress this message
     }
-    
+
     const apiShortened = shortenApiInit(message);
+    if (apiShortened === '') {
+      return;
+    }
     if (apiShortened) {
       originalConsoleWarn(apiShortened);
     } else {
       originalConsoleWarn.apply(console, args);
     }
   };
-  
+
   // Mark as shortened to prevent double setup
   (console as any).__dotbotShortened = true;
 }
-
-// Setup console shortener on module load (before any Polkadot.js code runs)
-setupConsoleShortener();
 
 // Read version from package.json or environment
 const EXPRESS_VERSION = process.env.DOTBOT_EXPRESS_VERSION || '0.1.0';
@@ -353,8 +381,15 @@ const loggerConfig: pino.LoggerOptions = {
   }),
 };
 
-// Create the base logger
+// Create the base logger first so we can use it for Polkadot summaries (JSON when LOG_FORMAT=json)
 const baseLogger = pino(loggerConfig);
+const polkadotLogger = baseLogger.child({ subsystem: 'polkadot' });
+const polkadotLogInfo = (msg: string) => polkadotLogger.info(msg);
+const polkadotLogWarn = (msg: string) => polkadotLogger.warn(msg);
+
+// Setup console shortener on module load (before any Polkadot.js code runs)
+// Pass pino loggers so Polkadot summaries go out as JSON when LOG_FORMAT=json (Grafana-friendly)
+setupConsoleShortener(polkadotLogInfo, polkadotLogWarn);
 
 /**
  * Create a child logger with additional context

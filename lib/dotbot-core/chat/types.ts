@@ -31,7 +31,7 @@ export type Environment = 'mainnet' | 'testnet';
  */
 export const ENVIRONMENT_NETWORKS: Record<Environment, Network[]> = {
   mainnet: ['polkadot', 'kusama'],
-  testnet: ['westend']
+  testnet: ['westend', 'paseo'],
 };
 
 /**

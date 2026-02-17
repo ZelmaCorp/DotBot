@@ -7,7 +7,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 // Import @dotbot/express - this automatically sets up console filters via its index.ts
-import { chatRouter, dotbotRouter, errorHandler, notFoundHandler, requestLogger } from '@dotbot/express';
+import { chatRouter, createLogger, dotbotRouter, errorHandler, notFoundHandler, requestLogger } from '@dotbot/express';
 
 dotenv.config();
 
@@ -123,11 +123,12 @@ app.use('/api/dotbot', dotbotRouter);
 
 // Mount simulation routes (Chopsticks server)
 import { simulationRouter } from '@dotbot/express';
+const appLogger = createLogger({ subsystem: 'app' });
 if (simulationRouter) {
   app.use('/api/simulation', simulationRouter);
-  console.log('[App] Simulation routes mounted at /api/simulation');
+  appLogger.info('Simulation routes mounted at /api/simulation');
 } else {
-  console.error('[App] ERROR: simulationRouter is undefined!');
+  appLogger.error('simulationRouter is undefined');
 }
 
 /**

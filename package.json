@@ -10,7 +10,9 @@
   ],
   "scripts": {
     "dev:backend": "npm run dev --workspace=backend",
+    "dev:backend:fresh": "npm run build:core && npm run dev --workspace=backend",
     "dev:frontend": "npm run start --workspace=frontend",
+    "dev:frontend:fresh": "npm run build:core && (rm -rf frontend/node_modules/.cache 2>/dev/null || true) && npm run start --workspace=frontend",
     "build:core": "npm run build --workspace=@dotbot/core",
     "build": "npm run build:core && npm run build --workspace=backend && npm run build --workspace=frontend",
     "test": "npm run test --workspaces --if-present",
