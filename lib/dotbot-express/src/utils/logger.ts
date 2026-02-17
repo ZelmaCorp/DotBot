@@ -192,6 +192,15 @@ function createApiInitShortener(
     if (handleUnknownApiMessage(cleaned, messages, showUnknownApiSummary)) {
       return '';
     }
+    // Suppress other Polkadot REGISTRY/API noise (single JSON line instead of raw)
+    if (cleaned.startsWith('REGISTRY:')) {
+      logInfo('[Polkadot] REGISTRY/signed extensions (expected, suppressed)');
+      return '';
+    }
+    if (cleaned.startsWith('API/INIT:') && !cleaned.includes('RPC methods not decorated') && !cleaned.includes('Not decorating runtime apis') && !cleaned.includes('Not decorating unknown')) {
+      logInfo('[Polkadot] API/INIT (expected, suppressed)');
+      return '';
+    }
     
     return null; // Pass through to console
   };
@@ -221,6 +230,11 @@ function createVersionWarningHandler(
       versionWarnings.add(match[1]);
       showSummary();
       return true; // Suppress individual message
+    }
+    // Suppress wasm deprecation noise (one JSON line instead)
+    if (message.includes('using deprecated parameters') && message.includes('initSync')) {
+      logWarn('[Polkadot] wasm: deprecated initSync() parameters (suppressed)');
+      return true;
     }
     return false;
   };

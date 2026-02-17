@@ -19,6 +19,8 @@ export function requestLogger(
   
   res.on('finish', () => {
     const duration = Date.now() - startTime;
+    const isHealthCheck = req.method === 'GET' && req.path === '/api/health' && res.statusCode === 200;
+
     const logData = {
       method: req.method,
       path: req.path,
@@ -32,6 +34,8 @@ export function requestLogger(
       logger.error(logData, 'Request failed');
     } else if (res.statusCode >= 400) {
       logger.warn(logData, 'Request error');
+    } else if (isHealthCheck) {
+      logger.debug(logData, 'Request completed');
     } else {
       logger.info(logData, 'Request completed');
     }
