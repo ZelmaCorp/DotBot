@@ -114,6 +114,30 @@ export function generateWestendKnowledgeSchema(): KnowledgeDomainSchema {
 }
 
 /**
+ * Generate schema for Paseo knowledge
+ */
+export function generatePaseoKnowledgeSchema(): KnowledgeDomainSchema {
+  return {
+    name: 'paseoKnowledge',
+    description: 'Paseo testnet ecosystem knowledge (PAS token, PassetHub, testnet-specific info)',
+    fields: [
+      {
+        name: 'parachains',
+        type: 'ParachainInfo[]',
+        description: 'List of Paseo parachains (relay, PassetHub)',
+        isArray: true,
+      },
+      {
+        name: 'fees',
+        type: 'FeeStructure[]',
+        description: 'Fee structures on Paseo testnet',
+        isArray: true,
+      },
+    ],
+  };
+}
+
+/**
  * Format knowledge schema for system prompt
  * 
  * Generates a human-readable description of available knowledge that can be
@@ -123,6 +147,7 @@ export function formatKnowledgeSchemaForPrompt(): string {
   const schemas = [
     generatePolkadotKnowledgeSchema(),
     generateWestendKnowledgeSchema(),
+    generatePaseoKnowledgeSchema(),
   ];
 
   let output = '## Available Knowledge Domains\n\n';

@@ -200,7 +200,117 @@
   }
 }
 
-/* Compact variant - small button like ThemeToggle */
+/* 3-option segment (modal variant) */
+.environment-switch-segment {
+  display: flex;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="dark"] .environment-switch-segment {
+  border-color: rgba(251, 191, 36, 0.4);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.environment-switch-segment-option {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 0;
+}
+
+.environment-switch-segment-option:hover:not(:disabled):not(.active) {
+  background-color: rgba(251, 191, 36, 0.1);
+  color: var(--text-primary);
+}
+
+.environment-switch-segment-option.active {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.environment-switch-segment-option.active.mainnet {
+  background-color: rgba(124, 58, 237, 0.2);
+  color: var(--brand-purple);
+}
+
+[data-theme="dark"] .environment-switch-segment-option.active.mainnet {
+  background-color: rgba(124, 58, 237, 0.25);
+  color: var(--brand-white);
+}
+
+.environment-switch-segment-option.active.testnet {
+  background-color: rgba(251, 191, 36, 0.25);
+  color: #92400e;
+}
+
+[data-theme="dark"] .environment-switch-segment-option.active.testnet {
+  background-color: rgba(251, 191, 36, 0.2);
+  color: var(--brand-white);
+}
+
+.environment-switch-segment-option:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Compact variant - 3 small options */
+.environment-switch-compact-group {
+  display: flex;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid var(--border-primary);
+  background-color: var(--bg-secondary);
+}
+
+.environment-switch-compact-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.environment-switch-compact-option:hover:not(:disabled):not(.active) {
+  background-color: var(--bg-action);
+  color: var(--text-primary);
+}
+
+.environment-switch-compact-option.active {
+  background-color: rgba(251, 191, 36, 0.25);
+  color: #92400e;
+}
+
+[data-theme="dark"] .environment-switch-compact-option.active {
+  background-color: rgba(251, 191, 36, 0.2);
+  color: var(--brand-white);
+}
+
+.environment-switch-compact-option:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.environment-switch-compact-label {
+  color: inherit;
+}
+
+/* Legacy single-button compact (kept for any remaining usage) */
 .environment-switch-compact {
   display: flex;
   align-items: center;

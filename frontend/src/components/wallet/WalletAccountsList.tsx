@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { Plus } from 'lucide-react';
-import { Environment } from '@dotbot/core';
+import type { Network } from '@dotbot/core';
 import { WalletAccount } from '../../types/wallet';
 import { useDebouncedClick } from '../../hooks/useDebounce';
 import WalletAccountItem from './WalletAccountItem';
@@ -17,19 +17,19 @@ import EnvironmentSwitch from './EnvironmentSwitch';
 interface WalletAccountsListProps {
   accounts: WalletAccount[];
   isConnecting: boolean;
-  environment: Environment;
+  network: Network;
   onConnectAccount: (account: WalletAccount) => void;
   onRefreshAccounts: () => void;
-  onEnvironmentSwitch?: (environment: Environment) => void;
+  onNetworkSwitch?: (network: Network) => void;
 }
 
 const WalletAccountsList: React.FC<WalletAccountsListProps> = ({
   accounts,
   isConnecting,
-  environment,
+  network,
   onConnectAccount,
   onRefreshAccounts,
-  onEnvironmentSwitch
+  onNetworkSwitch,
 }) => {
   // Debounced handler to prevent multiple rapid clicks
   const handleRefreshAccounts = useDebouncedClick(onRefreshAccounts, 500);
@@ -56,11 +56,11 @@ const WalletAccountsList: React.FC<WalletAccountsListProps> = ({
         <span>Add Account</span>
       </button>
       
-      {/* Environment Switch Section */}
-      {onEnvironmentSwitch && (
+      {/* Network Switch Section */}
+      {onNetworkSwitch && (
         <EnvironmentSwitch
-          environment={environment}
-          onSwitch={onEnvironmentSwitch}
+          network={network}
+          onSwitch={onNetworkSwitch}
           variant="modal"
         />
       )}

@@ -375,6 +375,10 @@ lib/dotbot-core/agents/
 
 **Purpose**: Execute extrinsics created by agents.
 
+**Execution layer (who does what):**
+- **Orchestrator** converts AI-generated plans (ExecutionPlan / ExecutionStep[]) into runtime-compatible transactions: it calls the appropriate agents, which create extrinsics, and builds the ExecutionArray. So the conversion from plan to extrinsics is done by the **Orchestrator** (via agents), not by the Executioner.
+- **Executioner** handles signing, submission, and monitoring of the prepared ExecutionArray, keeping the process deterministic and auditable.
+
 **Structure:**
 ```
 lib/dotbot-core/executionEngine/
@@ -431,7 +435,7 @@ lib/dotbot-core/executionEngine/
 **RpcManager Network Features:**
 - Network-scoped storage keys (health tracking isolated per network)
 - Factory functions for easy network-specific instantiation
-- Pre-configured endpoint lists for Polkadot, Kusama, and Westend
+- Pre-configured endpoint lists for Polkadot, Kusama, Westend, and Paseo
 
 ---
 
@@ -446,23 +450,25 @@ lib/dotbot-core/prompts/system/knowledge/
 ├── networkUtils.ts             # Network utility functions (20+)
 ├── index.ts                    # Centralized exports
 ├── dotKnowledge.ts             # Polkadot-specific information
-└── westendKnowledge.ts         # Westend testnet information
+├── westendKnowledge.ts         # Westend testnet information
+└── paseoKnowledge.ts           # Paseo testnet information
 ```
 
 **Key Types:**
-- **Network**: Type-safe union (`'polkadot' | 'kusama' | 'westend'`)
+- **Network**: Type-safe union (`'polkadot' | 'kusama' | 'westend' | 'paseo'`)
 - **NetworkMetadata**: Centralized network configuration (tokens, decimals, SS58, RPC endpoints, colors)
 - **NETWORK_CONFIG**: Complete metadata for all supported networks
 
 **Current Support:**
 - ✅ Polkadot: Full support (knowledge base + infrastructure)
 - ✅ Westend: Full support (knowledge base + infrastructure)
+- ✅ Paseo: Full support (knowledge base + infrastructure; native token PAS, SS58 format 0)
 - ⚠️ Kusama: Partial support (infrastructure only, knowledge base TODO)
 
 **Key Functions:**
 - `getNetworkMetadata(network)` - Get all configuration for a network
 - `detectNetworkFromChainName(chainName)` - Auto-detect network from chain info
-- `getNetworkTokenSymbol(network)` - Get native token symbol (DOT/KSM/WND)
+- `getNetworkTokenSymbol(network)` - Get native token symbol (DOT/KSM/WND/PAS)
 - `isTestnet(network)` - Check if network is testnet
 - `getRelayChainEndpoints(network)` - Get Relay Chain RPC endpoints
 - `getAssetHubEndpoints(network)` - Get Asset Hub RPC endpoints
@@ -517,7 +523,7 @@ lib/dotbot-core/storage/
 
 3. **Environment Isolation**
    - `mainnet`: Production environment (Polkadot, Kusama)
-   - `testnet`: Testing environment (Westend)
+   - `testnet`: Testing environment (Westend, Paseo)
    - Chat instances cannot mix environments
    - Switching environment creates new chat instance
 
@@ -1170,7 +1176,7 @@ class ChatInstance {
 // Environment validation
 const ENVIRONMENT_NETWORKS: Record<Environment, Network[]> = {
   mainnet: ['polkadot', 'kusama'],
-  testnet: ['westend']
+  testnet: ['westend', 'paseo']
 };
 
 // UI components
@@ -1224,7 +1230,7 @@ Implement a comprehensive multi-network infrastructure with:
 **Layer 1: Type System**
 ```typescript
 // Core network type
-export type Network = 'polkadot' | 'kusama' | 'westend';
+export type Network = 'polkadot' | 'kusama' | 'westend' | 'paseo';
 
 // Comprehensive network metadata
 export interface NetworkMetadata {
@@ -1243,7 +1249,8 @@ export interface NetworkMetadata {
 export const NETWORK_CONFIG: Record<Network, NetworkMetadata> = {
   polkadot: { name: 'Polkadot', token: 'DOT', decimals: 10, ... },
   kusama: { name: 'Kusama', token: 'KSM', decimals: 12, ... },
-  westend: { name: 'Westend', token: 'WND', decimals: 12, isTestnet: true, ... }
+  westend: { name: 'Westend', token: 'WND', decimals: 12, isTestnet: true, ... },
+  paseo: { name: 'Paseo', token: 'PAS', decimals: 10, ss58Format: 0, isTestnet: true, ... }
 };
 ```
 
@@ -1338,7 +1345,7 @@ const dotbot = await DotBot.create({
 This architecture enables:
 1. **Environment-bound chat instances** (mainnet/testnet separation in UI)
 2. **Kusama full support** (add `kusamaKnowledge.ts` - infrastructure already complete)
-3. **Additional testnets** (Rococo, Paseo) with minimal changes
+3. **Additional testnets** (e.g. Rococo) with minimal changes
 4. **Network-specific features** (e.g., Kusama canary features)
 
 **Kusama Status:** Infrastructure is complete (RPC endpoints, factory functions, types), but `kusamaKnowledge.ts` needs to be created. Currently falls back to Polkadot knowledge.
@@ -1348,7 +1355,8 @@ This architecture enables:
 - `lib/dotbot-core/prompts/system/knowledge/networkUtils.ts` - Utilities (20+ functions)
 - `lib/dotbot-core/prompts/system/knowledge/dotKnowledge.ts` - Polkadot knowledge
 - `lib/dotbot-core/prompts/system/knowledge/westendKnowledge.ts` - Westend knowledge
-- `lib/dotbot-core/rpcManager/` - Network-aware RPC management (RpcManager.ts, factories, healthTracker)
+- `lib/dotbot-core/prompts/system/knowledge/paseoKnowledge.ts` - Paseo testnet knowledge
+- `lib/dotbot-core/rpcManager/` - Network-aware RPC management (RpcManager.ts, factories, healthTracker, endpoints)
 - `lib/dotbot-core/dotbot.ts` - DotBot class; `lib/dotbot-core/dotbot/create.ts` - Network/config in create args
 
 **Jest Configuration:**
@@ -2480,7 +2488,7 @@ Use a three-layer approach to maximize ExecutionPlan reliability:
 
 **Last Updated**: February 2026
 
-**Recent changes (PRs #91–#96, ScenarioEngine):** ExecutionPlan reliability (system prompt + code retry + frontend LLM error messaging); RpcManager STABILITY_DELAY_MS and getReadApi retry; historical Execution Flows (frozen, Rerun/Restore); balance context in chat history (CHAT_HISTORY_MESSAGE_LIMIT, formatBalanceTurnContext); React render fix for execution flow state; ScenarioEngine expression system (comparison/logical operators, ExpressionValidator, 20+ examples, converted scenarios).
+**Recent changes (Paseo + ScenarioEngine):** Paseo testnet support (full knowledge base, RPC endpoints, PAS token, SS58 format 0); chat and ScenarioEngine tied to network (mainnet/testnet + network); dynamic token symbol in scenario prompts ({{TOKEN}} → PAS/WND/DOT by network); entity addresses in scenarios encoded for current network SS58; ExecutionPlan reliability (system prompt + code retry + frontend LLM error messaging); RpcManager STABILITY_DELAY_MS and getReadApi retry; historical Execution Flows (frozen, Rerun/Restore); balance context in chat history; ScenarioEngine expression system (comparison/logical operators, ExpressionValidator).
 
 **Maintainers**: This document is updated with every significant architectural change via PR review process.
 

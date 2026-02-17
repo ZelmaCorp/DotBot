@@ -399,6 +399,22 @@ describe('DotBot', () => {
         expect(dotbot.getNetwork()).toBe('kusama');
       });
 
+      it('should accept network parameter for Paseo', async () => {
+        (mockRelayChainApi.rpc as any).system.chain.mockResolvedValue({
+          toString: () => 'Paseo',
+        });
+
+        const config: DotBotConfig = {
+          wallet: mockWallet,
+          network: 'paseo',
+        };
+
+        const dotbot = await DotBot.create(config);
+
+        expect(createRpcManagersForNetwork).toHaveBeenCalledWith('paseo');
+        expect(dotbot.getNetwork()).toBe('paseo');
+      });
+
       it('should NOT detect network from chain name during creation (lazy loading)', async () => {
         // Mock Westend chain name
         (mockRelayChainApi.rpc as any).system.chain.mockResolvedValue({ 

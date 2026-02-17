@@ -3,16 +3,17 @@ import { useWalletStore } from '../../stores/walletStore';
 import WalletModal from './WalletModal';
 import EnvironmentBadge from './EnvironmentBadge';
 import walletIcon from '../../assets/wallet.svg';
-import { Environment } from '@dotbot/core';
+import type { Network } from '@dotbot/core';
+import { getEnvironmentFromNetwork } from '../../utils/appUtils';
 
 interface WalletButtonProps {
-  environment?: Environment;
-  onEnvironmentSwitch: (environment: Environment) => void;
+  network?: Network;
+  onNetworkSwitch: (network: Network) => void;
 }
 
-const WalletButton: React.FC<WalletButtonProps> = ({ 
-  environment = 'mainnet',
-  onEnvironmentSwitch 
+const WalletButton: React.FC<WalletButtonProps> = ({
+  network = 'polkadot',
+  onNetworkSwitch,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const {
@@ -53,15 +54,15 @@ const WalletButton: React.FC<WalletButtonProps> = ({
           }
         </span>
         {isConnected && (
-          <EnvironmentBadge environment={environment} className="wallet-environment-badge" />
+          <EnvironmentBadge environment={getEnvironmentFromNetwork(network)} className="wallet-environment-badge" />
         )}
       </button>
 
-      <WalletModal 
+      <WalletModal
         isOpen={isModalOpen}
         onClose={handleCloseModal}
-        environment={environment}
-        onEnvironmentSwitch={onEnvironmentSwitch}
+        network={network}
+        onNetworkSwitch={onNetworkSwitch}
       />
     </>
   );

@@ -7,6 +7,7 @@
 import type { Network, PolkadotKnowledge } from './types';
 import { STATIC_KNOWLEDGE_BASE, formatPolkadotKnowledgeBase } from './dotKnowledge';
 import { WESTEND_KNOWLEDGE_BASE, formatWestendKnowledgeBase } from './westendKnowledge';
+import { PASEO_KNOWLEDGE_BASE, formatPaseoKnowledgeBase } from './paseoKnowledge';
 
 // Types
 export type {
@@ -52,6 +53,18 @@ export {
   formatWestendKnowledgeBase,
 } from './westendKnowledge';
 
+// Paseo Knowledge Base
+export {
+  PASEO_KNOWLEDGE_BASE,
+  PASEO_XCM_PATTERNS,
+  PASEO_COMMON_PATTERNS,
+  PASEO_ECOSYSTEM_CHANGES,
+  PASEO_SAFETY_GUIDELINES,
+  fetchLivePaseoParachainData,
+  buildPaseoKnowledgeBase,
+  formatPaseoKnowledgeBase,
+} from './paseoKnowledge';
+
 // Network Utilities
 export {
   getNetworkMetadata,
@@ -81,6 +94,8 @@ export function getKnowledgeBaseForNetwork(network: Network): PolkadotKnowledge 
       return STATIC_KNOWLEDGE_BASE;
     case 'westend':
       return WESTEND_KNOWLEDGE_BASE;
+    case 'paseo':
+      return PASEO_KNOWLEDGE_BASE;
     case 'kusama':
       // TODO: Implement Kusama knowledge base
       // For now, use Polkadot as template
@@ -97,6 +112,8 @@ export function formatKnowledgeBaseForNetwork(network: Network): string {
       return formatPolkadotKnowledgeBase();
     case 'westend':
       return formatWestendKnowledgeBase();
+    case 'paseo':
+      return formatPaseoKnowledgeBase();
     case 'kusama':
       // TODO: Implement Kusama formatter
       return formatPolkadotKnowledgeBase(); // Fallback

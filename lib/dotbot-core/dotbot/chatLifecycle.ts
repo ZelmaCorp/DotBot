@@ -10,11 +10,12 @@ import { DotBotEventType } from './types';
 
 type DotBotInstance = any;
 
-/** Load or create chat for current env/wallet; init execution sessions. */
+/** Load or create chat for current env/wallet/network; init execution sessions. */
 export async function initializeChatInstance(dotbot: DotBotInstance): Promise<void> {
   try {
     const instances = await dotbot.chatManager.queryInstances({
       environment: dotbot.environment,
+      network: dotbot.network,
       walletAddress: dotbot.wallet.address,
       archived: false,
     });

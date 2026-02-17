@@ -31,6 +31,11 @@ export function getEndpointsForNetwork(network: Network): {
         relayChain: RpcEndpoints.WESTEND_RELAY_CHAIN,
         assetHub: RpcEndpoints.WESTEND_ASSET_HUB,
       };
+    case 'paseo':
+      return {
+        relayChain: RpcEndpoints.PASEO_RELAY_CHAIN,
+        assetHub: RpcEndpoints.PASEO_ASSET_HUB,
+      };
     default:
       throw new Error(`Unknown network: ${network}`);
   }
@@ -45,8 +50,8 @@ export function createRpcManagersForNetwork(network: Network): {
 } {
   const endpoints = getEndpointsForNetwork(network);
   
-  // Westend testnet endpoints are often slower, use shorter timeout to fail faster
-  const connectionTimeout = network === 'westend' ? 5000 : 10000;
+  // Testnet endpoints (Westend, Paseo) are often slower, use shorter timeout to fail faster
+  const connectionTimeout = network === 'westend' || network === 'paseo' ? 5000 : 10000;
   
   return {
     relayChainManager: new RpcManager({
@@ -152,6 +157,36 @@ export function createWestendAssetHubManager(): RpcManager {
     failoverTimeout: 5 * 60 * 1000,
     connectionTimeout: 10000,
     storageKey: 'dotbot_rpc_health_westend_asset_hub',
+    healthDataMaxAge: 24 * 60 * 60 * 1000,
+  });
+}
+
+// ============================================================================
+// Paseo Factory Functions
+// ============================================================================
+
+/**
+ * Create a RPC manager for Paseo Relay Chain
+ */
+export function createPaseoRelayChainManager(): RpcManager {
+  return new RpcManager({
+    endpoints: RpcEndpoints.PASEO_RELAY_CHAIN,
+    failoverTimeout: 5 * 60 * 1000,
+    connectionTimeout: 5000,
+    storageKey: 'dotbot_rpc_health_paseo_relay',
+    healthDataMaxAge: 24 * 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Create a RPC manager for Paseo Asset Hub (PassetHub)
+ */
+export function createPaseoAssetHubManager(): RpcManager {
+  return new RpcManager({
+    endpoints: RpcEndpoints.PASEO_ASSET_HUB,
+    failoverTimeout: 5 * 60 * 1000,
+    connectionTimeout: 5000,
+    storageKey: 'dotbot_rpc_health_paseo_asset_hub',
     healthDataMaxAge: 24 * 60 * 60 * 1000,
   });
 }

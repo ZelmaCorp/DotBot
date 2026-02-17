@@ -143,10 +143,16 @@ router.post('/session', async (req: Request, res: Response) => {
       stack: error.stack,
       wallet: wallet?.address 
     }, 'Error creating session');
-    
+
+    const msg = error?.message ?? 'Failed to create session';
+    const isUnknownNetwork = typeof msg === 'string' && msg.includes('Unknown network');
+    const responseMessage = isUnknownNetwork
+      ? `${msg}. Rebuild the core and restart the backend: from repo root run "npm run build:core" then restart the backend.`
+      : msg;
+
     res.status(500).json({
       error: 'Internal server error',
-      message: error.message || 'Failed to create session',
+      message: responseMessage,
       timestamp: new Date().toISOString()
     });
   }

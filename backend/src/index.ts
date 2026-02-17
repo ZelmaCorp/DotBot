@@ -7,12 +7,13 @@ import { createServer } from 'http';
 import app from './app';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { WebSocketManager } from '@dotbot/express';
+import { WebSocketManager, createLogger } from '@dotbot/express';
 import { initFileStorage, validateAndReport } from '@dotbot/core';
 import path from 'path';
 import fs from 'fs';
 
 const execAsync = promisify(exec);
+const serverLogger = createLogger({ subsystem: 'server' });
 
 // Validate environment configuration before starting
 validateAndReport();
@@ -24,9 +25,9 @@ const STORAGE_DIR = process.env.STORAGE_DIR || path.join(path.resolve(__dirname,
 try {
   fs.mkdirSync(STORAGE_DIR, { recursive: true });
   initFileStorage(STORAGE_DIR);
-  console.log(`[Server] FileStorage initialized at: ${STORAGE_DIR}`);
+  serverLogger.info({ storageDir: STORAGE_DIR }, 'FileStorage initialized');
 } catch (error) {
-  console.error('[Server] Failed to initialize FileStorage, using MemoryStorage:', error);
+  serverLogger.error({ err: error }, 'Failed to initialize FileStorage, using MemoryStorage');
 }
 
 // Create HTTP server (needed for Socket.IO)
@@ -76,11 +77,11 @@ async function killProcessOnPort(port: number): Promise<boolean> {
   }
   
   try {
-    console.log(`[Server] Found process ${pid} using port ${port}, attempting to kill...`);
+    serverLogger.info({ pid, port }, 'Found process using port, attempting to kill');
     await killProcess(pid);
     return true;
   } catch (error) {
-    console.warn(`[Server] Failed to kill process ${pid}:`, error);
+    serverLogger.warn({ err: error, pid, port }, 'Failed to kill process');
     return false;
   }
 }
@@ -90,13 +91,9 @@ async function killProcessOnPort(port: number): Promise<boolean> {
  */
 function logServerStartup(port: number): void {
   const env = process.env.NODE_ENV || 'development';
-  console.log('[Server] DotBot backend server started');
-  console.log(`[Server] Environment: ${env}`);
-  console.log(`[Server] Port: ${port}`);
-  console.log(`[Server] Health check: http://localhost:${port}/api/health`);
-  console.log(`[Server] Chat endpoint: http://localhost:${port}/api/chat`);
-  console.log(`[Server] DotBot endpoint: http://localhost:${port}/api/dotbot/chat`);
-  console.log(`[Server] WebSocket endpoint: ws://localhost:${port}/socket.io`);
+  serverLogger.info('DotBot backend server started');
+  serverLogger.info({ environment: env, port }, 'Server listening');
+  serverLogger.info({ health: `http://localhost:${port}/api/health`, chat: `http://localhost:${port}/api/chat`, dotbot: `http://localhost:${port}/api/dotbot/chat`, websocket: `ws://localhost:${port}/socket.io` }, 'Endpoints');
 }
 
 /**
@@ -108,17 +105,17 @@ async function handlePortInUse(
   resolve: () => void,
   reject: (error: Error) => void
 ): Promise<void> {
-  console.log(`[Server] Port ${port} is already in use`);
-  
+  serverLogger.info({ port }, 'Port already in use');
+
   const killed = await killProcessOnPort(port);
-  
+
   if (killed) {
-    console.log(`[Server] Process killed, retrying on port ${port}...`);
+    serverLogger.info({ port }, 'Process killed, retrying');
     await new Promise(resolve => setTimeout(resolve, 1000));
     startServer(port, maxRetries - 1).then(resolve).catch(reject);
   } else {
     const nextPort = port + 1;
-    console.log(`[Server] Trying next available port: ${nextPort}`);
+    serverLogger.info({ port, nextPort }, 'Trying next available port');
     startServer(nextPort, maxRetries - 1).then(resolve).catch(reject);
   }
 }
@@ -153,6 +150,6 @@ async function startServer(port: number, maxRetries = 10): Promise<void> {
  * Start server
  */
 startServer(Number(PORT)).catch((error) => {
-  console.error('[Server] Failed to start server:', error);
+  serverLogger.error({ err: error }, 'Failed to start server');
   process.exit(1);
 });

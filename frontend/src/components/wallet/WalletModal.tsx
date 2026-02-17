@@ -8,7 +8,7 @@
  */
 
 import React, { useEffect, useCallback } from 'react';
-import { Environment } from '@dotbot/core';
+import type { Network } from '@dotbot/core';
 import { useWalletStore } from '../../stores/walletStore';
 import { WalletAccount } from '../../types/wallet';
 import { web3AuthService } from '@dotbot/core/services/web3AuthService';
@@ -20,15 +20,15 @@ import WalletDisconnectedState from './WalletDisconnectedState';
 interface WalletModalProps {
   isOpen: boolean;
   onClose: () => void;
-  environment?: Environment;
-  onEnvironmentSwitch?: (environment: Environment) => void;
+  network?: Network;
+  onNetworkSwitch?: (network: Network) => void;
 }
 
-const WalletModal: React.FC<WalletModalProps> = ({ 
-  isOpen, 
-  onClose, 
-  environment = 'mainnet',
-  onEnvironmentSwitch 
+const WalletModal: React.FC<WalletModalProps> = ({
+  isOpen,
+  onClose,
+  network = 'polkadot',
+  onNetworkSwitch,
 }) => {
   const {
     isConnected,
@@ -161,24 +161,24 @@ const WalletModal: React.FC<WalletModalProps> = ({
               accountName={selectedAccount.name || ''}
               address={selectedAccount.address}
               source={selectedAccount.source}
-              environment={environment}
+              network={network}
               allAccounts={accounts}
               isConnecting={isConnecting}
               onDisconnect={handleDisconnect}
               onConnectAccount={handleConnectAccount}
               onRefreshAccounts={refreshAccounts}
-              onEnvironmentSwitch={onEnvironmentSwitch || (() => {})}
+              onNetworkSwitch={onNetworkSwitch || (() => {})}
             />
           ) : (
             <WalletDisconnectedState
               error={error}
               accounts={accounts}
               isConnecting={isConnecting}
-              environment={environment}
+              network={network}
               onConnectAccount={handleConnectAccount}
               onEnableWallet={enableWallet}
               onRefreshAccounts={refreshAccounts}
-              onEnvironmentSwitch={onEnvironmentSwitch}
+              onNetworkSwitch={onNetworkSwitch}
             />
           )}
         </div>

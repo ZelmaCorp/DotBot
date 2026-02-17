@@ -57,6 +57,15 @@ describe('Network Utilities', () => {
       expect(metadata.isTestnet).toBe(true);
     });
 
+    it('should return correct metadata for Paseo', () => {
+      const metadata = getNetworkMetadata('paseo');
+      expect(metadata.network).toBe('paseo');
+      expect(metadata.nativeToken).toBe('PAS');
+      expect(metadata.decimals).toBe(10);
+      expect(metadata.ss58Format).toBe(0); // Polkadot address format
+      expect(metadata.isTestnet).toBe(true);
+    });
+
     it('should return undefined for unknown network', () => {
       const metadata = getNetworkMetadata('unknown' as Network);
       expect(metadata).toBeUndefined();
@@ -79,6 +88,13 @@ describe('Network Utilities', () => {
       expect(detectNetworkFromChainName('Kusama CC3')).toBe('kusama');
     });
 
+    it('should detect Paseo from chain name', () => {
+      expect(detectNetworkFromChainName('Paseo')).toBe('paseo');
+      expect(detectNetworkFromChainName('paseo')).toBe('paseo');
+      expect(detectNetworkFromChainName('PASEO')).toBe('paseo');
+      expect(detectNetworkFromChainName('Paseo Relay')).toBe('paseo');
+    });
+
     it('should default to Polkadot for unknown chains', () => {
       expect(detectNetworkFromChainName('Polkadot')).toBe('polkadot');
       expect(detectNetworkFromChainName('Unknown Chain')).toBe('polkadot');
@@ -91,6 +107,7 @@ describe('Network Utilities', () => {
       expect(getNetworkTokenSymbol('polkadot')).toBe('DOT');
       expect(getNetworkTokenSymbol('kusama')).toBe('KSM');
       expect(getNetworkTokenSymbol('westend')).toBe('WND');
+      expect(getNetworkTokenSymbol('paseo')).toBe('PAS');
     });
 
     it('should throw for invalid network', () => {
@@ -103,6 +120,7 @@ describe('Network Utilities', () => {
       expect(getNetworkDecimals('polkadot')).toBe(10);
       expect(getNetworkDecimals('kusama')).toBe(12);
       expect(getNetworkDecimals('westend')).toBe(12);
+      expect(getNetworkDecimals('paseo')).toBe(10);
     });
 
     it('should throw for invalid network', () => {
@@ -115,6 +133,7 @@ describe('Network Utilities', () => {
       expect(getNetworkSS58Format('polkadot')).toBe(0);
       expect(getNetworkSS58Format('kusama')).toBe(2);
       expect(getNetworkSS58Format('westend')).toBe(42);
+      expect(getNetworkSS58Format('paseo')).toBe(0); // Polkadot address format
     });
 
     it('should throw for invalid network', () => {
@@ -127,6 +146,7 @@ describe('Network Utilities', () => {
       expect(isTestnet('polkadot')).toBe(false);
       expect(isTestnet('kusama')).toBe(false);
       expect(isTestnet('westend')).toBe(true);
+      expect(isTestnet('paseo')).toBe(true);
     });
   });
 
@@ -143,6 +163,10 @@ describe('Network Utilities', () => {
       const westendEndpoints = getRelayChainEndpoints('westend');
       expect(westendEndpoints.length).toBeGreaterThan(0);
       expect(westendEndpoints[0]).toContain('wss://');
+
+      const paseoEndpoints = getRelayChainEndpoints('paseo');
+      expect(paseoEndpoints.length).toBeGreaterThan(0);
+      expect(paseoEndpoints[0]).toContain('wss://');
     });
   });
 
@@ -159,13 +183,17 @@ describe('Network Utilities', () => {
       const westendEndpoints = getAssetHubEndpoints('westend');
       expect(westendEndpoints.length).toBeGreaterThan(0);
       expect(westendEndpoints[0]).toContain('wss://');
+
+      const paseoEndpoints = getAssetHubEndpoints('paseo');
+      expect(paseoEndpoints.length).toBeGreaterThan(0);
+      expect(paseoEndpoints[0]).toContain('wss://');
     });
   });
 
   describe('getSupportedNetworks', () => {
     it('should return all supported networks', () => {
       const networks = getSupportedNetworks();
-      expect(networks).toEqual(['polkadot', 'kusama', 'westend']);
+      expect(networks).toEqual(['polkadot', 'kusama', 'westend', 'paseo']);
     });
   });
 
@@ -174,13 +202,15 @@ describe('Network Utilities', () => {
       const networks = getProductionNetworks();
       expect(networks).toEqual(['polkadot', 'kusama']);
       expect(networks).not.toContain('westend');
+      expect(networks).not.toContain('paseo');
     });
   });
 
   describe('getTestnets', () => {
     it('should return only testnets', () => {
       const networks = getTestnets();
-      expect(networks).toEqual(['westend']);
+      expect(networks).toContain('westend');
+      expect(networks).toContain('paseo');
       expect(networks).not.toContain('polkadot');
       expect(networks).not.toContain('kusama');
     });
@@ -191,6 +221,7 @@ describe('Network Utilities', () => {
       expect(isValidNetwork('polkadot')).toBe(true);
       expect(isValidNetwork('kusama')).toBe(true);
       expect(isValidNetwork('westend')).toBe(true);
+      expect(isValidNetwork('paseo')).toBe(true);
       expect(isValidNetwork('invalid')).toBe(false);
       expect(isValidNetwork('')).toBe(false);
     });
@@ -201,6 +232,7 @@ describe('Network Utilities', () => {
       expect(parseNetwork('polkadot')).toBe('polkadot');
       expect(parseNetwork('kusama')).toBe('kusama');
       expect(parseNetwork('westend')).toBe('westend');
+      expect(parseNetwork('paseo')).toBe('paseo');
     });
 
     it('should return fallback for invalid networks', () => {
@@ -229,6 +261,7 @@ describe('Network Utilities', () => {
       expect(getNetworkDisplayName('polkadot')).toBe('Polkadot');
       expect(getNetworkDisplayName('kusama')).toBe('Kusama');
       expect(getNetworkDisplayName('westend')).toBe('Westend Testnet');
+      expect(getNetworkDisplayName('paseo')).toBe('Paseo Testnet');
     });
 
     it('should return undefined for invalid network', () => {
@@ -246,6 +279,10 @@ describe('Network Utilities', () => {
       
       const westendDesc = getNetworkDescription('westend');
       expect(westendDesc).toContain('testnet');
+      
+      const paseoDesc = getNetworkDescription('paseo');
+      expect(paseoDesc).toContain('testnet');
+      expect(paseoDesc).toContain('Paseo');
     });
 
     it('should return undefined for invalid network', () => {
@@ -265,7 +302,13 @@ describe('Network Utilities', () => {
       expect(westendKB.parachains).toBeDefined();
       expect(westendKB.parachains.length).toBeGreaterThan(0);
 
-      const kusamaKB = await getKnowledgeBaseForNetwork('kusama');
+      const paseoKB = getKnowledgeBaseForNetwork('paseo');
+      expect(paseoKB).toBeDefined();
+      expect(paseoKB.parachains).toBeDefined();
+      expect(paseoKB.parachains.length).toBeGreaterThan(0);
+      expect(paseoKB.parachains.some((p) => p.nativeToken === 'PAS')).toBe(true);
+
+      const kusamaKB = getKnowledgeBaseForNetwork('kusama');
       expect(kusamaKB).toBeDefined();
       // Should fallback to Polkadot for now
     });
@@ -282,6 +325,12 @@ describe('Network Utilities', () => {
       expect(typeof westendFormatted).toBe('string');
       expect(westendFormatted.length).toBeGreaterThan(0);
       expect(westendFormatted).toContain('Knowledge Base');
+
+      const paseoFormatted = formatKnowledgeBaseForNetwork('paseo');
+      expect(typeof paseoFormatted).toBe('string');
+      expect(paseoFormatted.length).toBeGreaterThan(0);
+      expect(paseoFormatted).toContain('Paseo');
+      expect(paseoFormatted).toContain('PAS');
     });
   });
 });

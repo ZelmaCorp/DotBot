@@ -7,7 +7,7 @@
  */
 
 import React from 'react';
-import { Environment } from '@dotbot/core';
+import type { Network } from '@dotbot/core';
 import { WalletAccount } from '../../types/wallet';
 import WalletErrorCard from './WalletErrorCard';
 import WalletAccountsList from './WalletAccountsList';
@@ -17,22 +17,22 @@ interface WalletDisconnectedStateProps {
   error: string | null;
   accounts: WalletAccount[];
   isConnecting: boolean;
-  environment: Environment;
+  network: Network;
   onConnectAccount: (account: WalletAccount) => void;
   onEnableWallet: () => void;
   onRefreshAccounts: () => void;
-  onEnvironmentSwitch?: (environment: Environment) => void;
+  onNetworkSwitch?: (network: Network) => void;
 }
 
 const WalletDisconnectedState: React.FC<WalletDisconnectedStateProps> = ({
   error,
   accounts,
   isConnecting,
-  environment,
+  network,
   onConnectAccount,
   onEnableWallet,
   onRefreshAccounts,
-  onEnvironmentSwitch
+  onNetworkSwitch,
 }) => {
   return (
     <div className="wallet-disconnected-state">
@@ -46,10 +46,10 @@ const WalletDisconnectedState: React.FC<WalletDisconnectedStateProps> = ({
         <WalletAccountsList
           accounts={accounts}
           isConnecting={isConnecting}
-          environment={environment}
+          network={network}
           onConnectAccount={onConnectAccount}
           onRefreshAccounts={onRefreshAccounts}
-          onEnvironmentSwitch={onEnvironmentSwitch}
+          onNetworkSwitch={onNetworkSwitch}
         />
       ) : (
         <WalletEmptyState
