@@ -48,11 +48,11 @@ export interface BalanceContext {
     frozen: string;
   };
   assetHub: {
-  free: string;
-  reserved: string;
-  frozen: string;
+    free: string;
+    reserved: string;
+    frozen: string;
   } | null;
-  total: string;  
+  total: string;
   symbol: string;
 }
 

@@ -58,7 +58,7 @@ export const RpcEndpoints = {
     'wss://sys.ibp.network/westmint',                    // IBP network Westend Asset Hub
   ],
 
-  // Paseo Testnet (community-run testnet, PAS token, SS58 42)
+  // Paseo Testnet (community-run testnet, PAS token, SS58 0)
   PASEO_RELAY_CHAIN: [
     'wss://paseo.rpc.amforc.com:443',                    // Amforc (widely referenced, Polkadot.js Apps)
     'wss://paseo-rpc.dwellir.com',                       // Dwellir
@@ -66,9 +66,12 @@ export const RpcEndpoints = {
     'wss://paseo.dotters.network',                       // Dotters
     'wss://pas-rpc.stakeworld.io',                       // StakeWorld
   ],
-  // Paseo Asset Hub / PassetHub
+  // Paseo Asset Hub (paraId 1000) — from Polkadot.js Apps; path is asset-hub-paseo not paseo-assethub
   PASEO_ASSET_HUB: [
-    'wss://sys.ibp.network/paseo-assethub',              // IBP PassetHub
+    'wss://asset-hub-paseo-rpc.n.dwellir.com',           // Dwellir (Polkadot.js Apps)
+    'wss://sys.ibp.network/asset-hub-paseo',             // IBP (Polkadot.js Apps)
+    'wss://asset-hub-paseo.dotters.network',             // Dotters (Polkadot.js Apps)
+    'wss://sys.turboflakes.io/asset-hub-paseo',          // TurboFlakes (Polkadot.js Apps)
   ],
 
   ROCSTAR_RELAY_CHAIN: [
