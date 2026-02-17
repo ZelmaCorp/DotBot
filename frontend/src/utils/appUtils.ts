@@ -117,6 +117,9 @@ export async function setupScenarioEngineDependencies(
 ): Promise<void> {
   await engine.initialize();
   const api = await dotbot.getApi();
+
+  // Sync scenario default chain with DotBot network so {{TOKEN}} resolves correctly (e.g. PAS on Paseo, WND on Westend)
+  engine.setDefaultEnvironment({ chain: dotbot.getNetwork(), mode: 'live' });
   
   // Set wallet account and signer for live mode transfers
   if (account) {

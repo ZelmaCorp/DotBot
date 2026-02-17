@@ -22,13 +22,12 @@ const ADVERSARIAL_ADMIN_ADDRESS = '5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68nd
 // =============================================================================
 
 export const HAPPY_PATH_TESTS: Scenario[] = [
-  // Basic transfer that should PASS (small amount)
+  // Basic transfer that should PASS (small amount); token is resolved at runtime from network (e.g. PAS on Paseo, WND on Westend)
   transferScenario({
     id: "happy-path-001",
     name: "Small Transfer to Alice (Should Pass)",
     amount: "0.2",
     recipient: "Alice",
-    token: "WND",
   }),
   
   // Basic transfer that should FAIL (insufficient balance)
@@ -51,7 +50,7 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
       {
         id: 'step-1',
         type: 'prompt',
-        input: 'Send 0.1 WND to Alice then send 0.1 WND to Bob',
+        input: 'Send 0.1 {{TOKEN}} to Alice then send 0.1 {{TOKEN}} to Bob',
       }
     ],
     expectations: [ // not sure about this
@@ -146,7 +145,7 @@ export const EDGE_CASE_TESTS: Scenario[] = [
         type: 'prompt',
         // Single prompt generates ONE ExecutionFlow with 2 transactions.
         // First: 0.5 (small). Second: calc returns (remaining + 0.2) so second transfer fails after first.
-        input: 'Send 0.5 WND to Alice, then send {{calc:insufficientBalance(0.5, 0.01)}} WND to Bob',
+        input: 'Send 0.5 {{TOKEN}} to Alice, then send {{calc:insufficientBalance(0.5, 0.01)}} {{TOKEN}} to Bob',
       },
     ],
     expectations: [

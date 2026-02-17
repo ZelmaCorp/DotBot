@@ -440,33 +440,19 @@ export class ExecutionArray {
   }
 
   private flushNotifications(): void {
-    // Flush status notifications
+    // Flush status notifications (already in a setTimeout from scheduleNotification, so run synchronously)
     if (this.pendingStatusNotifications.size > 0) {
       const items = Array.from(this.pendingStatusNotifications);
       this.pendingStatusNotifications.clear();
-      
-      // Use setTimeout for immediate next-tick notification
-      // (Removed requestIdleCallback to reduce delay - it can defer up to 50ms)
-      const notify = () => {
-        items.forEach((item) => {
-          this.notifyStatus(item);
-        });
-      };
-
-      setTimeout(notify, 0);
+      items.forEach((item) => {
+        this.notifyStatus(item);
+      });
     }
 
     // Flush progress notification
     if (this.pendingProgressNotification) {
       this.pendingProgressNotification = false;
-      
-      // Use setTimeout for immediate next-tick notification
-      // (Removed requestIdleCallback to reduce delay - it can defer up to 50ms)
-      const notify = () => {
-        this.notifyProgress();
-      };
-
-      setTimeout(notify, 0);
+      this.notifyProgress();
     }
 
     this.notificationTimeout = null;

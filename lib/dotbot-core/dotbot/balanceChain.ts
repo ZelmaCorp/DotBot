@@ -36,10 +36,6 @@ export async function getBalance(dotbot: DotBotInstance): Promise<{
 
   const relayAccountInfo = await dotbot.api!.query.system.account(address);
   const relayRaw = relayAccountInfo.toJSON();
-  dotbot.rpcLogger?.debug?.(
-    { network: dotbot.network, address: address ? `${address.slice(0, 8)}...` : undefined, relayAccountJson: relayRaw },
-    'getBalance: relay system.account response'
-  );
   const relayBalance = parseAccountData(relayRaw);
 
   let assetHubBalance: { free: string; reserved: string; frozen: string } | null = null;
@@ -53,10 +49,6 @@ export async function getBalance(dotbot: DotBotInstance): Promise<{
     try {
       const assetHubAccountInfo = await dotbot.assetHubApi.query.system.account(address);
       const assetHubRaw = assetHubAccountInfo.toJSON();
-      dotbot.rpcLogger?.debug?.(
-        { network: dotbot.network, address: address ? `${address.slice(0, 8)}...` : undefined, assetHubAccountJson: assetHubRaw },
-        'getBalance: Asset Hub system.account response'
-      );
       assetHubBalance = parseAccountData(assetHubRaw);
     } catch (err) {
       dotbot.rpcLogger?.debug?.(
@@ -67,17 +59,6 @@ export async function getBalance(dotbot: DotBotInstance): Promise<{
   }
 
   const totalFree = BigInt(relayBalance.free) + (assetHubBalance ? BigInt(assetHubBalance.free) : BigInt(0));
-  dotbot.rpcLogger?.info?.(
-    {
-      network: dotbot.network,
-      addressPrefix: address.slice(0, 8),
-      relayFree: relayBalance.free,
-      assetHubFree: assetHubBalance?.free ?? null,
-      total: totalFree.toString(),
-      assetHubConnected: !!dotbot.assetHubApi,
-    },
-    'getBalance: result'
-  );
   return { relayChain: relayBalance, assetHub: assetHubBalance, total: totalFree.toString() };
 }
 

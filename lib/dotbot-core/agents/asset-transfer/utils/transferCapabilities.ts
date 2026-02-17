@@ -162,8 +162,9 @@ function shouldUseKeepAlive(
     return true;
   }
 
-  if (capabilities.isAssetHub && capabilities.nativeTokenSymbol === 'DOT') {
-    return capabilities.hasTransferKeepAlive;
+  // Prefer transferKeepAlive on all Asset Hubs to avoid account reaping (ED) and "Transaction Invalid"
+  if (capabilities.isAssetHub && capabilities.hasTransferKeepAlive) {
+    return true;
   }
 
   return false;

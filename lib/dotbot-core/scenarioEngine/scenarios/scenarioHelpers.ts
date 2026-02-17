@@ -193,8 +193,12 @@ export function createScenario(id: string, name: string): ScenarioBuilder {
 // COMMON PATTERNS (Pre-built Builders)
 // =============================================================================
 
+/** Placeholder replaced at runtime with the current network's native token symbol (e.g. WND, PAS, DOT). */
+export const TOKEN_PLACEHOLDER = '{{TOKEN}}';
+
 /**
- * Happy path transfer scenario
+ * Happy path transfer scenario.
+ * Uses {{TOKEN}} in the prompt so the executor can substitute the correct symbol for the current network (e.g. PAS on Paseo, WND on Westend).
  */
 export function transferScenario(config: {
   id: string;
@@ -203,7 +207,7 @@ export function transferScenario(config: {
   recipient: string;
   token?: string;
 }): Scenario {
-  const token = config.token || 'WND';
+  const token = config.token ?? TOKEN_PLACEHOLDER;
   return createScenario(config.id, config.name)
     .category('happy-path')
     .tags('transfer', 'basic')
@@ -233,7 +237,7 @@ export function insufficientBalanceScenario(config: {
     .category('edge-case')
     .tags('transfer', 'insufficient-balance', 'error')
     .description(`Transfer ${config.amount} (more than available balance)`)
-    .withPrompt(`Send ${config.amount} to ${config.recipient}`)
+    .withPrompt(`Send ${config.amount} ${TOKEN_PLACEHOLDER} to ${config.recipient}`)
     .expectText({
       contains: ['insufficient', 'balance'],
       notContains: ['execution'],

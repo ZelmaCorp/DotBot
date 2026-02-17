@@ -7,7 +7,7 @@ import { DotBotSession } from '../sessionManager';
 import { sendSuccess, sendNotFound } from './routeUtils';
 
 /**
- * Verify chat belongs to session
+ * Verify chat belongs to session (same wallet, environment, and network)
  */
 export function verifyChatBelongsToSession(
   chat: any,
@@ -15,7 +15,8 @@ export function verifyChatBelongsToSession(
 ): boolean {
   return (
     chat.walletAddress === session.wallet.address &&
-    chat.environment === session.environment
+    chat.environment === session.environment &&
+    chat.network === session.network
   );
 }
 
@@ -54,6 +55,7 @@ export async function handleListChatInstances(
   const chats = await chatManager.queryInstances({
     walletAddress: session.wallet.address,
     environment: session.environment,
+    network: session.network,
     archived: false,
   });
 
