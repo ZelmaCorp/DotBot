@@ -187,7 +187,12 @@ export class StateAllocator {
 
   constructor(config: StateAllocatorConfig) {
     // Set defaults for ss58Format and seedPrefix
-    const ss58Format = config.ss58Format ?? (config.chain === 'polkadot' || config.chain === 'asset-hub-polkadot' ? 0 : 42);
+    const ss58Format = config.ss58Format ?? (
+      config.chain === 'polkadot' || config.chain === 'asset-hub-polkadot' ||
+      config.chain === 'paseo' || config.chain === 'asset-hub-paseo'
+        ? 0
+        : 42
+    );
     const seedPrefix = config.seedPrefix ?? 'dotbot-scenario';
     
     this.config = {
@@ -945,8 +950,10 @@ export class StateAllocator {
       'polkadot': 'polkadot',
       'kusama': 'kusama',
       'westend': 'westend',
+      'paseo': 'paseo',
       'asset-hub-polkadot': 'polkadot',
       'asset-hub-westend': 'westend',
+      'asset-hub-paseo': 'paseo',
     };
     return chainToNetwork[chain] || 'polkadot';
   }

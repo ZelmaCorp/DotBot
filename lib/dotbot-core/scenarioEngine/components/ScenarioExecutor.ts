@@ -46,6 +46,8 @@ import type { SubmittableExtrinsic } from '@polkadot/api/types';
 import { BN } from '@polkadot/util';
 import { KeyringSigner } from '../../executionEngine/signers/keyringSigner';
 import type { ExecutionPlan, ExecutionStep } from '../../prompts/system/execution/types';
+import { getNetworkTokenSymbol } from '../../prompts/system/knowledge/networkUtils';
+import type { Network } from '../../prompts/system/knowledge/types';
 import type {
   Scenario,
   ScenarioStep,
@@ -139,6 +141,9 @@ export interface ExecutorDependencies {
   
   /** Optional: Wallet address resolver (for getting the actual wallet address used in tests) */
   getWalletAddress?: () => string | undefined;
+
+  /** Optional: Current network for the scenario (used to resolve {{TOKEN}} in prompts to the native symbol, e.g. PAS, WND) */
+  getNetwork?: () => Network;
 }
 
 // =============================================================================
@@ -444,7 +449,17 @@ export class ScenarioExecutor {
     if (this.context) {
       this.context.currentPrompt = input;
     }
-    
+
+    // Replace {{TOKEN}} first so the variable processor doesn't treat it as a missing variable (and to use current network)
+    if (input.includes('{{TOKEN}}')) {
+      const network = this.deps?.getNetwork?.();
+      if (network) {
+        const symbol = getNetworkTokenSymbol(network);
+        input = input.replace(/\{\{TOKEN\}\}/g, symbol);
+        this.emit({ type: 'log', level: 'debug', message: `Resolved {{TOKEN}} to ${symbol} for network ${network}` });
+      }
+    }
+
     // Replace variables and expressions in the prompt
     // If expression evaluation fails, continue with original input (graceful degradation)
     try {
