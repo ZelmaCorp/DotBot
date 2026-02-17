@@ -419,10 +419,11 @@ router.get('/session/:sessionId/chats', async (req: Request, res: Response) => {
     // Get chat manager from DotBot instance
     const chatManager = session.dotbot.getChatManager();
     
-    // Query chat instances for this wallet and environment
+    // Query chat instances for this wallet, environment, and network
     const chats = await chatManager.queryInstances({
       walletAddress: session.wallet.address,
       environment: session.environment,
+      network: session.network,
       archived: false, // Only return non-archived chats
     });
 
