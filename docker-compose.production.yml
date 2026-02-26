@@ -41,6 +41,7 @@ services:
       - AI_PROVIDER=${AI_PROVIDER:-asi-one}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
       - STORAGE_DIR=/app/backend/data/storage
     volumes:
       - backend-data:/app/backend/data
