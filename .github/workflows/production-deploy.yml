@@ -187,7 +187,8 @@ jobs:
         cat > deploy/.env << EOF
         NODE_ENV=production
         DEBUG=false
-        LOG_LEVEL=warn
+        LOG_LEVEL=info
+        LOG_FORMAT=json
         
         # Domain Configuration
         DOMAIN_NAME=live.dotbot.zelmacorp.io
@@ -255,6 +256,12 @@ jobs:
             environment:
               - NODE_ENV=production
             restart: always
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 10s
             networks:
               - dotbot-production
         
@@ -273,7 +280,14 @@ jobs:
               - AI_PROVIDER=${AI_PROVIDER:-asi-one}
               - CORS_ORIGINS=${CORS_ORIGINS:-*}
               - LOG_LEVEL=${LOG_LEVEL:-info}
+              - LOG_FORMAT=json
             restart: always
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 10s
             networks:
               - dotbot-production
             depends_on:
@@ -362,6 +376,7 @@ jobs:
               -e AI_PROVIDER="${AI_PROVIDER:-asi-one}" \
               -e CORS_ORIGINS="${CORS_ORIGINS:-*}" \
               -e LOG_LEVEL="${LOG_LEVEL:-info}" \
+              -e LOG_FORMAT=json \
               ${{ needs.build.outputs.backend-image }}
           fi
           
