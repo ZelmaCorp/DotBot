@@ -2,6 +2,36 @@
 
 This document explains **why** DotBot is built the way it is. It covers design decisions, architectural patterns, and the rationale behind key choices.
 
+### Quick navigation
+
+| If you want to…                    | Go to                                                                 |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| See high-level boxes and layout    | [System Architecture](#system-architecture)                            |
+| Understand core principles         | [Core Design Principles](#core-design-principles)                     |
+| See where code lives               | [Module Structure](#module-structure)                                  |
+| Understand key choices             | [Design Decisions](#design-decisions)                                  |
+| Follow data/execution flow         | [Data Flow](#data-flow)                                                |
+| Call the backend or DotBot API     | [Backend API endpoints (reference)](#backend-api-endpoints-reference), [API.md](API.md) |
+| Conventions and style              | [Conventions](#conventions)                                            |
+| Dependencies                        | [Dependencies](#dependencies)                                          |
+
+### Backend API endpoints (reference)
+
+All DotBot backend routes use the **`/api/dotbot`** prefix. Full request/response details are in [API.md](API.md).
+
+| Method | Endpoint | Purpose |
+| ------ | -------- | ------- |
+| POST   | `/api/dotbot/session` | Create or get a DotBot session |
+| POST   | `/api/dotbot/chat` | Send a chat message (LLM + plan preparation) |
+| POST   | `/api/dotbot/session/:sessionId/execution/:executionId/start` | Start execution (client runs signing/broadcast) |
+| GET    | `/api/dotbot/session/:sessionId` | Get session state |
+| GET    | `/api/dotbot/session/:sessionId/chats` | List chats in session |
+| DELETE | `/api/dotbot/session/:sessionId` | Delete session |
+
+Simulation and health endpoints live under `/api/simulation` and `/api/health` respectively.
+
+---
+
 ## Table of Contents
 
 - [System Architecture](#system-architecture)
@@ -21,7 +51,7 @@ DotBot has frontend and backend components in a monorepo, designed for secure AP
 
 ### High-Level Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                         FRONTEND                            │
 │  ┌────────────────────────────────────────────────────┐     │
@@ -54,7 +84,7 @@ DotBot has frontend and backend components in a monorepo, designed for secure AP
 
 ### Project Structure
 
-```
+```text
 DotBot/                      # Monorepo root
 ├── package.json             # Workspace configuration (4 workspaces)
 │
@@ -124,9 +154,9 @@ DotBot/                      # Monorepo root
 
 **Solution**: Move AI services to the backend; keep blockchain operations client-side (wallet, signing, RPC).
 
-**Modularity**: The design stays modular: the frontend and `@dotbot/core` can run standalone (e.g. with API keys provided via env or a different backend). The backend is the recommended deployment for production so keys stay server-side.
+**Design vision**: There are two libraries — `@dotbot/core` and `@dotbot/express` (Express helper). The core is designed to support **multiple setups**; the developer decides where it runs (pluggable signer, pluggable AI — in principle any split). We don’t have capacity to robustly test or implement every setup. The setup we **implement and test** is frontend + backend with the split above (AI server-side, signing client-side). The backend is the recommended deployment so keys stay server-side.
 
-**Benefits**:
+**Benefits (current setup)**:
 1. **Security**: API keys never exposed to client when using the backend
 2. **Flexibility**: Easy to switch AI providers server-side
 3. **Cost control**: Rate limiting and usage monitoring
@@ -134,7 +164,7 @@ DotBot/                      # Monorepo root
 
 ### dotbot-core: Environment-Agnostic Design
 
-The `@dotbot/core` library is designed to work in both browser and Node.js:
+The `@dotbot/core` library is designed to work in both browser and Node.js and to support **multiple setups** — the developer decides where it runs (e.g. frontend only, backend only, or frontend + backend). Pluggable signers and AI allow any split in principle. We currently implement and test frontend + backend.
 
 ```typescript
 // Environment abstraction (lib/dotbot-core/env.ts)
@@ -170,31 +200,36 @@ import { AIService } from '@dotbot/core';
 
 ### API Flow: Chat Example
 
+All DotBot backend routes use the `/api/dotbot` prefix. See [Backend API endpoints (reference)](#backend-api-endpoints-reference) and [API.md](API.md) for full request/response shapes.
+
 ```typescript
-// 1. Frontend sends request to backend
-const response = await fetch('http://localhost:8000/api/chat', {
+// 1. Frontend: create or get session, then send chat message
+const sessionRes = await fetch('http://localhost:8000/api/dotbot/session', {
   method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ wallet: walletAddress }),
+});
+const { sessionId } = await sessionRes.json();
+
+const chatRes = await fetch('http://localhost:8000/api/dotbot/chat', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     message: 'Transfer 10 DOT to Alice',
-    provider: 'asi-one'
-  })
+    wallet: walletAddress,
+    sessionId,
+  }),
 });
 
-// 2. Backend (dotbot-express) handles request
-router.post('/api/chat', async (req, res) => {
-  const aiService = new AIService(); // Uses server-side API keys
-  const response = await aiService.sendMessage(req.body.message);
-  res.json({ response });
-});
-
-// 3. AI response returned to frontend
-// 4. Frontend uses dotbot-core to execute blockchain operations client-side
+// 2. Backend (@dotbot/express) runs LLM and plan preparation; returns execution state
+// 3. Frontend uses @dotbot/core to run signing and broadcast client-side (user approves first)
 ```
 
 ### Shared Library Development
 
 **Current Setup (Monorepo):**
-```
+
+```text
 DotBot/lib/dotbot-core     ← Shared by frontend and backend
          └─ (TypeScript path aliases allow importing as @dotbot/core)
 ```
@@ -322,6 +357,19 @@ const result = buildSafeTransferExtrinsic(api, params, capabilities);
 
 **Purpose:** Turnkey DotBot class and extracted logic modules.
 
+**Key methods (reference):**
+
+| Method / API | Purpose |
+| ------------- | ------- |
+| `DotBot.create(config)` | Factory: create DotBot with wallet, network, RPC managers, optional callbacks. |
+| `dotbot.chat(message, options?)` | Send message; run LLM, extract plan, prepare execution (no auto-execute). |
+| `dotbot.startExecution(executionId)` | Run prepared execution (signing + broadcast on client). |
+| `dotbot.getBalance()`, `dotbot.getChainInfo()` | Balance and chain info (RPC lazy-loaded). |
+| `dotbot.getHistory()` | Conversation history for LLM context (text messages only). |
+| `dotbot.currentChat` | Current chat instance; `getDisplayMessages()`, `onExecutionUpdate()`, etc. |
+
+Full signatures and request/response shapes: [API.md — ChatInstance API, Execution Engine](API.md).
+
 - **dotbot.ts**: Single class `DotBot` (~500 lines). Public API: `create()`, `chat()`, `getBalance()`, `getChainInfo()`, `prepareExecution()` (internal), `startExecution()`, chat lifecycle, events. RPC and execution system are **lazy-loaded** on first use (e.g. first `chat()` or `getBalance()`).
 - **dotbot/create.ts**: `getCreateArgs(config)` — builds RPC managers, ExecutionSystem, config, network, chat manager for constructor.
 - **dotbot/chatHandlers.ts**: `handleConversationResponse`, `handleExecutionResponse` (route LLM response to text vs execution flow).
@@ -342,7 +390,8 @@ const result = buildSafeTransferExtrinsic(api, params, capabilities);
 **Purpose**: Create production-safe extrinsics for specific operations.
 
 **Structure:**
-```
+
+```text
 lib/dotbot-core/agents/
 ├── baseAgent.ts              # Base class with common utilities
 ├── types.ts                  # Shared agent interfaces
@@ -382,7 +431,8 @@ lib/dotbot-core/agents/
 - **Executioner** handles signing, submission, and monitoring of the prepared ExecutionArray, keeping the process deterministic and auditable.
 
 **Structure:**
-```
+
+```text
 lib/dotbot-core/executionEngine/
 ├── executioner.ts           # Main execution coordinator
 ├── executionArray.ts        # Transaction queue management
@@ -446,7 +496,8 @@ lib/dotbot-core/executionEngine/
 **Purpose**: Provide network-aware configuration and LLM context for multi-network support.
 
 **Structure:**
-```
+
+```text
 lib/dotbot-core/prompts/system/knowledge/
 ├── types.ts                    # Network types and metadata
 ├── networkUtils.ts             # Network utility functions (20+)
@@ -493,7 +544,8 @@ lib/dotbot-core/prompts/system/knowledge/
 **Purpose**: Manage conversation instances with execution flow tracking and environment isolation.
 
 **Structure:**
-```
+
+```text
 lib/dotbot-core/chat/
 ├── chatInstance.ts              # ChatInstance class (conversation + execution state)
 ├── chatInstanceManager.ts       # Chat lifecycle management
@@ -1654,96 +1706,98 @@ export const STORAGE_KEYS = {
 
 ## Data Flow
 
+**Where steps run (current, implemented-and-tested setup):** When using the backend API, LLM/planning and plan preparation run on the server. Simulation can run on the backend (Chopsticks) or be skipped. Signing and broadcasting run on the client (frontend) where the wallet is; the backend never signs. The core is designed so that in principle other splits (e.g. frontend-only or backend-only) are possible; we currently implement and test this split.
+
 ### Transfer Operation Flow
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. USER INPUT                                               │
-│    User: "Send 5 DOT to Alice"                             │
+│    User: "Send 5 DOT to Alice"                              │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. LLM / PLANNING                                           │
-│    getLLMResponse() with system prompt + conversation      │
+│    getLLMResponse() with system prompt + conversation       │
 │    → Model returns ExecutionPlan (JSON): agent, action,     │
-│      params (e.g. AssetTransferAgent, transfer, amount,    │
+│      params (e.g. AssetTransferAgent, transfer, amount,     │
 │      recipient, chain). Format guardrail retries if prose.  │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 3. AGENT PREPARATION                                        │
 │                                                             │
-│    AssetTransferAgent.transfer({                           │
-│      sender: user.address,                                 │
-│      recipient: 'alice-address',                           │
-│      amount: '5',                                          │
-│      chain: 'assetHub',                                    │
-│      keepAlive: true                                       │
-│    })                                                      │
+│    AssetTransferAgent.transfer({                            │
+│      sender: user.address,                                  │
+│      recipient: 'alice-address',                            │
+│      amount: '5',                                           │
+│      chain: 'assetHub',                                     │
+│      keepAlive: true                                        │
+│    })                                                       │
 │                                                             │
-│    ┌─────────────────────────────────────────┐           │
-│    │ a) Validate addresses                   │           │
-│    │ b) Detect runtime capabilities          │           │
-│    │ c) Validate balance + ED                │           │
-│    │ d) Create production-safe extrinsic     │           │
-│    │ e) Optionally simulate with Chopsticks  │           │
-│    │    (via backend server)                 │           │
-│    └─────────────────────────────────────────┘           │
+│    ┌─────────────────────────────────────────┐              │
+│    │ a) Validate addresses                   │              │
+│    │ b) Detect runtime capabilities          │              │
+│    │ c) Validate balance + ED                │              │
+│    │ d) Create production-safe extrinsic     │              │
+│    │ e) Optionally simulate with Chopsticks  │              │
+│    │    (via backend server)                 │              │
+│    └─────────────────────────────────────────┘              │
 │                                                             │
-│    Returns: AgentResult {                                  │
-│      extrinsic: SubmittableExtrinsic,  ← Ready to sign!  │
-│      description: "Transfer 5 DOT to Alice",              │
-│      estimatedFee: "100000000",                           │
-│    }                                                       │
+│    Returns: AgentResult {                                   │
+│      extrinsic: SubmittableExtrinsic,  ← Ready to sign!     │
+│      description: "Transfer 5 DOT to Alice",                │
+│      estimatedFee: "100000000",                             │
+│    }                                                        │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 4. EXECUTION (Executioner)                                  │
 │                                                             │
-│    executioner.execute(agentResult)                        │
+│    executioner.execute(agentResult)                         │
 │                                                             │
-│    ┌─────────────────────────────────────────┐           │
-│    │ a) Simulation (optional, backend)      │           │
-│    │    - If enabled:                        │           │
-│    │      • HTTP request to backend          │           │
-│    │      • Backend runs Chopsticks          │           │
-│    │      • Show balance changes              │           │
-│    │      • Catch errors early                │           │
-│    │    - If disabled:                        │           │
-│    │      • Skip simulation                   │           │
-│    │      • Status: 'ready'                   │           │
-│    └─────────────────────────────────────────┘           │
+│    ┌─────────────────────────────────────────┐              │
+│    │ a) Simulation (optional, backend)       │              │
+│    │    - If enabled:                        │              │
+│    │      • HTTP request to backend          │              │
+│    │      • Backend runs Chopsticks          │              │
+│    │      • Show balance changes             │              │
+│    │      • Catch errors early               │              │
+│    │    - If disabled:                       │              │
+│    │      • Skip simulation                  │              │
+│    │      • Status: 'ready'                  │              │
+│    └─────────────────────────────────────────┘              │
 │                     ↓                                       │
-│    ┌─────────────────────────────────────────┐           │
-│    │ b) Signing                              │           │
-│    │    - Show user transaction details      │           │
-│    │    - Request approval                   │           │
-│    │    - Sign with wallet                   │           │
-│    └─────────────────────────────────────────┘           │
+│    ┌─────────────────────────────────────────┐              │
+│    │ b) Signing (client-side only)           │              │
+│    │    - Show user transaction details      │              │
+│    │    - Request approval                   │              │
+│    │    - Sign with wallet                   │              │
+│    └─────────────────────────────────────────┘              │
 │                     ↓                                       │
-│    ┌─────────────────────────────────────────┐           │
-│    │ c) Broadcasting                         │           │
-│    │    - Submit signed extrinsic to network │           │
-│    │    - Get transaction hash               │           │
-│    └─────────────────────────────────────────┘           │
+│    ┌─────────────────────────────────────────┐              │
+│    │ c) Broadcasting                         │              │
+│    │    - Submit signed extrinsic to network │              │
+│    │    - Get transaction hash               │              │
+│    └─────────────────────────────────────────┘              │
 │                     ↓                                       │
-│    ┌─────────────────────────────────────────┐           │
-│    │ d) Monitoring                           │           │
-│    │    - Wait for InBlock                   │           │
-│    │    - Wait for Finalized                 │           │
-│    │    - Extract events                     │           │
-│    └─────────────────────────────────────────┘           │
+│    ┌─────────────────────────────────────────┐              │
+│    │ d) Monitoring                           │              │
+│    │    - Wait for InBlock                   │              │
+│    │    - Wait for Finalized                 │              │
+│    │    - Extract events                     │              │
+│    └─────────────────────────────────────────┘              │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
 │ 5. RESULT                                                   │
 │                                                             │
 │    ExecutionResult {                                        │
-│      success: true,                                        │
-│      blockHash: "0x...",                                   │
-│      txHash: "0x...",                                      │
-│      events: [...]                                         │
-│    }                                                       │
+│      success: true,                                         │
+│      blockHash: "0x...",                                    │
+│      txHash: "0x...",                                       │
+│      events: [...]                                          │
+│    }                                                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -1778,7 +1832,8 @@ interface ExecutionResult {
 ### Network-Aware Data Flow
 
 **Network Selection Flow:**
-```
+
+```text
 1. Application initializes with network parameter ('polkadot', 'kusama', or 'westend')
    ↓
 2. Factory creates network-specific RPC managers
@@ -1798,7 +1853,8 @@ interface ExecutionResult {
 ```
 
 **Network Detection Flow:**
-```
+
+```text
 Connected to unknown chain
    ↓
 detectNetworkFromChainName(chainName)
