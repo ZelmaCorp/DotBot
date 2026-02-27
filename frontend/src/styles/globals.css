@@ -885,8 +885,11 @@ body {
 
 /* Input area styles */
 .input-area {
+  position: sticky;
+  bottom: 0;
   padding: 24px;
   border-top: 1px solid var(--border-primary);
+  z-index: 1;
 }
 
 .input-container {
