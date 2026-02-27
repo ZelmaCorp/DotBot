@@ -348,7 +348,10 @@ jobs:
           
           # If backend is currently running, send a graceful shutdown notice so the frontend
           # can show "new backend version available, please reload" before we stop it.
-          if docker ps -a --format '{{.Names}} {{.Status}}' | grep -q "dotbot-production-backend.*Up" && [ -n "${{ secrets.DEPLOY_SHUTDOWN_TOKEN }}" ]; then
+          # (Variable + safe numeric test so we never trigger script_stop)
+          BACKEND_UP=$(docker ps -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep -c "dotbot-production-backend.*Up" || true)
+          BACKEND_UP=${BACKEND_UP:-0}; case "$BACKEND_UP" in *[!0-9]*) BACKEND_UP=0;; esac
+          if [ "$BACKEND_UP" -gt 0 ] && [ -n "${{ secrets.DEPLOY_SHUTDOWN_TOKEN }}" ]; then
             echo "Sending shutdown notice to backend (user warning before teardown)..."
             curl -s -X POST \
               -H "Authorization: Bearer ${{ secrets.DEPLOY_SHUTDOWN_TOKEN }}" \
@@ -360,7 +363,9 @@ jobs:
           fi
           
           # Only cleanup if containers are not running properly
-          if ! docker ps -a --format '{{.Names}} {{.Status}}' | grep -q "dotbot-production-frontend.*Up"; then
+          FRONTEND_UP=$(docker ps -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep -c "dotbot-production-frontend.*Up" || true)
+          FRONTEND_UP=${FRONTEND_UP:-0}; case "$FRONTEND_UP" in *[!0-9]*) FRONTEND_UP=0;; esac
+          if [ "$FRONTEND_UP" -eq 0 ]; then
             echo "Frontend not running, performing cleanup..."
             docker stop dotbot-production-frontend dotbot-production-backend 2>/dev/null || true
             docker rm -f dotbot-production-frontend dotbot-production-backend 2>/dev/null || true
@@ -400,7 +405,9 @@ jobs:
           sleep 30
           
           # Check backend logs if it's restarting
-          if docker ps -a --format '{{.Names}} {{.Status}}' | grep -q "dotbot-production-backend.*Restarting"; then
+          BACKEND_RESTARTING=$(docker ps -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep -c "dotbot-production-backend.*Restarting" || true)
+          BACKEND_RESTARTING=${BACKEND_RESTARTING:-0}; case "$BACKEND_RESTARTING" in *[!0-9]*) BACKEND_RESTARTING=0;; esac
+          if [ "$BACKEND_RESTARTING" -gt 0 ]; then
             echo "⚠️ Backend is restarting, checking logs..."
             docker logs dotbot-production-backend --tail 50 || true
           fi
