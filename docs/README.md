@@ -6,7 +6,7 @@ Welcome to DotBot's documentation. This guide will help you understand what DotB
 
 DotBot is a ChatGPT-like web application that makes interacting with the Polkadot ecosystem simple and intuitive. Instead of navigating complex dApps and understanding technical details, users can perform blockchain operations through natural language conversations.
 
-**Architecture:** DotBot consists of a React frontend, TypeScript/Express backend, and shared core libraries in a monorepo structure. The backend securely manages AI provider API keys, while the shared `@dotbot/core` library handles blockchain operations for both frontend and backend.
+**Architecture:** DotBot is built around two libraries: **`@dotbot/core`** (core logic) and **`@dotbot/express`** (Express helper). The core is designed to support **multiple setups** — the developer decides where it runs (e.g. frontend + backend, frontend only, or backend only), with pluggable signers and AI. We currently implement and test the **frontend + backend** setup: React frontend, Express backend, shared `@dotbot/core`; the backend manages AI API keys, and the frontend runs signing and broadcast where the wallet is.
 
 ### Core Concept
 
@@ -77,18 +77,18 @@ That's it! DotBot handles the complexity behind the scenes.
 
 ## Architecture Overview
 
-DotBot follows a clean, scalable monorepo architecture:
+DotBot follows a clean, scalable monorepo architecture. The diagram below describes the **current, implemented-and-tested setup** (frontend + backend). The core supports other setups too (developer decides); we don’t yet robustly test those.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                  Frontend (React)                       │
 │               ChatGPT-like web interface                │
-│         Uses @dotbot/core (client-side mode)             │
+│                  Uses @dotbot/core                      │
 └─────────────────────────────────────────────────────────┘
                             ↓ HTTP API
 ┌─────────────────────────────────────────────────────────┐
 │              Backend (TypeScript/Express)               │
-│         @dotbot/express routes & middleware             │
+│         @dotbot/express (routes & middleware)           │
 │      Secure AI provider API key management              │
 │          Session management for DotBot instances        │
 └─────────────────────────────────────────────────────────┘
@@ -96,7 +96,7 @@ DotBot follows a clean, scalable monorepo architecture:
 ┌─────────────────────────────────────────────────────────┐
 │             @dotbot/core (Shared Library)               │
 │  DotBot class (dotbot.ts) + dotbot/*.ts logic modules   │
-│  Agents: Asset Transfer (others planned)                 │
+│  Agents: Asset Transfer (others planned)                │
 │  - Validate input, create production-safe extrinsics    │
 │  Execution Engine:                                      │
 │  - Optional Chopsticks simulation                       │
@@ -448,7 +448,7 @@ interface AgentResult {
 7. **Broadcasting Phase**: Sends signed transaction to network
 8. **Monitoring Phase**: Waits for finalization, updates ExecutionMessage in chat
 
-**Note:** Execution now requires explicit user approval (two-step pattern: prepare → approve → execute).
+**Note:** Execution requires explicit user approval (two-step pattern: prepare → approve → execute). When using the backend API, LLM and plan preparation run server-side; simulation, signing, and broadcast run on the client.
 
 ### Error Handling
 
