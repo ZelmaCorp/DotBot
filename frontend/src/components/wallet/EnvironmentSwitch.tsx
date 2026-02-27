@@ -12,6 +12,7 @@
 import React, { useState } from 'react';
 import { Info, Loader2 } from 'lucide-react';
 import type { Network } from '@dotbot/core';
+import ConfirmationModal from '../common/ConfirmationModal';
 import '../../styles/environment-switch.css';
 
 /** Networks offered in this switch (mainnet = Polkadot; testnets = Westend, Paseo) */
@@ -45,15 +46,32 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
   explanatoryText = true,
 }) => {
   const [isSwitching, setIsSwitching] = useState(false);
+  const [showWestendWarning, setShowWestendWarning] = useState(false);
   const currentNetwork: SwitchableNetwork = SWITCH_NETWORKS.some((o) => o.network === network)
     ? (network as SwitchableNetwork)
     : 'polkadot';
 
   const handleSelect = async (targetNetwork: SwitchableNetwork) => {
     if (isSwitching || disabled || targetNetwork === currentNetwork) return;
+    if (targetNetwork === 'westend') {
+      setShowWestendWarning(true);
+      return;
+    }
     setIsSwitching(true);
     try {
       await onSwitch(targetNetwork as unknown as Network);
+    } catch (error) {
+      console.error('Environment switch failed:', error);
+    } finally {
+      setIsSwitching(false);
+    }
+  };
+
+  const handleWestendConfirm = async (usePaseo: boolean) => {
+    setShowWestendWarning(false);
+    setIsSwitching(true);
+    try {
+      await onSwitch((usePaseo ? 'paseo' : 'westend') as unknown as Network);
     } catch (error) {
       console.error('Environment switch failed:', error);
     } finally {
@@ -93,6 +111,19 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
   const faucetUrl = isTestnet ? FAUCET_URLS[currentNetwork] ?? '' : '';
 
   return (
+    <>
+      <ConfirmationModal
+        isOpen={showWestendWarning}
+        onClose={() => setShowWestendWarning(false)}
+        onConfirm={() => handleWestendConfirm(true)}
+        onTertiary={() => handleWestendConfirm(false)}
+        title="Westend testnet warning"
+        message="Transactions on Westend are lately failing; the same error appears on Polkadot.js. For a stable testnet, we recommend Paseo."
+        confirmText="Use Paseo instead"
+        cancelText="Back"
+        tertiaryLabel="Switch to Westend anyway"
+        variant="warning"
+      />
     <div className="environment-switch-modal">
       <div className="environment-switch-content">
         <div className="environment-switch-header">
@@ -147,6 +178,7 @@ const EnvironmentSwitch: React.FC<EnvironmentSwitchProps> = ({
         )}
       </div>
     </div>
+    </>
   );
 };
 

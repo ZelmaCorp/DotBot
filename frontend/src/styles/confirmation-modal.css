@@ -111,6 +111,10 @@ body.modal-open .confirmation-modal-overlay * {
   color: var(--error-color, #ef4444);
 }
 
+.confirmation-modal-icon-warning {
+  color: var(--warning-color, #f59e0b);
+}
+
 .confirmation-modal-title {
   font-size: 1.25rem;
   font-weight: 600;
@@ -210,6 +214,15 @@ body.modal-open .confirmation-modal-overlay * {
 
 .confirmation-modal-button-info:hover:not(:disabled) {
   background-color: var(--brand-pink-hover, #d91a72);
+}
+
+.confirmation-modal-button-tertiary {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.confirmation-modal-button-tertiary:hover:not(:disabled) {
+  background-color: var(--bg-message-user);
 }
 
 .confirmation-modal-button:disabled {
