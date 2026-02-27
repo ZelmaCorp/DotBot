@@ -2,6 +2,28 @@
 
 This document provides comprehensive API documentation for integrating DotBot into your application.
 
+### Quick navigation (key sections)
+
+| If you want to…                          | Go to                                                                 |
+| --------------------------------------- | --------------------------------------------------------------------- |
+| Get running in 5 minutes                 | [Top 5 things to do first](#top-5-things-to-do-first)                 |
+| Call the backend REST API                | [Backend API](#backend-api)                                            |
+| Understand execution plans and flows     | [Execution plan example](#execution-plan-and-array-example)            |
+| Wire up the LLM (prompts + history)      | [LLM integration example](#llm-integration-example)                     |
+| Configure networks (Polkadot, Westend…)  | [Network Configuration](#network-configuration)                        |
+| Use RPC managers and utilities           | [Utilities API](#utilities-api)                                       |
+| See types and contracts                  | [OpenAPI Specification](#openapi-specification), [TypeScript Types](#typescript-types) |
+
+### Top 5 things to do first
+
+1. **Install and run** — Clone repo, `npm install`, `npm run build:core`, then `npm run dev:backend` and `npm run dev:frontend` ([Getting Started](#getting-started)).
+2. **Use the high-level API** — Prefer `DotBot.create()` + `dotbot.chat()` with an `llm` callback so RPC and signer stay lazy-loaded ([Basic Setup](#basic-setup)).
+3. **Call the backend** — All DotBot REST endpoints use the **`/api/dotbot`** prefix (e.g. `POST /api/dotbot/session`, `POST /api/dotbot/chat`). See [Backend API](#backend-api).
+4. **Understand the flow** — LLM returns an `ExecutionPlan`; the app prepares an `ExecutionArray` and shows it in the UI; the user approves, then signing and broadcast run on the client. See [Execution plan example](#execution-plan-and-array-example).
+5. **Pick a network** — Use `createRpcManagersForNetwork('westend')` or `'polkadot'` for network-specific RPC and knowledge. See [Network Configuration](#network-configuration).
+
+---
+
 ## Table of Contents
 
 - [Getting Started](#getting-started)
@@ -168,12 +190,12 @@ const result = await agent.transfer({
 
 DotBot has multi-network infrastructure:
 
-| Network | Token | Decimals | Type | Status | Use Case |
-|---------|-------|----------|------|--------|----------|
-| Polkadot | DOT | 10 | Mainnet | ✅ **Full Support** | Production operations |
-| Westend | WND | 12 | Testnet | ✅ **Full Support** | Safe testing |
-| Paseo | PAS | 10 | Testnet | ✅ **Full Support** | Safe testing (SS58 format 0) |
-| Kusama | KSM | 12 | Canary | ⚠️ **Partial** | Infrastructure ready; LLM knowledge base not yet implemented |
+| Network   | Token | Decimals | Type    | Status            | Use Case                                              |
+| --------- | ----- | -------- | ------- | ----------------- | ----------------------------------------------------- |
+| Polkadot  | DOT   | 10       | Mainnet | ✅ **Full Support** | Production operations                                 |
+| Westend   | WND   | 12       | Testnet | ✅ **Full Support** | Safe testing                                          |
+| Paseo     | PAS   | 10       | Testnet | ✅ **Full Support** | Safe testing (SS58 format 0)                          |
+| Kusama    | KSM   | 12       | Canary  | ⚠️ **Partial**     | Infrastructure ready; LLM knowledge base not yet implemented |
 
 **Status Legend:**
 - ✅ **Full Support**: Complete knowledge base + RPC infrastructure
@@ -185,7 +207,11 @@ DotBot has multi-network infrastructure:
 
 ## Backend API
 
-The DotBot backend provides REST API endpoints for AI chat and blockchain operations. The backend runs AI provider communication server-side (keeping API keys secure), while `@dotbot/core` is used by both the backend and the frontend (in client-side mode).
+DotBot is built around two libraries: **`@dotbot/core`** (the core logic) and **`@dotbot/express`** (a helper for Express). The core is designed to support **multiple setups** — the developer decides where it runs (e.g. frontend + backend, frontend only, or backend only). Pluggable signers and AI allow any split in principle. We don’t yet have capacity to robustly test or implement every setup; the one **implemented and tested** is frontend + backend as described below.
+
+The backend provides REST API endpoints for AI chat and blockchain operations. It runs AI provider communication server-side (keeping API keys secure) and uses `@dotbot/core`; the frontend also uses `@dotbot/core` for execution (signing, broadcast), which runs where the wallet is.
+
+**Endpoint naming:** All DotBot backend routes use the **`/api/dotbot`** prefix (e.g. `POST /api/dotbot/session`, `POST /api/dotbot/chat`). This keeps DotBot operations clearly separated from other API routes.
 
 ### Architecture
 
@@ -195,11 +221,12 @@ Frontend ←HTTP→ Backend (Express.js) ←→ @dotbot/core ←→ Polkadot Net
               AI Providers (ASI-One, Claude)
 ```
 
-**Key points:**
+**Key points (current, implemented-and-tested setup):**
 - **Secure API Key Management**: AI provider keys stored server-side
 - **Session Management**: Persistent DotBot instances across requests
-- **Shared Core**: `@dotbot/core` used in both backend and frontend (client-side mode)
-- **Multiple Modes**: Backend-driven AI + client-side blockchain ops, or fully client-side when keys are provided directly
+- **Shared Core**: `@dotbot/core` used in both backend and frontend; `@dotbot/express` is the Express helper
+- **Signing on client**: Transaction signing and broadcast run on the client (frontend) where the wallet is; the backend never has private keys
+- **Design vision**: Core is designed for frontend-only, backend-only, or frontend+backend; the split above is the one we currently implement and test
 
 ### Base URL
 
@@ -357,57 +384,53 @@ Create or get a DotBot session.
 
 #### `POST /api/dotbot/chat`
 
-Send a message to DotBot (with blockchain operations support).
+Send a message to DotBot (with blockchain operations support). The backend runs the LLM and plan preparation; the client runs execution (signing, broadcast) when the user approves.
 
 **Request:**
 ```json
 {
-  "sessionId": "session_1234567890_abc",
   "message": "Send 2 DOT to Bob",
+  "wallet": { "address": "5Grwva...", "name": "Alice", "source": "polkadot-js" },
+  "environment": "testnet",
+  "network": "westend",
+  "sessionId": "optional-session-id",
   "provider": "asi-one"
 }
 ```
 
 **Parameters:**
-- `sessionId` (string, required): Session ID from `POST /api/dotbot/session`
 - `message` (string, required): User's message
+- `wallet` (object, required): Wallet account (address, name, source)
+- `environment` (string, optional): `'mainnet'` or `'testnet'`. Default: `'mainnet'`
+- `network` (string, optional): Network (e.g. `'polkadot'`, `'westend'`). Inferred from environment if omitted
+- `sessionId` (string, optional): If omitted, a session is derived from wallet + environment and created or reused
 - `provider` (string, optional): AI provider. Default: `'asi-one'`
 
-**Response:**
+**Response:** Wrapped as `{ success, result, sessionId, chatId, timestamp }`. The `result` object contains:
 ```json
 {
   "response": "I've prepared a transfer of 2 DOT to Bob...",
-  "plan": {
-    "operations": [
-      {
-        "agent": "AssetTransferAgent",
-        "action": "transfer",
-        "params": {
-          "recipient": "Bob",
-          "amount": "2",
-          "chain": "assetHub"
-        }
-      }
-    ]
-  },
+  "plan": { "id": "...", "steps": [...] },
+  "executionId": "exec_...",
   "executed": false,
-  "conversationItems": [...]
+  "success": true
 }
 ```
+Use `result.executionId` when calling the execution/start endpoint or when running execution on the client.
 
 ---
 
 #### `POST /api/dotbot/session/:sessionId/execution/:executionId/start`
 
-Start execution of a prepared transaction (after user approval).
+Get execution state for a prepared plan. **Execution (signing, broadcast) runs on the client** where the wallet is available; the backend cannot sign. This endpoint returns the serialized `ExecutionArrayState` so the client can display or run execution locally.
 
 **Parameters (path):**
 - `sessionId` (string, required): Session ID
 - `executionId` (string, required): Execution ID from the chat response (ExecutionMessage)
 
-**Request body:** Optional; backend may accept additional options.
+**Request body:** Optional (e.g. `{ "autoApprove": false }`).
 
-**Response:** Execution status and result (e.g. success, txHash, blockHash) as the execution progresses or completes.
+**Response:** `{ success, executionId, state, timestamp }` where `state` is the execution state (ExecutionArrayState). The client uses this to run signing and broadcast in the frontend.
 
 ---
 
@@ -419,11 +442,12 @@ Get session details.
 ```json
 {
   "sessionId": "session_1234567890_abc",
-  "wallet": { "address": "...", "name": "Alice" },
-  "network": "westend",
   "environment": "testnet",
-  "chatId": "chat_1234567890_xyz",
-  "createdAt": "2026-01-14T12:00:00.000Z"
+  "network": "westend",
+  "wallet": { "address": "...", "name": "Alice", "source": "polkadot-js" },
+  "currentChatId": "chat_1234567890_xyz",
+  "createdAt": "2026-01-14T12:00:00.000Z",
+  "lastAccessed": "2026-01-14T12:00:00.000Z"
 }
 ```
 
@@ -615,12 +639,14 @@ const sessionId = await client.initialize({
   source: 'polkadot-js'
 }, 'westend');
 
-const chatResult = await client.chat(sessionId, 'Send 2 DOT to Bob');
+const chatResponse = await client.chat(sessionId, 'Send 2 DOT to Bob');
+const chatResult = chatResponse.result; // Backend wraps in { success, result, sessionId, chatId, timestamp }
 console.log(chatResult.response);
 
 if (chatResult.plan && userApproved) {
-  const execResult = await client.execute(sessionId, chatResult.executionId);
-  console.log('Transaction:', execResult.result.txHash);
+  // Get execution state from backend; then run signing + broadcast on the client (e.g. via DotBot.startExecution)
+  const { state } = await client.execute(sessionId, chatResult.executionId);
+  // Client uses state to run execution locally; txHash comes from that execution.
 }
 ```
 
@@ -1379,6 +1405,33 @@ console.log(result.response);
 // ExecutionFlow shown in UI for user approval
 // User clicks "Accept & Start" → startExecution() called
 ```
+
+#### LLM integration example
+
+Combined example: system prompt and conversation history passed to your LLM in one flow. DotBot builds the system prompt (network context, output mode override) and passes it with the user message and a `context` object. This is how the custom `llm` callback is used when you pass `dotbot.chat(message, { llm: ... })`.
+
+```typescript
+const result = await dotbot.chat("Send 3 DOT to Bob", {
+  llm: async (message, systemPrompt, context) => {
+    // message: current user message
+    // systemPrompt: built by DotBot (network, JSON-only override, etc.)
+    // context: { conversationHistory, turnContext?, walletAddress, network }
+    const response = await llmService.chat({
+      message,
+      systemPrompt,
+      history: context?.conversationHistory ?? [],
+    });
+    return response;  // must be the raw LLM response string
+  },
+  // Optional overrides (usually not needed):
+  // systemPrompt: "Custom system prompt",
+  // conversationHistory: [...],
+});
+
+// After the call: result.response (text), result.plan (ExecutionPlan if extracted)
+```
+
+**Context fields:** `context.conversationHistory` is the previous messages in LLM format (`[{ role, content }, ...]`); DotBot fills it from the current chat (or from `options.conversationHistory` if you passed it). `context` also includes `turnContext` (one-line balance summary for this turn), `walletAddress`, and `network` for use in prompts or logging. Your callback must return a `Promise<string>` (the raw LLM response).
 
 **Breaking Changes:**
 - ⚠️ v0.2.0: No longer auto-executes. Returns `executed: false`. User must approve via `startExecution()`.
@@ -2702,6 +2755,62 @@ const unsubscribe = executionArray.subscribe((state) => {
 
 ---
 
+### Execution plan and array example
+
+`ExecutionPlan` is the JSON structure the LLM returns; the runtime converts it into an `ExecutionArray` for execution. Below is a **concrete example** of a plan with two steps (two transfers).
+
+**ExecutionPlan (LLM output):**
+
+```json
+{
+  "id": "exec-abc123",
+  "originalRequest": "Send 5 DOT to Alice and 1 DOT to Bob",
+  "status": "pending",
+  "requiresApproval": true,
+  "createdAt": 1709000000000,
+  "steps": [
+    {
+      "id": "step-1",
+      "stepNumber": 1,
+      "agentClassName": "AssetTransferAgent",
+      "functionName": "transfer",
+      "parameters": {
+        "recipient": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+        "amount": "5",
+        "chain": "relay",
+        "keepAlive": true
+      },
+      "executionType": "extrinsic",
+      "status": "pending",
+      "description": "Transfer 5 DOT to Alice",
+      "requiresConfirmation": true,
+      "createdAt": 1709000000000
+    },
+    {
+      "id": "step-2",
+      "stepNumber": 2,
+      "agentClassName": "AssetTransferAgent",
+      "functionName": "transfer",
+      "parameters": {
+        "recipient": "5FHneW46xGXgs5mUivUymiY8qW1LWE2b2vMKc1bBqPDp4sYv",
+        "amount": "1",
+        "chain": "relay",
+        "keepAlive": true
+      },
+      "executionType": "extrinsic",
+      "status": "pending",
+      "description": "Transfer 1 DOT to Bob",
+      "requiresConfirmation": true,
+      "createdAt": 1709000000000
+    }
+  ]
+}
+```
+
+The runtime then builds an `ExecutionArray` from this plan (one item per step). After preparation, the client receives an `ExecutionArrayState` (with `items`, `currentIndex`, `isExecuting`, etc.) to drive the UI and run signing/broadcast when the user approves.
+
+---
+
 ## Settings Management API
 
 ### Simulation Configuration
@@ -2810,6 +2919,8 @@ disableSimulation(); // Same as updateSimulationConfig({ enabled: false })
 ---
 
 ## Utilities API
+
+Utilities are spread across the codebase; this section consolidates the main ones. For **network and chain helpers** (e.g. chain IDs, token decimals, knowledge base), see [Network Utilities](#network-utilities) and `lib/dotbot-core/prompts/system/knowledge/networkUtils.ts`.
 
 ### RpcManager
 
