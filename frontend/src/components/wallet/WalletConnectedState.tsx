@@ -6,8 +6,8 @@
  * Will be part of @dotbot/react package.
  */
 
-import React from 'react';
-import { Plus } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Plus, Check, Loader2 } from 'lucide-react';
 import type { Network } from '@dotbot/core';
 import { WalletAccount } from '../../types/wallet';
 import { useDebouncedClick } from '../../hooks/useDebounce';
@@ -15,6 +15,8 @@ import { getEnvironmentFromNetwork } from '../../utils/appUtils';
 import WalletAccountCard from './WalletAccountCard';
 import WalletAccountItem from './WalletAccountItem';
 import EnvironmentSwitch from './EnvironmentSwitch';
+
+const ADD_ACCOUNT_FEEDBACK_MS = 2500;
 
 interface WalletConnectedStateProps {
   accountName: string;
@@ -25,7 +27,7 @@ interface WalletConnectedStateProps {
   isConnecting: boolean;
   onDisconnect: () => void;
   onConnectAccount: (account: WalletAccount) => void;
-  onRefreshAccounts: () => void;
+  onRefreshAccounts: () => void | Promise<number>;
   onNetworkSwitch: (network: Network) => void;
 }
 
@@ -48,7 +50,46 @@ const WalletConnectedState: React.FC<WalletConnectedStateProps> = ({
 
   // Debounced handlers to prevent multiple rapid clicks
   const handleDisconnect = useDebouncedClick(onDisconnect, 500);
-  const handleRefreshAccounts = useDebouncedClick(onRefreshAccounts, 500);
+
+  const [addAccountMessage, setAddAccountMessage] = useState<{
+    type: 'refreshing' | 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleRefreshAccounts = useCallback(async () => {
+    if (addAccountMessage?.type === 'refreshing') return;
+    setAddAccountMessage({ type: 'refreshing', text: 'Refreshing…' });
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = null;
+    }
+    try {
+      const result = await Promise.resolve(onRefreshAccounts());
+      const count = typeof result === 'number' ? result : 0;
+      const text =
+        typeof result === 'number'
+          ? `Found ${count} account${count !== 1 ? 's' : ''}`
+          : 'Accounts updated';
+      setAddAccountMessage({ type: 'success', text });
+    } catch {
+      setAddAccountMessage({ type: 'error', text: 'Something went wrong' });
+    }
+    feedbackTimeoutRef.current = setTimeout(() => {
+      setAddAccountMessage(null);
+      feedbackTimeoutRef.current = null;
+    }, ADD_ACCOUNT_FEEDBACK_MS);
+  }, [onRefreshAccounts, addAccountMessage?.type]);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const isAddAccountBusy = addAccountMessage?.type === 'refreshing' || isConnecting;
 
   return (
     <div className="wallet-connected-state">
@@ -73,14 +114,22 @@ const WalletConnectedState: React.FC<WalletConnectedStateProps> = ({
         </div>
       )}
 
-      {/* Add Account Button */}
+      {/* Add Account Button – uses button body as message area for feedback */}
       <button
         onClick={handleRefreshAccounts}
-        className="wallet-add-account-btn"
-        disabled={isConnecting}
+        className={`wallet-add-account-btn wallet-add-account-btn--${addAccountMessage?.type ?? 'idle'}`}
+        disabled={isAddAccountBusy}
       >
-        <Plus className="wallet-add-icon" size={20} />
-        <span>Add Account</span>
+        {addAccountMessage?.type === 'refreshing' ? (
+          <Loader2 className="wallet-add-icon wallet-add-icon--spin" size={20} />
+        ) : addAccountMessage?.type === 'success' ? (
+          <Check className="wallet-add-icon" size={20} />
+        ) : (
+          <Plus className="wallet-add-icon" size={20} />
+        )}
+        <span>
+          {addAccountMessage?.text ?? 'Add Account'}
+        </span>
       </button>
 
       <EnvironmentSwitch
