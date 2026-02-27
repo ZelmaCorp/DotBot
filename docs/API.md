@@ -1361,10 +1361,14 @@ interface ChatOptions {
 interface ChatResult {
   response: string;
   plan?: ExecutionPlan;
+  executionArrayState?: ExecutionArrayState;  // Stateless mode: prepared state for client
+  executionId?: string;                         // Pass to startExecution()
   executed: boolean;
   success: boolean;
   completed: number;
   failed: number;
+  executionErrors?: string[];                  // When executed and some items failed (e.g. "Transaction Invalid")
+  backendSimulated?: boolean;
 }
 ```
 
@@ -1377,10 +1381,13 @@ interface ChatResult {
 **Returns:**
 - `response` (string): Bot's response or execution result
 - `plan` (ExecutionPlan, optional): Extracted execution plan if found
-- `executed` (boolean): Whether execution occurred (v0.2.0: always false until user approves)
-- `success` (boolean): Whether operation succeeded
-- `completed` (number): Number of completed operations
-- `failed` (number): Number of failed operations
+- `executionId` (string, optional): Id to pass to `startExecution()` when a plan was prepared
+- `executed` (boolean): `false` when returned from `chat()` (user must approve). After execution completes (e.g. in ScenarioEngine or when polling), callers may see an updated result with `executed: true` and final counts.
+- `success` (boolean): When `executed` is true, whether all execution items succeeded
+- `completed` (number): When `executed` is true, number of items that completed successfully
+- `failed` (number): When `executed` is true, number of items that failed
+- `executionErrors` (string[], optional): When `executed` is true and some items failed, error messages (e.g. `["Transaction Invalid"]`)
+- `backendSimulated` (boolean, optional): Whether the backend ran Chopsticks simulation for this flow
 
 **Behavior (v0.2.0):**
 1. Saves user message to chat history
