@@ -109,7 +109,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="settings-option-label">Enable Transaction Simulation</div>
                 <div className="settings-option-description">
                   Simulate transactions using Chopsticks before signing to preview effects and catch errors early.
-                  This adds 1-3 seconds of latency but improves safety by validating transactions before execution.
+                  This adds some latency but improves safety by validating transactions before execution.
                 </div>
               </div>
               <label className="settings-toggle">
