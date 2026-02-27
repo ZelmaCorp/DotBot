@@ -353,11 +353,42 @@ body {
 
 .sidebar-footer-expanded {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 12px;
   opacity: 1;
   transition: opacity 0.3s ease-in-out 0.1s;
+}
+
+.sidebar-footer-powered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.sidebar-footer-logo-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.sidebar-footer-polkadot-placeholder {
+  display: none;
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-footer-polkadot-placeholder.visible {
+  display: inline-block;
+}
+
+.sidebar-footer-polkadot-placeholder svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 .sidebar-footer-collapsed {
