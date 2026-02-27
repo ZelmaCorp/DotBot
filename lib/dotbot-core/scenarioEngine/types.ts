@@ -609,6 +609,9 @@ export interface StepResult {
     completed: number;
     failed: number;
   };
+
+  /** Error messages from execution items that failed (e.g. "Transaction Invalid"). */
+  executionErrors?: string[];
   
   /** Error if step failed */
   error?: {
@@ -675,6 +678,9 @@ export interface EvaluationResult {
   
   /** Recommendations */
   recommendations?: string[];
+
+  /** Error messages from execution failures (e.g. "Transaction Invalid"). Present when execution ran but had failures. */
+  executionErrors?: string[];
 }
 
 // =============================================================================
