@@ -407,9 +407,10 @@ const result = await agent.batchTransfer({
 
 ## Next Steps
 
-- **[Architecture Guide](./ARCHITECTURE.md)** - Understand design decisions
-- **[API Reference](./API.md)** - Integrate DotBot into your application
-- **[Contributing](../README.md#contributing)** - Help improve DotBot
+- **[Architecture Guide](./ARCHITECTURE.md)** - Design decisions and structure
+- **[API Reference](./API.md)** - Backend and core API
+- **[DevOps Guide](./DEVOPS.md)** - Deployment and CI/CD
+- **[Contributing](../README.md#contributing)** - How to contribute
 
 ## Getting Help
 
@@ -427,7 +428,7 @@ Every agent returns a standardized result:
 interface AgentResult {
   description: string;              // Human-readable description
   extrinsic: SubmittableExtrinsic; // Ready-to-sign transaction
-  estimatedFee?: string;           // Fee in Planck
+  estimatedFee?: string;           // Fee in smallest unit (decimals vary by network)
   warnings?: string[];             // Important notices
   metadata?: Record<string, any>;  // Additional data
   resultType: 'extrinsic' | 'data';
@@ -436,7 +437,7 @@ interface AgentResult {
 }
 ```
 
-### Execution Flow (v0.2.0)
+### Execution Flow
 
 1. **LLM Phase**: User message → LLM generates ExecutionPlan
 2. **Preparation Phase**: `prepareExecution()` orchestrates plan, adds ExecutionMessage to chat
