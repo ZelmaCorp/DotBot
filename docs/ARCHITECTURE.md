@@ -78,7 +78,7 @@ DotBot/                      # Monorepo root
 │   │   ├── prompts/        # LLM system prompts
 │   │   ├── services/       # AI, logger, simulation
 │   │   ├── storage/        # chatStorage, fileStorage
-│   │   ├── scenarioEngine/  # Testing framework
+│   │   ├── scenarioEngine/  # Testing framework (UI-integrated scenarios)
 │   │   └── env.ts           # Environment abstraction (browser/Node.js)
 │   │
 │   └── dotbot-express/      # @dotbot/express - Express integration
@@ -885,45 +885,7 @@ Agents must create and return complete, ready-to-sign extrinsics.
 - Agents are responsible for production-safe extrinsic creation
 - Executioner is simple and generic
 
-**Code Comparison:**
-
-Before (Metadata Approach):
-```typescript
-// Agent (200 lines)
-async transfer(params) {
-  // Validate
-  return { metadata: { amount, recipient, ... } };
-}
-
-// Executioner (500 lines of agent-specific logic)
-async execute(item) {
-  // Create session
-  // Rebuild extrinsic from metadata
-  // Manual address encoding
-  // Manual method selection
-  // Registry validation
-  // Then: simulate, sign, broadcast
-}
-```
-
-After (Extrinsic Approach):
-```typescript
-// Agent (200 lines)
-async transfer(params) {
-  // Validate
-  // Detect capabilities
-  // Create production-safe extrinsic
-  return { extrinsic: readyToSign };
-}
-
-// Executioner (150 lines, generic)
-async execute(item) {
-  // Extrinsic already perfect!
-  // Just: simulate, sign, broadcast
-}
-```
-
-(Updated: January 2026, see ARCHITECTURE_REVERSION_COMPLETE.md)
+**Summary:** Agent returns ready-to-sign extrinsic; executioner stays generic (simulate, sign, broadcast). Previously the executioner rebuilt from metadata (agent-specific logic, registry issues); reverted to agent-first.
 
 ---
 
@@ -1650,6 +1612,46 @@ export const STORAGE_KEYS = {
 
 ---
 
+### Decision 10: Two-Step Execution Pattern
+
+**Context:** Auto-execution after LLM prevented user review; global execution state blocked multiple flows.
+
+**Decision:** Two steps: (1) **Prepare** — `prepareExecution(plan)` orchestrates, adds ExecutionMessage to chat, UI shows "Accept & Start"; (2) **Execute** — `startExecution(executionId)` when user approves.
+
+**Rationale:** User safety (review before signing), multiple flows per conversation, state owned by ChatInstance. Breaking: `executeWithArrayTracking()` → use `prepareExecution()` + `startExecution(id)`; `chat()` no longer auto-executes.
+
+---
+
+### Decision 11: ScenarioEngine Architecture
+
+**Context:** Need to test LLM-driven behavior through the actual UI; deterministic entities for reproducibility.
+
+**Decision:** ScenarioEngine with EntityCreator (deterministic keypairs), StateAllocator (initial state), ScenarioExecutor (runs through UI via events), Evaluator (LLM-consumable logs). Event-driven; works in browser, console, or CI.
+
+**Rationale:** Testing through UI catches real UX issues; same seed → same addresses; RpcManager integration for health/failover.
+
+---
+
+### Decision 12: TypeScript Backend and Monorepo
+
+**Context:** Python backend unused; frontend had its own lib; code duplication and two languages.
+
+**Decision:** TypeScript backend (Express), `@dotbot/core` in root `lib/`, `@dotbot/express` for routes/middleware, npm workspaces, OpenAPI as contract, Prism mock, OpenAPITestRunner.
+
+**Rationale:** Single language, shared core, contract-first API, atomic changes across workspaces.
+
+---
+
+### Decision 13: LLM Output Format Guardrail
+
+**Context:** LLM sometimes returns prose instead of JSON ExecutionPlan; no ExecutionFlow shown.
+
+**Decision:** Three layers: (1) Prompt: JSON MODE + FINAL CHECK in system prompt; (2) Code: in `getLLMResponse()`, detect prose/format violation and retry once with correction prompt; (3) Frontend: show clear LLM ERROR when no plan extracted.
+
+**Rationale:** Mode identity and final check reduce violations; single retry handles residual variance; clear errors instead of silent failure.
+
+---
+
 ## Data Flow
 
 ### Transfer Operation Flow
@@ -2088,402 +2090,6 @@ class AgentError extends Error {
 2. **Chain Diversity**: Different parachains have different capabilities
 3. **XCM Complexity**: Cross-chain operations are complex
 4. **Performance**: Simulation adds latency
-
----
-
-### Decision 10: Two-Step Execution Pattern
-
-**Context:**
-- Initial implementation auto-executed transactions immediately after LLM response
-- Users had no opportunity to review transactions before signing
-- Execution state was global in DotBot, preventing multiple concurrent flows
-- No way to resume interrupted execution flows
-
-**Decision:**
-Implement two-step execution pattern:
-1. **Prepare**: `prepareExecution(plan)` - Orchestrates plan, adds ExecutionMessage to chat, shows UI for review
-2. **Execute**: `startExecution(executionId)` - Executes when user clicks "Accept & Start"
-
-**Rationale:**
-1. **User Safety**: Users can review transactions before signing
-2. **Better UX**: Clear separation between planning and execution
-3. **Multiple Flows**: Supports multiple independent execution flows per conversation
-4. **Resumable**: Interrupted flows can be rebuilt and resumed
-5. **State Ownership**: Execution state belongs to ChatInstance, not DotBot
-
-**Implementation:**
-```typescript
-// Step 1: Prepare (automatic after LLM response)
-await dotbot.prepareExecution(plan);
-// → Orchestrates ExecutionPlan → ExecutionArray
-// → Adds ExecutionMessage to chat timeline
-// → UI shows ExecutionFlow component with "Accept & Start" button
-
-// Step 2: Execute (user-triggered)
-await dotbot.startExecution(executionMessage.executionId);
-// → Executes specific ExecutionArray by ID
-// → Updates ExecutionMessage in chat as execution progresses
-```
-
-**Breaking Changes:**
-- ⚠️ **Removed**: `executeWithArrayTracking()` → use `prepareExecution()` + `startExecution(id)`
-- ⚠️ **Removed**: `onExecutionArrayUpdate()` → use `chat.onExecutionUpdate(id, callback)`
-- ⚠️ **Removed**: `currentExecutionArray` property → use `chat.getExecutionArray(id)`
-- ⚠️ **Changed**: `chat()` no longer auto-executes → returns `executed: false`, user must approve
-
-**Consequences:**
-- **Breaking**: Existing code using removed methods must migrate
-- **Feature**: User approval required before execution
-- **Feature**: Multiple execution flows per conversation
-- **Feature**: Execution flows can be resumed after interruption
-- **DX**: Cleaner API, better separation of concerns
-
-**History:**
-- v0.2.0 (PR #44, #45, January 2026): Two-step execution pattern introduced
-- v0.1.0: Auto-execution immediately after LLM response
-
----
-
-### Decision 11: ScenarioEngine Architecture
-
-**Context:**
-- Need systematic testing framework for DotBot's LLM-driven behavior
-- Must test through actual UI (not bypass it) to catch real issues
-- Need deterministic test entities for reproducible tests
-- Want to test across different execution modes (synthetic, emulated, live)
-- Need LLM-consumable evaluation logs for automated analysis
-
-**Decision:**
-Implement ScenarioEngine as a pluggable testing framework with four core components:
-1. **EntityCreator**: Deterministic test account generation
-2. **StateAllocator**: Initial state setup (balances, on-chain, local storage)
-3. **ScenarioExecutor**: Executes scenarios through DotBot UI via events
-4. **Evaluator**: Evaluates results and generates LLM-consumable logs
-
-**Rationale:**
-1. **UI Integration**: Testing through UI catches real user experience issues
-2. **Deterministic Entities**: Same seed → same addresses (reproducible tests)
-3. **Pluggable Design**: Works in browser, console, or CI environments
-4. **Event-Driven**: Observable execution for debugging and analysis
-5. **LLM-Consumable Logs**: Structured logs enable automated test analysis
-6. **Mode Flexibility**: Synthetic for speed, emulated for realism, live for confidence
-
-**Implementation:**
-```typescript
-// EntityCreator: Deterministic keypair generation
-const entityCreator = createEntityCreator('synthetic', {
-  seedPrefix: 'test',
-  ss58Format: 42, // Westend
-});
-const alice = await entityCreator.createKeypairEntity('Alice');
-// Same seed → same address every time
-
-// StateAllocator: Set up initial state
-const allocator = createStateAllocator('emulated', 'westend', {
-  entityResolver: (name) => entities.get(name),
-  rpcManagerProvider: () => ({ relayChainManager, assetHubManager }),
-});
-await allocator.allocateBalance('Alice', '100 DOT');
-
-// ScenarioExecutor: Execute through UI
-const executor = createScenarioExecutor();
-executor.setDependencies({ api, dotbot });
-executor.addEventListener((event) => {
-  // UI subscribes to events (inject-prompt, log, etc.)
-});
-await executor.executeScenario(scenario);
-
-// Evaluator: Evaluate results
-const evaluator = createEvaluator();
-evaluator.addEventListener((event) => {
-  // LLM-consumable logs
-});
-const result = evaluator.evaluate(scenario, stepResults);
-```
-
-**Key Design Choices:**
-
-1. **Deterministic Entity Creation**
-   - Uses Substrate derivation paths: `//{seedPrefix}/{name}`
-   - Same input → same address (critical for reproducible tests)
-   - Multisig addresses calculated deterministically from sorted signatories
-
-2. **RPC Manager Integration**
-   - StateAllocator uses RpcManager (not direct connections)
-   - Leverages health checks, failover, round-robin
-   - ExecutionSession locks API instance during transactions
-
-3. **Event-Driven Execution**
-   - Executor emits events, UI subscribes
-   - No direct UI dependencies (works in console)
-   - LLM-consumable logs for automated analysis
-
-4. **Pluggable Dependencies**
-   - Executor accepts DotBot instance, API, entity resolvers
-   - StateAllocator accepts RPC manager provider
-   - Enables testing in any environment
-
-**Alternatives Considered:**
-
-1. ❌ **Separate Test Harness (Bypass UI)**
-   - Problem: Doesn't catch UI-level issues
-   - Problem: Tests don't reflect real user experience
-   - Problem: UI changes break tests even if logic is correct
-
-2. ❌ **Non-Deterministic Entities**
-   - Problem: Tests not reproducible
-   - Problem: Hard to debug (addresses change each run)
-   - Problem: Can't hardcode addresses in scenarios
-
-3. ❌ **Direct API Connections**
-   - Problem: Doesn't leverage RPC management infrastructure
-   - Problem: No health checks or failover
-   - Problem: Duplicates existing functionality
-
-4. ✅ **Event-Driven Through UI with Deterministic Entities**
-   - Tests real user experience
-   - Reproducible and debuggable
-   - Leverages existing infrastructure
-   - Pluggable and environment-agnostic
-
-**Consequences:**
-
-✅ **Benefits:**
-- Tests reflect real user experience
-- Reproducible test results
-- LLM-consumable evaluation logs
-- Works in multiple environments (browser, console, CI)
-- Comprehensive test coverage (unit + integration)
-
-⚠️ **Trade-offs:**
-- Requires UI integration (but that's the point - test through UI)
-- More complex than simple unit tests (but more valuable)
-- Event-driven architecture adds some complexity (but enables observability)
-
-**Testing Strategy:**
-- Unit tests for each component (EntityCreator, StateAllocator, ScenarioExecutor, Evaluator)
-- Integration tests for end-to-end scenarios (optional, can use unit tests)
-- Manual verification scripts (removed - unit tests sufficient)
-
-**History:**
-- v0.2.0 (PR #50+, January 2026): Initial ScenarioEngine implementation
-  - EntityCreator with deterministic keypair generation
-  - StateAllocator with multi-mode support
-  - ScenarioExecutor with event-driven UI integration
-  - Evaluator with LLM-consumable logging
-
----
-
-### Decision 12: TypeScript Backend Migration and Monorepo Structure
-
-**Context:**
-- Initial backend was Python-based with FastAPI (was not used)
-- Frontend was React/TypeScript with separate lib folder
-- Code duplication between frontend lib and potential backend usage
-- Different languages complicated development workflow
-- Agent system was separate (Python-based Fetch.ai agents)
-
-**Decision:**
-Migrate to TypeScript backend with monorepo structure:
-1. Replace Python backend with Express.js/TypeScript backend
-2. Move `@dotbot/core` to project root `lib/` folder
-3. Create `@dotbot/express` library for backend Express integration
-4. Use npm workspaces for monorepo management
-5. Define API contract in `openapi.yaml` as base truth
-6. Use Prism for mock server generation
-7. Implement OpenAPI-based integration testing
-
-**Rationale:**
-
-1. **Type Safety Across Stack**: TypeScript everywhere (frontend, backend, shared libs)
-2. **Code Sharing**: `@dotbot/core` shared between frontend and backend without duplication
-3. **Developer Experience**: Single language, consistent tooling, easier debugging
-4. **Monorepo Benefits**: 
-   - Single dependency management
-   - Atomic cross-workspace changes
-   - Easier refactoring
-   - Better CI/CD
-5. **Contract-First API**: OpenAPI spec as single source of truth prevents drift
-6. **Testing Infrastructure**: Prism + OpenAPITestRunner ensure compliance
-
-**Implementation:**
-
-**Before (v0.1.0):**
-```
-DotBot/
-├── frontend/
-│   ├── src/lib/         # Frontend-only lib
-│   └── package.json
-├── backend/             # Python/FastAPI
-│   ├── main.py
-│   └── requirements.txt
-└── agents/              # Separate Python agents
-```
-
-**After (v0.2.0):**
-```
-DotBot/                  # Monorepo root
-├── package.json         # Workspaces: backend, frontend, lib/*
-├── lib/
-│   ├── dotbot-core/     # Shared core logic
-│   └── dotbot-express/  # Express integration
-├── backend/             # TypeScript/Express
-│   ├── src/
-│   ├── openapi.yaml
-│   └── package.json     # Depends on: @dotbot/core, @dotbot/express
-└── frontend/            # React/TypeScript
-    └── package.json     # Depends on: @dotbot/core
-```
-
-**API Structure:**
-
-```typescript
-// Shared core (lib/dotbot-core)
-export { DotBot } from './dotbot';
-export { AssetTransferAgent } from './agents/asset-transfer';
-export { AIService } from './services/ai/aiService';
-
-// Express integration (lib/dotbot-express)
-export { chatRouter } from './routes/chat';
-export { dotbotRouter } from './routes/dotbot';
-export { sessionManager } from './sessionManager';
-
-// Backend (backend/src)
-import express from 'express';
-import { chatRouter, dotbotRouter } from '@dotbot/express';
-
-const app = express();
-app.use('/api', chatRouter);
-app.use('/api', dotbotRouter);
-```
-
-**OpenAPI Contract Example:**
-
-```yaml
-# backend/openapi.yaml
-paths:
-  /api/chat:
-    post:
-      summary: Send a chat message
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                message: { type: string }
-                provider: { type: string, enum: [asi-one, claude] }
-      responses:
-        '200':
-          description: Chat response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChatResponse'
-```
-
-**Alternatives Considered:**
-
-1. ❌ **Keep Python Backend**
-   - Problem: Code duplication (Python backend can't use TypeScript lib)
-   - Problem: Different dev environments
-   - Problem: Type mismatches at API boundary
-
-2. ❌ **Polyrepo (Separate Repositories)**
-   - Problem: Dependency management complexity
-   - Problem: Hard to make atomic changes across packages
-   - Problem: Version synchronization issues
-
-3. ✅ **TypeScript Backend + Monorepo**
-   - Type safety across entire stack
-   - Code sharing without duplication
-   - Unified development environment
-   - Atomic cross-package changes
-
-**Consequences:**
-
-✅ **Benefits:**
-- Single language (TypeScript) across stack
-- Shared `@dotbot/core` logic (no duplication)
-- Better type safety (no JSON type mismatches)
-- Easier refactoring (changes propagate)
-- Consistent developer experience
-- OpenAPI ensures API contract compliance
-- Prism enables parallel frontend/backend development
-
-⚠️ **Trade-offs:**
-- Migration effort (Python → TypeScript)
-- Monorepo complexity (workspace management)
-- OpenAPI maintenance (must keep in sync)
-
-📊 **Migration Stats:**
-- **Deleted**: ~2000 lines Python backend
-- **Deleted**: Separate agents/ folder (now in `@dotbot/core`)
-- **Added**: `lib/dotbot-express` (~800 lines)
-- **Added**: `openapi.yaml` (1100 lines)
-- **Added**: OpenAPITestRunner (~400 lines)
-- **Added**: Prism integration
-- **Refactored**: Frontend to use shared `lib/dotbot-core`
-
-**Testing Infrastructure:**
-
-```bash
-# Run mock server (Prism)
-npm run mock
-
-# Test specific endpoint
-npm run test:endpoint /api/health
-
-# Test all endpoints
-npm run test:integration
-```
-
-**Future Extensions:**
-
-This architecture enables:
-1. **NPM Publishing**: Publish `@dotbot/core` and `@dotbot/express` to npm
-2. **Additional Backends**: Other frameworks can use `@dotbot/core` + `@dotbot/express`
-3. **Microservices**: Extract workspaces into separate services if needed
-4. **Shared Tooling**: ESLint, Prettier, TSConfig across all workspaces
-
-**History:**
-- v0.2.0 (PR #60+, January 2026): TypeScript backend migration, monorepo structure
-- v0.1.0: Python backend with FastAPI
-
----
-
-### Decision 13: LLM Output Format Guardrail (ExecutionPlan Reliability)
-
-**Context:**
-- The LLM (e.g. ASI-One) sometimes returns prose (e.g. "I've prepared a transaction flow with 1 step...") instead of a JSON ExecutionPlan, so no ExecutionFlow is shown and the user gets incorrect feedback.
-- Instruction-tuned models have a strong reflex to explain in prose; prompt instructions alone do not guarantee JSON-only output on every call.
-
-**Decision:**
-Use a three-layer approach to maximize ExecutionPlan reliability:
-
-1. **Output Mode Override (prompt)**: At the start of the system prompt, state that when responding with an ExecutionPlan the model is in **JSON MODE** — it is a JSON generator, not an assistant; emitting any prose is a failure. This gives a mode identity and reduces assistant-style reflexes.
-
-2. **Final Line Hard Stop (prompt)**: At the end of the system prompt, add a **FINAL CHECK BEFORE RESPONDING**: "If you are about to generate an ExecutionPlan: STOP. DELETE any prose. OUTPUT ONLY the \`\`\`json block." Models tend to treat final checks seriously.
-
-3. **Code-level safety net (llm.ts)**: In `getLLMResponse()`, after receiving the LLM response, if the response does not start with \`\`\`json and either (a) contains a JSON block later, or (b) looks like command prose (e.g. "I've prepared", "transaction flow", "Review the details below"), retry **once** with an injected system message: "You violated the output format... Return ONLY the JSON ExecutionPlan. NO prose." The retry almost always returns valid JSON. Frontend logs and displays a clear **LLM ERROR** message when no plan is extracted (so users and logs see correct feedback instead of silent failure).
-
-**Rationale:**
-- **Prompt layers**: Mode identity and final check reduce format violations without changing APIs.
-- **Retry**: Industry-standard for tool-calling systems; handles residual variance when the model still returns prose.
-- **Clear errors**: When no plan is extracted, the frontend shows an explicit error (and optional response preview) instead of misleading success or generic failure.
-
-**Consequences:**
-- System prompt is slightly longer (mode override + final check); prompt was also cleaned up and trimmed elsewhere.
-- One extra LLM call in the retry path when format violation is detected (single retry only).
-- Logs include `shouldRetryFormat`, `looksLikeCommandProse` for debugging detection.
-
-**Implementation:**
-- `lib/dotbot-core/prompts/system/loader.ts`: Output Mode Override block, FINAL CHECK block, compact rules and examples.
-- `lib/dotbot-core/dotbot/llm.ts`: Format check after first response; retry with correction prompt when appropriate; logging of guardrail decision.
-- `frontend/src/App.tsx`: When `plan` is missing but response looks like transfer prose, show a clear **LLM ERROR** message (e.g. "Model returned prose instead of ExecutionPlan...") with optional preview so users and logs see accurate feedback instead of incorrect success/failure. If context (e.g. balance) could not be obtained, a clean error message is shown instead of generic failure.
-
-**History:**
-- v0.2.x (January 2026): Three-layer guardrail (prompt mode + final check + code retry); RpcManager health check 30 min, clear on disconnect, STABILITY_DELAY_MS and getReadApi retry; frontend LLM error messaging; balance context via CHAT_HISTORY_MESSAGE_LIMIT and formatBalanceTurnContext.
 
 ---
 
