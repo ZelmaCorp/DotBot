@@ -2,21 +2,20 @@
  * Amount Normalization Utilities
  * 
  * Provides amount conversion functions for different input formats.
+ * Integer amounts (e.g. "1", 5) are interpreted as human token units (1 DOT, 5 DOT), not Planck.
  */
 
 import { BN } from '@polkadot/util';
 import { TransferCapabilities } from './transferCapabilities';
+import { integerAmountToPlanck } from './amountParser';
 
 /**
- * Normalize amount to BN, handling different input formats
- * 
- * Accepts:
- * - BN object (passthrough)
- * - Number (converted to BN)
- * - String integer: "15000000000" (converted to BN)
- * - String decimal: "1.5" (converted to Planck using chain decimals)
- * 
- * @param amount Amount in various formats
+ * Normalize amount to BN (Planck), handling different input formats.
+ *
+ * All string/number inputs are treated as human token units (DOT, KSM, etc.);
+ * they are converted to Planck using chain decimals. BN inputs are passed through.
+ *
+ * @param amount Amount in various formats (human string/number or BN already in Planck)
  * @param capabilities Chain capabilities for decimal conversion
  * @returns Amount as BN in smallest unit (Planck)
  */
@@ -30,9 +29,9 @@ export function normalizeAmountToBN(
 
   if (typeof amount === 'number') {
     if (!Number.isInteger(amount) || amount < 0) {
-      throw new Error(`Invalid amount: ${amount}. Must be a positive integer in Planck.`);
+      throw new Error(`Invalid amount: ${amount}. Must be a positive integer.`);
     }
-    return new BN(amount);
+    return integerAmountToPlanck(amount, capabilities.nativeDecimals);
   }
 
   if (typeof amount === 'string') {
@@ -60,7 +59,7 @@ export function normalizeAmountToBN(
       throw new Error(`Invalid amount format: ${amount}. Must be integer or decimal string.`);
     }
 
-    return new BN(amount);
+    return integerAmountToPlanck(amount, capabilities.nativeDecimals);
   }
 
   throw new Error(`Unsupported amount type: ${typeof amount}`);

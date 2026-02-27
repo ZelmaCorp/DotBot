@@ -3,6 +3,7 @@
  */
 
 import {
+  integerAmountToPlanck,
   parseAndValidateAmountWithCapabilities,
   parseAmount,
   formatAmount,
@@ -36,6 +37,17 @@ describe('Amount Parser Utilities', () => {
       specName: 'polkadot',
       specVersion: 1,
     };
+  });
+
+  describe('integerAmountToPlanck()', () => {
+    it('should always treat integer as human token units ("1" = 1 DOT)', () => {
+      expect(integerAmountToPlanck('1', 10).toString()).toBe('10000000000');
+      expect(integerAmountToPlanck('5', 10).toString()).toBe('50000000000');
+      expect(integerAmountToPlanck(1, 10).toString()).toBe('10000000000');
+    });
+    it('should multiply by 10^decimals (no heuristic)', () => {
+      expect(integerAmountToPlanck('10000000000', 10).toString()).toBe('100000000000000000000');
+    });
   });
 
   describe('parseAmount()', () => {
@@ -144,6 +156,16 @@ describe('Amount Parser Utilities', () => {
       const result = parseAndValidateAmountWithCapabilities(1.5, mockCapabilities);
 
       expect(result.toString()).toBe('15000000000');
+    });
+
+    it('should treat integer string "1" as 1 DOT (not 1 Planck)', () => {
+      const result = parseAndValidateAmountWithCapabilities('1', mockCapabilities);
+      expect(result.toString()).toBe('10000000000');
+    });
+
+    it('should treat integer string "10000000000" as 10e9 DOT (human)', () => {
+      const result = parseAndValidateAmountWithCapabilities('10000000000', mockCapabilities);
+      expect(result.toString()).toBe('100000000000000000000');
     });
 
     it('should include index in error message for batch transfers', () => {
