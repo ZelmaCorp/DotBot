@@ -18,6 +18,9 @@ interface ConfirmationModalProps {
   message: string;
   confirmText?: string;
   cancelText?: string;
+  /** Optional third button (e.g. "Switch to Westend anyway" in a warning). Renders between cancel and confirm. */
+  tertiaryLabel?: string;
+  onTertiary?: () => void;
   variant?: 'danger' | 'warning' | 'info';
   isLoading?: boolean;
 }
@@ -30,6 +33,8 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   message,
   confirmText = 'Confirm',
   cancelText = 'Cancel',
+  tertiaryLabel,
+  onTertiary,
   variant = 'danger',
   isLoading = false,
 }) => {
@@ -83,6 +88,9 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
             {variant === 'danger' && (
               <AlertTriangle className="confirmation-modal-icon confirmation-modal-icon-danger" size={20} />
             )}
+            {variant === 'warning' && (
+              <AlertTriangle className="confirmation-modal-icon confirmation-modal-icon-warning" size={20} />
+            )}
             <h2 className="confirmation-modal-title">{title}</h2>
           </div>
           <button 
@@ -107,6 +115,15 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           >
             {cancelText}
           </button>
+          {tertiaryLabel && onTertiary && (
+            <button
+              onClick={onTertiary}
+              className="confirmation-modal-button confirmation-modal-button-tertiary"
+              disabled={isLoading}
+            >
+              {tertiaryLabel}
+            </button>
+          )}
           <button
             onClick={handleConfirm}
             className={`confirmation-modal-button confirmation-modal-button-confirm confirmation-modal-button-${variant}`}
