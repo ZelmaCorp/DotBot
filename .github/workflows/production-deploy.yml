@@ -215,6 +215,7 @@ jobs:
         
         # Security
         SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+        DEPLOY_SHUTDOWN_TOKEN=${{ secrets.DEPLOY_SHUTDOWN_TOKEN }}
         
         # Application URLs
         # NOTE: Base URLs should NOT include /api suffix
@@ -243,7 +244,7 @@ jobs:
           echo "CLAUDE_API_KEY=${{ secrets.CLAUDE_API_KEY }}" >> deploy/.env
         fi
         
-        # Create docker-compose for production deployment with unique container names
+        # Create docker-compose for production deployment (single stack, ports 3020/3021)
         cat > deploy/docker-compose.production.yml << 'EOF'
         version: '3.8'
         
@@ -273,6 +274,7 @@ jobs:
             environment:
               - NODE_ENV=production
               - PORT=8000
+              - DEPLOY_SHUTDOWN_TOKEN=${DEPLOY_SHUTDOWN_TOKEN}
               - ASI_ONE_API_KEY=${ASI_ONE_API_KEY}
               - ASI_ONE_ENDPOINT=${ASI_ONE_ENDPOINT:-https://agentverse.ai/api/v1}
               - ASI_ONE_BASE_URL=${ASI_ONE_BASE_URL:-https://api.asi1.ai/v1}
@@ -344,6 +346,19 @@ jobs:
           # Login to GitHub Container Registry
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
+          # If backend is currently running, send a graceful shutdown notice so the frontend
+          # can show "new backend version available, please reload" before we stop it.
+          if docker ps | grep -q "dotbot-production-backend.*Up" && [ -n "${{ secrets.DEPLOY_SHUTDOWN_TOKEN }}" ]; then
+            echo "Sending shutdown notice to backend (user warning before teardown)..."
+            curl -s -X POST \
+              -H "Authorization: Bearer ${{ secrets.DEPLOY_SHUTDOWN_TOKEN }}" \
+              http://localhost:3021/api/internal/shutdown-notice || echo "Shutdown notice request failed (continuing deploy)."
+            echo "Waiting 30 seconds so users can see the reload banner..."
+            sleep 30
+          else
+            echo "Backend not running or DEPLOY_SHUTDOWN_TOKEN not set; skipping shutdown notice."
+          fi
+          
           # Only cleanup if containers are not running properly
           if ! docker ps | grep -q "dotbot-production-frontend.*Up"; then
             echo "Frontend not running, performing cleanup..."
@@ -357,7 +372,7 @@ jobs:
             echo "Containers are running, skipping cleanup..."
           fi
           
-          # Pull latest images and deploy with fallback strategy
+          # Pull latest images and deploy
           docker-compose -f docker-compose.production.yml pull
           docker-compose -f docker-compose.production.yml down --volumes || true
           
@@ -369,6 +384,7 @@ jobs:
             docker run -d --name dotbot-production-backend --network dotbot-production -p 3021:8000 \
               -e NODE_ENV=production \
               -e PORT=8000 \
+              -e DEPLOY_SHUTDOWN_TOKEN="$DEPLOY_SHUTDOWN_TOKEN" \
               -e ASI_ONE_API_KEY="$ASI_ONE_API_KEY" \
               -e ASI_ONE_ENDPOINT="${ASI_ONE_ENDPOINT:-https://agentverse.ai/api/v1}" \
               -e ASI_ONE_BASE_URL="${ASI_ONE_BASE_URL:-https://api.asi1.ai/v1}" \
@@ -392,7 +408,7 @@ jobs:
           # Verify deployment
           docker ps | grep dotbot-production
           
-          # Quick health check (Docker Compose health checks will handle retries)
+          # Quick health check
           curl -f http://localhost:3020/health || exit 1
           curl -f http://localhost:3021/api/health || exit 1
 

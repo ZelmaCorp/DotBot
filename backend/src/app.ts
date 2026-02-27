@@ -8,6 +8,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 // Import @dotbot/express - this automatically sets up console filters via its index.ts
 import { chatRouter, createLogger, dotbotRouter, errorHandler, notFoundHandler, requestLogger } from '@dotbot/express';
+import { isBackendGoingDown, shutdownHeaderMiddleware, shutdownNoticeRouter } from './deploy/shutdownNotice';
 
 dotenv.config();
 
@@ -84,6 +85,7 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
+app.use(shutdownHeaderMiddleware);
 
 /**
  * API Routes
@@ -111,9 +113,11 @@ app.get('/api/status', (req: Request, res: Response) => {
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     environment: NODE_ENV,
+    goingDown: isBackendGoingDown(),
     timestamp: new Date().toISOString()
   });
 });
+app.use('/api/internal', shutdownNoticeRouter);
 
 // Mount chat routes
 app.use('/api/chat', chatRouter);

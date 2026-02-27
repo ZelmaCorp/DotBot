@@ -3,6 +3,8 @@
  * Handles communication with the DotBot backend server
  */
 
+import { notifyBackendGoingDown } from './backendStatus';
+
 const BACKEND_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 export interface ChatRequest {
@@ -37,6 +39,11 @@ export async function sendChatMessage(request: ChatRequest): Promise<string> {
     body: JSON.stringify(request),
   });
 
+  const goingDownHeader = response.headers.get('X-Backend-Going-Down');
+  if (goingDownHeader && goingDownHeader.toLowerCase() === 'true') {
+    notifyBackendGoingDown();
+  }
+
   if (!response.ok) {
     const error: ErrorResponse = await response.json();
     throw new Error(error.message || 'Failed to send chat message');
@@ -52,6 +59,11 @@ export async function sendChatMessage(request: ChatRequest): Promise<string> {
 export async function getAvailableProviders(): Promise<string[]> {
   const response = await fetch(`${BACKEND_URL}/api/chat/providers`);
   
+  const goingDownHeader = response.headers.get('X-Backend-Going-Down');
+  if (goingDownHeader && goingDownHeader.toLowerCase() === 'true') {
+    notifyBackendGoingDown();
+  }
+
   if (!response.ok) {
     throw new Error('Failed to fetch providers');
   }
@@ -66,6 +78,10 @@ export async function getAvailableProviders(): Promise<string[]> {
 export async function checkBackendHealth(): Promise<boolean> {
   try {
     const response = await fetch(`${BACKEND_URL}/api/health`);
+    const goingDownHeader = response.headers.get('X-Backend-Going-Down');
+    if (goingDownHeader && goingDownHeader.toLowerCase() === 'true') {
+      notifyBackendGoingDown();
+    }
     return response.ok;
   } catch (error) {
     console.error('[Backend API] Health check failed:', error);
