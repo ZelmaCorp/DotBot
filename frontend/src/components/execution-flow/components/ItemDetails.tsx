@@ -19,7 +19,11 @@ export interface ItemDetailsProps {
 }
 
 const ItemDetails: React.FC<ItemDetailsProps> = ({ item }) => {
-  const isItemExecuting = item.status === 'executing' || item.status === 'signing' || item.status === 'broadcasting';
+  const isItemExecuting =
+    item.status === 'executing' ||
+    item.status === 'signing' ||
+    item.status === 'broadcasting' ||
+    item.status === 'in_block';
   const isItemCompleted = item.status === 'completed' || item.status === 'finalized';
   const isItemFailed = item.status === 'failed';
 
@@ -29,7 +33,7 @@ const ItemDetails: React.FC<ItemDetailsProps> = ({ item }) => {
       <MetadataSection metadata={item.metadata} />
       <ErrorSection item={item} isItemFailed={isItemFailed} />
       <ResultSection item={item} isItemCompleted={isItemCompleted} />
-      <ExecutingIndicator isItemExecuting={isItemExecuting} />
+      <ExecutingIndicator isItemExecuting={isItemExecuting} status={item.status} />
     </div>
   );
 };
