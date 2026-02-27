@@ -106,7 +106,7 @@ describe('AssetTransferAgent', () => {
         const result = await agent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
         });
 
         expect(result.extrinsic).toBeDefined();
@@ -131,7 +131,7 @@ describe('AssetTransferAgent', () => {
         const result = await agent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
           keepAlive: true,
         });
 
@@ -161,7 +161,7 @@ describe('AssetTransferAgent', () => {
         const result = await agent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
         });
 
         expect(result.estimatedFee).toBeDefined();
@@ -174,7 +174,7 @@ describe('AssetTransferAgent', () => {
         const error = await agent.transfer({
           address: INVALID_ADDRESSES.EMPTY,
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
         }).catch((e: unknown) => e) as AgentError;
 
         expect(error).toBeInstanceOf(AgentError);
@@ -185,7 +185,7 @@ describe('AssetTransferAgent', () => {
         const error = await agent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: INVALID_ADDRESSES.EMPTY,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
         }).catch(e => e);
 
         expect(error).toBeInstanceOf(AgentError);
@@ -196,7 +196,7 @@ describe('AssetTransferAgent', () => {
         const error = await agent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: TEST_ADDRESSES.ALICE,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
         }).catch(e => e);
 
         expect(error).toBeInstanceOf(AgentError);
@@ -233,7 +233,7 @@ describe('AssetTransferAgent', () => {
         const error = await agent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_DOT, // 1 DOT, but only 0.1 DOT available
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT, // 1 DOT, but only 0.1 DOT available
         }).catch(e => e);
 
         expect(error).toBeInstanceOf(AgentError);
@@ -249,7 +249,7 @@ describe('AssetTransferAgent', () => {
         const result = await agent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
           validateBalance: false,
         });
 
@@ -264,7 +264,7 @@ describe('AssetTransferAgent', () => {
         const error = await uninitializedAgent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
         }).catch(e => e);
 
         expect(error).toBeInstanceOf(AgentError);
@@ -279,7 +279,7 @@ describe('AssetTransferAgent', () => {
         const error = await agent.transfer({
           address: TEST_ADDRESSES.ALICE,
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_DOT,
+          amount: TEST_AMOUNTS_HUMAN.ONE_DOT,
         }).catch(e => e);
 
         expect(error).toBeInstanceOf(AgentError);
@@ -294,8 +294,8 @@ describe('AssetTransferAgent', () => {
         const result = await agent.batchTransfer({
           address: TEST_ADDRESSES.ALICE,
           transfers: [
-            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS.ONE_DOT },
-            { recipient: TEST_ADDRESSES.CHARLIE, amount: TEST_AMOUNTS.HALF_DOT },
+            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
+            { recipient: TEST_ADDRESSES.CHARLIE, amount: TEST_AMOUNTS_HUMAN.HALF_DOT },
           ],
         });
 
@@ -311,8 +311,8 @@ describe('AssetTransferAgent', () => {
         const result = await agent.batchTransfer({
           address: TEST_ADDRESSES.ALICE,
           transfers: [
-            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS.ONE_DOT },
-            { recipient: TEST_ADDRESSES.CHARLIE, amount: TEST_AMOUNTS.HALF_DOT },
+            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
+            { recipient: TEST_ADDRESSES.CHARLIE, amount: TEST_AMOUNTS_HUMAN.HALF_DOT },
           ],
         });
 
@@ -338,7 +338,7 @@ describe('AssetTransferAgent', () => {
       it('should throw AgentError for more than 100 transfers', async () => {
         const tooManyTransfers = Array.from({ length: 101 }, (_, i) => ({
           recipient: TEST_ADDRESSES.BOB,
-          amount: TEST_AMOUNTS.ONE_PLANCK,
+          amount: TEST_AMOUNTS_HUMAN.SMALL,
         }));
 
         const error = await agent.batchTransfer({
@@ -354,8 +354,8 @@ describe('AssetTransferAgent', () => {
         const error = await agent.batchTransfer({
           address: TEST_ADDRESSES.ALICE,
           transfers: [
-            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS.ONE_DOT },
-            { recipient: INVALID_ADDRESSES.EMPTY, amount: TEST_AMOUNTS.ONE_DOT },
+            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
+            { recipient: INVALID_ADDRESSES.EMPTY, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
           ],
         }).catch(e => e);
 
@@ -367,8 +367,8 @@ describe('AssetTransferAgent', () => {
         const error = await agent.batchTransfer({
           address: TEST_ADDRESSES.ALICE,
           transfers: [
-            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS.ONE_DOT },
-            { recipient: TEST_ADDRESSES.ALICE, amount: TEST_AMOUNTS.ONE_DOT },
+            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
+            { recipient: TEST_ADDRESSES.ALICE, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
           ],
         }).catch(e => e);
 
@@ -396,8 +396,8 @@ describe('AssetTransferAgent', () => {
         const error = await agent.batchTransfer({
           address: TEST_ADDRESSES.ALICE,
           transfers: [
-            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS.ONE_DOT },
-            { recipient: TEST_ADDRESSES.CHARLIE, amount: TEST_AMOUNTS.ONE_DOT },
+            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
+            { recipient: TEST_ADDRESSES.CHARLIE, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
           ],
         }).catch(e => e);
 
@@ -413,7 +413,7 @@ describe('AssetTransferAgent', () => {
         const error = await uninitializedAgent.batchTransfer({
           address: TEST_ADDRESSES.ALICE,
           transfers: [
-            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS.ONE_DOT },
+            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
           ],
         }).catch(e => e);
 
@@ -431,7 +431,7 @@ describe('AssetTransferAgent', () => {
         const error = await agent.batchTransfer({
           address: TEST_ADDRESSES.ALICE,
           transfers: [
-            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS.ONE_DOT },
+            { recipient: TEST_ADDRESSES.BOB, amount: TEST_AMOUNTS_HUMAN.ONE_DOT },
           ],
         }).catch(e => e);
 

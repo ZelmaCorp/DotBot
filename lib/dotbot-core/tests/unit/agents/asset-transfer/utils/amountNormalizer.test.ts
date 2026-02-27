@@ -42,11 +42,12 @@ describe('Amount Normalizer Utilities', () => {
       expect(result.toString()).toBe('1000000000000');
     });
 
-    it('should convert number to BN', () => {
+    it('should convert number to BN (as human token units)', () => {
       const result = normalizeAmountToBN(1000000000000, mockCapabilities);
 
       expect(BN.isBN(result)).toBe(true);
-      expect(result.toString()).toBe('1000000000000');
+      // 1000000000000 DOT with 10 decimals = 1000000000000 * 10^10 planck
+      expect(result.toString()).toBe('10000000000000000000000');
     });
 
     it('should throw error for negative number', () => {
