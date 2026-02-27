@@ -273,6 +273,183 @@ describe('ScenarioExecutor', () => {
         expect(results[0].error?.message).toContain('Prompt step requires input');
       });
 
+      it('should set step success false and capture executionErrors when chatResult has execution failure', async () => {
+        executor.setDependencies({ api: mockApi });
+
+        const scenario: Scenario = {
+          id: 'test-1',
+          name: 'Execution failure',
+          description: 'Test execution failure reflected in step result',
+          category: 'happy-path',
+          steps: [
+            {
+              id: 'step-1',
+              type: 'prompt',
+              input: 'Send 1 DOT to Alice',
+            },
+          ],
+          expectations: [],
+        };
+
+        const executePromise = executor.executeScenario(scenario);
+        await flushMicrotasks();
+
+        executor.notifyPromptProcessed();
+        await flushMicrotasks();
+
+        const chatResultWithFailure = {
+          response: 'Prepared transfer',
+          plan: {
+            id: 'plan-1',
+            steps: [{
+              agentClassName: 'AssetTransferAgent',
+              functionName: 'transfer',
+              parameters: { amount: '1', recipient: 'Alice' },
+              description: 'Transfer 1 DOT to Alice',
+              executionType: 'extrinsic',
+            }],
+            requiresApproval: false,
+          },
+          executed: true,
+          success: false,
+          completed: 0,
+          failed: 1,
+          executionErrors: ['Transaction Invalid'],
+        };
+
+        executor.notifyResponseReceived(chatResultWithFailure);
+        await flushMicrotasks();
+
+        const results = await executePromise;
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(false);
+        expect(results[0].executionStats).toEqual({
+          executed: true,
+          success: false,
+          completed: 0,
+          failed: 1,
+        });
+        expect(results[0].executionErrors).toEqual(['Transaction Invalid']);
+      });
+
+      it('should set step success true when chatResult has execution success', async () => {
+        executor.setDependencies({ api: mockApi });
+
+        const scenario: Scenario = {
+          id: 'test-1',
+          name: 'Execution success',
+          description: 'Test execution success reflected in step result',
+          category: 'happy-path',
+          steps: [
+            {
+              id: 'step-1',
+              type: 'prompt',
+              input: 'Send 1 DOT to Alice',
+            },
+          ],
+          expectations: [],
+        };
+
+        const executePromise = executor.executeScenario(scenario);
+        await flushMicrotasks();
+
+        executor.notifyPromptProcessed();
+        await flushMicrotasks();
+
+        const chatResultSuccess = {
+          response: 'Transfer completed',
+          plan: {
+            id: 'plan-1',
+            steps: [{
+              agentClassName: 'AssetTransferAgent',
+              functionName: 'transfer',
+              parameters: { amount: '1', recipient: 'Alice' },
+              description: 'Transfer 1 DOT to Alice',
+              executionType: 'extrinsic',
+            }],
+            requiresApproval: false,
+          },
+          executed: true,
+          success: true,
+          completed: 1,
+          failed: 0,
+        };
+
+        executor.notifyResponseReceived(chatResultSuccess);
+        await flushMicrotasks();
+
+        const results = await executePromise;
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(true);
+        expect(results[0].executionStats).toEqual({
+          executed: true,
+          success: true,
+          completed: 1,
+          failed: 0,
+        });
+        expect(results[0].executionErrors).toBeUndefined();
+      });
+
+      it('should set step success true when chatResult has plan but executed false (plan only)', async () => {
+        executor.setDependencies({ api: mockApi });
+
+        const scenario: Scenario = {
+          id: 'test-1',
+          name: 'Plan only',
+          description: 'Test plan prepared but not executed',
+          category: 'happy-path',
+          steps: [
+            {
+              id: 'step-1',
+              type: 'prompt',
+              input: 'Send 1 DOT to Alice',
+            },
+          ],
+          expectations: [],
+        };
+
+        const executePromise = executor.executeScenario(scenario);
+        await flushMicrotasks();
+
+        executor.notifyPromptProcessed();
+        await flushMicrotasks();
+
+        const chatResultPlanOnly = {
+          response: 'Review the details below and click Accept when ready',
+          plan: {
+            id: 'plan-1',
+            steps: [{
+              agentClassName: 'AssetTransferAgent',
+              functionName: 'transfer',
+              parameters: { amount: '1', recipient: 'Alice' },
+              description: 'Transfer 1 DOT to Alice',
+              executionType: 'extrinsic',
+            }],
+            requiresApproval: false,
+          },
+          executed: false,
+          success: false,
+          completed: 0,
+          failed: 0,
+        };
+
+        executor.notifyResponseReceived(chatResultPlanOnly);
+        await flushMicrotasks();
+
+        const results = await executePromise;
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(true);
+        expect(results[0].executionStats).toEqual({
+          executed: false,
+          success: false,
+          completed: 0,
+          failed: 0,
+        });
+      });
+
       // Note: delayBefore tests with prompt steps removed due to complex async timing issues with fake timers
       // These are better tested in integration tests with real timing
     });
