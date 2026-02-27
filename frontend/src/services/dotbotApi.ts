@@ -13,13 +13,21 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 /**
  * Inspect response headers for deploy-related signals.
  *
- * When the backend is in the process of shutting down during a blue-green
- * deploy it sets X-Backend-Going-Down: true. We surface that via a shared
- * notifier so the App can show a reload banner.
+ * When the backend is in the process of shutting down it sets
+ * X-Backend-Going-Down: true. We surface that via a shared notifier so
+ * the App can show a reload banner.
+ *
+ * The function is defensive so it works both in the browser and in tests
+ * where Response.headers may be missing or partially mocked.
  */
 function checkBackendGoingDown(response: Response): void {
-  const goingDownHeader = response.headers.get('X-Backend-Going-Down');
-  if (goingDownHeader && goingDownHeader.toLowerCase() === 'true') {
+  const headers: any = (response as any).headers;
+  if (!headers || typeof headers.get !== 'function') {
+    return;
+  }
+
+  const goingDownHeader = headers.get('X-Backend-Going-Down');
+  if (goingDownHeader && typeof goingDownHeader === 'string' && goingDownHeader.toLowerCase() === 'true') {
     notifyBackendGoingDown();
   }
 }
