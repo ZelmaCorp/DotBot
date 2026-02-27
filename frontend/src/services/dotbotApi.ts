@@ -1,13 +1,28 @@
 /**
  * DotBot API Client
- * 
+ *
  * Frontend client for communicating with backend DotBot API.
  * All AI communication happens on the backend - this is just a thin client.
  */
 
 import type { ChatResult, Environment, Network } from '@dotbot/core';
+import { notifyBackendGoingDown } from './backendStatus';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
+/**
+ * Inspect response headers for deploy-related signals.
+ *
+ * When the backend is in the process of shutting down during a blue-green
+ * deploy it sets X-Backend-Going-Down: true. We surface that via a shared
+ * notifier so the App can show a reload banner.
+ */
+function checkBackendGoingDown(response: Response): void {
+  const goingDownHeader = response.headers.get('X-Backend-Going-Down');
+  if (goingDownHeader && goingDownHeader.toLowerCase() === 'true') {
+    notifyBackendGoingDown();
+  }
+}
 
 /**
  * Helper to handle fetch errors with better error messages
@@ -115,6 +130,8 @@ export async function createDotBotSession(
 
       clearTimeout(timeoutId);
 
+      checkBackendGoingDown(response);
+
       if (!response.ok) {
         await handleFetchError(response, 'create DotBot session');
       }
@@ -163,6 +180,8 @@ export async function getDotBotSession(sessionId: string): Promise<DotBotSession
         'Content-Type': 'application/json',
       },
     });
+
+    checkBackendGoingDown(response);
 
     if (!response.ok) {
       await handleFetchError(response, 'get DotBot session');
@@ -214,6 +233,8 @@ export async function sendDotBotMessage(
       }),
     });
 
+    checkBackendGoingDown(response);
+
     if (!response.ok) {
       await handleFetchError(response, 'send message to DotBot');
     }
@@ -250,6 +271,8 @@ export async function startExecution(
         autoApprove,
       }),
     });
+
+    checkBackendGoingDown(response);
 
     if (!response.ok) {
       await handleFetchError(response, 'start execution');
@@ -291,6 +314,8 @@ export async function getExecutionState(
       },
     });
 
+    checkBackendGoingDown(response);
+
     if (!response.ok) {
       await handleFetchError(response, 'get execution state');
     }
@@ -320,6 +345,8 @@ export async function deleteDotBotSession(sessionId: string): Promise<{ success:
         'Content-Type': 'application/json',
       },
     });
+
+    checkBackendGoingDown(response);
 
     if (!response.ok) {
       await handleFetchError(response, 'delete DotBot session');

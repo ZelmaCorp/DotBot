@@ -34,6 +34,7 @@ import {
   sendDotBotMessage,
   type WalletAccount,
 } from './services/dotbotApi';
+import { subscribeBackendGoingDown } from './services/backendStatus';
 import './styles/globals.css';
 import './styles/chat-history.css';
 import './styles/chat-history-card.css';
@@ -80,6 +81,9 @@ const AppContent: React.FC = () => {
   
   // Network preference (mainnet = polkadot; testnet = westend | paseo)
   const [preferredNetwork, setPreferredNetwork] = useState<Network>('polkadot');
+
+  // Backend deploy warning (blue-green shutdown notice)
+  const [backendGoingDown, setBackendGoingDown] = useState(false);
   
   // Cleanup ScenarioEngine on unmount to prevent subscription leaks
   useEffect(() => {
@@ -103,6 +107,14 @@ const AppContent: React.FC = () => {
 
   // Note: Preloading removed - DotBot initialization handles connections directly
   // This matches staging behavior and prevents redundant connection attempts
+
+  // Subscribe to backend shutdown notices and show a global reload banner
+  useEffect(() => {
+    const unsubscribe = subscribeBackendGoingDown(() => {
+      setBackendGoingDown(true);
+    });
+    return unsubscribe;
+  }, []);
 
   // Initialize DotBot when wallet connects
   useEffect(() => {
@@ -711,6 +723,22 @@ const AppContent: React.FC = () => {
             />
           </div>
         </div>
+
+        {/* Backend deploy warning banner */}
+        {backendGoingDown && (
+          <div className="backend-warning-banner">
+            <span className="backend-warning-text">
+              There is a new backend version available. Please reload the page, as connection to the old backend will not work anymore.
+            </span>
+            <button
+              type="button"
+              className="backend-warning-reload"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </button>
+          </div>
+        )}
 
         {/* Main Body */}
         <div className="main-body">
