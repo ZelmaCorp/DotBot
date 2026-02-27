@@ -1,9 +1,5 @@
 # Known Issues
 
-## Transfer amount defaults to Planck
-
-Sometimes the transfer amount is understood as Planck
-
 ## Westend transfer sometimes failes
 
 Westend sometimes gives back `Transaction Invalid `
@@ -17,7 +13,8 @@ This is what we know from SubWallet:
 Most likely this is related to Westend not being stable at the moment.
 We did not used to have this issue previously.
 Polkadot.js gives the same error as of now.
-
-## ScenarioEngine does not traslates addresses like Alice
-
 When evaluating, the ScenarioEngine does not translate addresses like Alice, will give failure for matching address.
+
+## Sometimes DotBot gets stuck at "Preparing transaction flow..."
+
+Sometimes DotBot gets stuck at "Preparing transaction flow..." (rare)
