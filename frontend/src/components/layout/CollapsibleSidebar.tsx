@@ -2,13 +2,11 @@ import React from 'react';
 import dotbotLogo from '../../assets/dotbot-logo.svg';
 import iconWrite from '../../assets/icon-write.svg';
 import iconSearch from '../../assets/icon-search.svg';
-import iconTransactions from '../../assets/icon-transactions.svg';
 import fetchAiLogo from '../../assets/fetch_ai.svg';
 
 interface SidebarProps {
   onNewChat: () => void;
   onSearchChat: () => void;
-  onTransactions: () => void;
   isExpanded: boolean;
   onToggle: (expanded: boolean) => void;
 }
@@ -16,7 +14,6 @@ interface SidebarProps {
 const CollapsibleSidebar: React.FC<SidebarProps> = ({
   onNewChat,
   onSearchChat,
-  onTransactions,
   isExpanded,
   onToggle
 }) => {
@@ -34,11 +31,6 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
       icon: iconSearch,
       label: 'Search Chat',
       onClick: onSearchChat
-    },
-    {
-      icon: iconTransactions,
-      label: 'Transactions',
-      onClick: onTransactions
     }
   ];
 
