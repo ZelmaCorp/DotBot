@@ -67,10 +67,19 @@ describe('Amount Normalizer Utilities', () => {
       expect(result.toString()).toBe('15000000000'); // 1.5 * 10^10
     });
 
-    it('should parse integer string', () => {
+    it('should treat all integer strings as human token units', () => {
       const result = normalizeAmountToBN('1000000000000', mockCapabilities);
+      expect(result.toString()).toBe('10000000000000000000000'); // 1e12 DOT = 1e12 * 1e10 Planck
+    });
 
-      expect(result.toString()).toBe('1000000000000');
+    it('should treat integer string "1" as 1 DOT', () => {
+      const result = normalizeAmountToBN('1', mockCapabilities);
+      expect(result.toString()).toBe('10000000000');
+    });
+
+    it('should treat integer number as human (1 → 1 DOT)', () => {
+      const result = normalizeAmountToBN(1, mockCapabilities);
+      expect(result.toString()).toBe('10000000000');
     });
 
     it('should throw error for too many decimal places', () => {

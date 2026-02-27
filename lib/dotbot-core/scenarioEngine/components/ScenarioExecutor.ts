@@ -63,6 +63,7 @@ import {
   CALCULATION_FUNCTIONS,
   type CalculationContext,
 } from './expressionCalculations';
+import { integerAmountToPlanck, parseAmount } from '../../agents/asset-transfer/utils/amountParser';
 
 // =============================================================================
 // TYPES
@@ -1241,8 +1242,11 @@ export class ScenarioExecutor {
       throw new Error(`Entity address not found for ${fromEntity}`);
     }
 
-    // Parse amount to BN
-    const amountBN = new BN(amount);
+    // Amount is always in human token units (e.g. "1", "0.5") → convert to Planck
+    const decimals = this.deps!.api.registry.chainDecimals?.[0] ?? 10;
+    const amountBN = amount.includes('.')
+      ? parseAmount(amount, decimals)
+      : integerAmountToPlanck(amount, decimals);
     
     // Create transfer extrinsic
     const transferExtrinsic = this.deps!.api.tx.balances.transferKeepAlive(
