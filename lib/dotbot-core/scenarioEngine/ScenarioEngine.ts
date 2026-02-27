@@ -84,6 +84,7 @@ import {
 
 import type { ApiPromise } from '@polkadot/api';
 import type { Network } from '../prompts/system/knowledge/types';
+import { getNetworkSS58Format } from '../prompts/system/knowledge/networkUtils';
 
 // =============================================================================
 // DEFAULT CONFIGURATION
@@ -1725,9 +1726,14 @@ export class ScenarioEngine {
 
     const environment = scenario.environment || this.config.defaultEnvironment;
 
+    // Use DotBot's current network for SS58 format when available, so entity addresses
+    // (e.g. Alice) match the format DotBot uses in execution plans and expectedParams checks pass.
+    const network = this.getEffectiveNetwork(scenario);
+    const ss58Format = getNetworkSS58Format(network);
+
     // Create entity creator
     this.entityCreator = createEntityCreator(environment.mode, {
-      ss58Format: this.getSS58Format(environment.chain),
+      ss58Format,
     });
     await this.entityCreator.initialize();
 
@@ -1972,6 +1978,18 @@ export class ScenarioEngine {
       'asset-hub-paseo': 'paseo',
     };
     return chainToNetwork[chain] || 'polkadot';
+  }
+
+  /**
+   * Effective network for entity creation and address format.
+   * Prefer DotBot's current network so entity addresses (Alice, Bob, etc.) match
+   * the format used in execution plans and expectedParams evaluation passes.
+   */
+  private getEffectiveNetwork(scenario: Scenario): Network {
+    const fromDotBot = this.dotbot?.getNetwork?.() as Network | undefined;
+    if (fromDotBot) return fromDotBot;
+    const environment = scenario.environment || this.config.defaultEnvironment;
+    return this.getNetworkFromChain(environment.chain) as Network;
   }
 
   private getSS58Format(chain: string): number {
