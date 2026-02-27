@@ -1,7 +1,8 @@
 /**
  * Amount Parsing Utilities
- * 
- * Provides amount parsing and formatting functions for transfer operations.
+ *
+ * All amounts from user/LLM/scenarios are in human token units (DOT, KSM, etc.).
+ * They are converted to Planck using chain decimals; raw Planck is never accepted unless explicitly opted in elsewhere.
  */
 
 import { BN } from '@polkadot/util';
@@ -9,21 +10,31 @@ import { TransferCapabilities } from './transferCapabilities';
 import { AgentError } from '../../types';
 
 /**
+ * Convert an integer amount (string or number) from human token units to Planck.
+ * User/LLM always use token units (DOT, KSM, etc.); they never pass raw Planck unless explicitly specified.
+ * So "1" always means 1 DOT, not 1 Planck.
+ */
+export function integerAmountToPlanck(value: string | number, decimals: number): BN {
+  const whole = typeof value === 'number' ? new BN(value) : new BN(value);
+  const multiplier = new BN(10).pow(new BN(decimals));
+  return whole.mul(multiplier);
+}
+
+/**
  * Parse and validate amount with chain-specific decimals
  * 
  * CRITICAL: This method MUST use the chain's actual decimals, not hardcoded 10!
- * According to GLOBAL RULE #9: AMOUNTS ARE ALWAYS BN INTERNALLY
+ * Integer strings (e.g. "1", "5") are treated as human token units, not Planck, so "1" = 1 DOT.
  */
 export function parseAndValidateAmountWithCapabilities(
   amount: string | number,
   capabilities: TransferCapabilities,
   index?: number
 ): BN {
-  // Convert numbers to strings first to properly handle decimals
   const amountStr = typeof amount === 'number' ? amount.toString() : amount;
   const amountBN = amountStr.includes('.')
     ? parseAmount(amountStr, capabilities.nativeDecimals)
-    : new BN(amountStr);
+    : integerAmountToPlanck(amountStr, capabilities.nativeDecimals);
 
   if (amountBN.lte(new BN(0))) {
     const prefix = index !== undefined ? `Transfer ${index + 1}: ` : '';
@@ -38,7 +49,8 @@ export function parseAndValidateAmountWithCapabilities(
 }
 
 /**
- * Parse amount from human-readable format to Planck
+ * Parse amount from human-readable format (with decimal point) to Planck.
+ * For integer strings/numbers use integerAmountToPlanck.
  */
 export function parseAmount(amount: string | number, decimals = 10): BN {
   const amountStr = typeof amount === 'number' ? amount.toString() : amount;

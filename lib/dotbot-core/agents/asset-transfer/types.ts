@@ -15,7 +15,7 @@ export interface TransferParams extends BaseAgentParams {
   /** Recipient address */
   recipient: string;
   
-  /** Amount to transfer (can be in human-readable format like "1.5" or in Planck like "15000000000") */
+  /** Amount to transfer in human token units (e.g. "1", "1.5", 5). Always converted to Planck internally. */
   amount: string | number;
   
   /** Target chain for the transfer - defaults to 'assetHub' for DOT */
@@ -32,6 +32,7 @@ export interface BatchTransferParams extends BaseAgentParams {
   /** Array of transfers */
   transfers: Array<{
     recipient: string;
+    /** Amount in human token units (e.g. "1", "1.5"). Always converted to Planck internally. */
     amount: string | number;
   }>;
   
