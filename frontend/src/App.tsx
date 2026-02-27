@@ -534,25 +534,40 @@ const AppContent: React.FC = () => {
 
   const handleNewChat = async () => {
     if (!dotbot) return;
-    
+
     try {
+      setIsInitializing(true);
+      setInitializingMessage('New Chat');
+      setInitializingSubMessage('Starting new chat in current network...');
+
       const currentNetwork = dotbot.getNetwork();
       if (preferredNetwork !== currentNetwork) {
+        setInitializingSubMessage(`Switching to ${preferredNetwork}...`);
         await dotbot.switchEnvironment(getEnvironmentFromNetwork(preferredNetwork), preferredNetwork);
+        if (backendSessionId && selectedAccount) {
+          const walletAccount: WalletAccount = {
+            address: getAddressForNetwork(selectedAccount.address, preferredNetwork),
+            name: selectedAccount.name,
+            source: selectedAccount.source,
+          };
+          await createDotBotSession(walletAccount, getEnvironmentFromNetwork(preferredNetwork), preferredNetwork, backendSessionId);
+        }
       } else {
         await dotbot.clearHistory();
       }
-      
-      // Close history view and show the new chat
+
       setShowChatHistory(false);
       setShowWelcomeScreen(true);
-      // Update current chat ID to trigger re-render
       if (dotbot.currentChat) {
         setCurrentChatId(dotbot.currentChat.id);
       }
-      setConversationRefresh(prev => prev + 1);
+      setConversationRefresh((prev) => prev + 1);
     } catch (error) {
       console.error('Failed to create new chat:', error);
+    } finally {
+      setIsInitializing(false);
+      setInitializingMessage('');
+      setInitializingSubMessage('');
     }
   };
 
@@ -564,11 +579,19 @@ const AppContent: React.FC = () => {
       try {
         console.log(`Switching to ${network} (${environment})...`);
         await dotbot.switchEnvironment(environment, network);
+        if (backendSessionId && selectedAccount) {
+          const walletAccount: WalletAccount = {
+            address: getAddressForNetwork(selectedAccount.address, network),
+            name: selectedAccount.name,
+            source: selectedAccount.source,
+          };
+          await createDotBotSession(walletAccount, environment, network, backendSessionId);
+        }
         setShowWelcomeScreen(true);
         if (dotbot.currentChat) {
           setCurrentChatId(dotbot.currentChat.id);
         }
-        setConversationRefresh(prev => prev + 1);
+        setConversationRefresh((prev) => prev + 1);
         console.info(`Successfully switched to ${network}`);
       } catch (error) {
         console.error('Failed to switch network:', error);
@@ -583,17 +606,15 @@ const AppContent: React.FC = () => {
   };
 
   const handleSelectChat = async (chat: ChatInstanceData) => {
-    if (!dotbot) return;
-    
+    if (!dotbot || !selectedAccount || !backendSessionId) return;
+
     try {
       setIsInitializing(true);
-      
-      // Check if we need to switch network/environment
       const currentEnvironment = dotbot.getEnvironment();
       const currentNetwork = dotbot.getNetwork();
       const needsEnvironmentSwitch = chat.environment !== currentEnvironment;
       const needsNetworkSwitch = chat.network !== currentNetwork;
-      
+
       if (needsEnvironmentSwitch) {
         setInitializingMessage('Switching Environment');
         setInitializingSubMessage(`Switching from ${currentEnvironment} to ${chat.environment}...`);
@@ -604,18 +625,27 @@ const AppContent: React.FC = () => {
         setInitializingMessage('Loading Chat');
         setInitializingSubMessage('Restoring conversation...');
       }
-      
+
+      // Always sync backend session to the chat's network first (no mixed network / zombie state).
+      const walletAccount: WalletAccount = {
+        address: getAddressForNetwork(selectedAccount.address, chat.network),
+        name: selectedAccount.name,
+        source: selectedAccount.source,
+      };
+      await createDotBotSession(walletAccount, chat.environment, chat.network, backendSessionId);
+      setPreferredNetwork(chat.network);
+
+      // Then load chat: switches frontend DotBot env/network and restores conversation (frozen ops revivable).
       await dotbot.loadChatInstance(chat.id);
+
       setShowChatHistory(false);
       setShowWelcomeScreen(false);
-      // Update current chat ID to trigger re-render
       if (dotbot.currentChat) {
         setCurrentChatId(dotbot.currentChat.id);
       }
-      setConversationRefresh(prev => prev + 1);
+      setConversationRefresh((prev) => prev + 1);
     } catch (error) {
       console.error('Failed to load chat:', error);
-      // We might want to show an error toast/notification here
     } finally {
       setIsInitializing(false);
       setInitializingMessage('');
@@ -659,7 +689,6 @@ const AppContent: React.FC = () => {
       <CollapsibleSidebar
             onNewChat={handleNewChat}
             onSearchChat={handleSearchChat}
-        onTransactions={() => {}}
             isExpanded={isSidebarExpanded}
             onToggle={setIsSidebarExpanded}
       />
