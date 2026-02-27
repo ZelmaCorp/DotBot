@@ -26,7 +26,7 @@ Transaction executes on-chain
 2. **User Control**: You always control your private keys and approve transactions
 3. **Environment Support**: Clear separation between mainnet and testnet environments
 4. **Multi-Chain Ready**: Built for Polkadot, Kusama, and parachains
-5. **Production-Safe**: Automatic fallbacks and runtime capability detection
+5. **Production-safety in mind**: Automatic fallbacks and runtime capability detection (POC/alpha; not guaranteed production-ready)
 6. **Chat History**: Persistent conversation history with search and filtering
 
 ## Quick Start
@@ -83,7 +83,7 @@ DotBot follows a clean, scalable monorepo architecture:
 ┌─────────────────────────────────────────────────────────┐
 │                  Frontend (React)                       │
 │               ChatGPT-like web interface                │
-│         Uses @dotbot/core for blockchain ops            │
+│         Uses @dotbot/core (client-side mode)             │
 └─────────────────────────────────────────────────────────┘
                             ↓ HTTP API
 ┌─────────────────────────────────────────────────────────┐
@@ -230,7 +230,7 @@ DotBot supports multiple environments with clear separation:
 
 ## Chat History
 
-**NEW** in v0.2.0: Persistent chat history with search capability.
+Persistent chat history with search capability.
 
 - All conversations saved to localStorage (or external storage)
 - Search by title, content, or date
@@ -297,7 +297,7 @@ Smart endpoint management:
 
 ### 6. ScenarioEngine Testing Framework
 
-**NEW** in v0.2.0; **enhanced** with expression system:
+ScenarioEngine (with expression system):
 - Deterministic test entity creation
 - **Expression system**: Comparison operators (`gte`, `lte`, `between`, `matches`, `in`, etc.) and logical operators (`all`, `any`, `not`, `when`/`then`/`else`) in expectations; backward compatible with existing scenarios
 - **ExpressionValidator**: Validates expectations at scenario load time (circular refs, nesting depth, invalid operators)
@@ -484,5 +484,5 @@ DotBot handles this complexity automatically.
 
 ## License
 
-MIT License - See [LICENSE](../LICENSE) for details
+GNU General Public License v3.0 - See [LICENSE](../LICENSE) for details.
 
