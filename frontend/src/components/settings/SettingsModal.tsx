@@ -122,22 +122,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               </label>
             </div>
           </div>
-
-          {/* Future settings sections - TODO */}
-          <div className="settings-section">
-            <h3 className="settings-section-title">General</h3>
-            <div className="settings-placeholder">TODO: General settings</div>
-          </div>
-
-          <div className="settings-section">
-            <h3 className="settings-section-title">Advanced</h3>
-            <div className="settings-placeholder">TODO: Advanced settings</div>
-          </div>
-
-          <div className="settings-section">
-            <h3 className="settings-section-title">About</h3>
-            <div className="settings-placeholder">TODO: About info</div>
-          </div>
         </div>
       </div>
     </div>
