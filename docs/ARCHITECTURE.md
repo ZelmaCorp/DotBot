@@ -17,7 +17,7 @@ This document explains **why** DotBot is built the way it is. It covers design d
 
 ## System Architecture
 
-DotBot is a distributed system with frontend and backend components, designed for secure API key management and scalable blockchain operations.
+DotBot has frontend and backend components in a monorepo, designed for secure API key management and scalable blockchain operations.
 
 ### High-Level Architecture
 
@@ -120,15 +120,17 @@ DotBot/                      # Monorepo root
 
 ### Design Rationale: Why Backend?
 
-**Problem**: AI provider API keys exposed in frontend code
+**Problem**: AI provider API keys must not be exposed in frontend code.
 
-**Solution**: Move AI services to backend, keep blockchain operations client-side
+**Solution**: Move AI services to the backend; keep blockchain operations client-side (wallet, signing, RPC).
+
+**Modularity**: The design stays modular: the frontend and `@dotbot/core` can run standalone (e.g. with API keys provided via env or a different backend). The backend is the recommended deployment for production so keys stay server-side.
 
 **Benefits**:
-1. **Security**: API keys never exposed to client
+1. **Security**: API keys never exposed to client when using the backend
 2. **Flexibility**: Easy to switch AI providers server-side
-3. **Cost Control**: Rate limiting and usage monitoring
-4. **Hybrid Architecture**: Blockchain ops stay client-side (leverages user's wallet)
+3. **Cost control**: Rate limiting and usage monitoring
+4. **Hybrid**: Blockchain ops stay client-side (user's wallet)
 
 ### dotbot-core: Environment-Agnostic Design
 
@@ -1659,7 +1661,15 @@ export const STORAGE_KEYS = {
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 2. AGENT PREPARATION                                        │
+│ 2. LLM / PLANNING                                           │
+│    getLLMResponse() with system prompt + conversation      │
+│    → Model returns ExecutionPlan (JSON): agent, action,     │
+│      params (e.g. AssetTransferAgent, transfer, amount,    │
+│      recipient, chain). Format guardrail retries if prose.  │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 3. AGENT PREPARATION                                        │
 │                                                             │
 │    AssetTransferAgent.transfer({                           │
 │      sender: user.address,                                 │
@@ -1686,7 +1696,7 @@ export const STORAGE_KEYS = {
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 3. EXECUTION (Executioner)                                  │
+│ 4. EXECUTION (Executioner)                                  │
 │                                                             │
 │    executioner.execute(agentResult)                        │
 │                                                             │
@@ -1724,7 +1734,7 @@ export const STORAGE_KEYS = {
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 4. RESULT                                                   │
+│ 5. RESULT                                                   │
 │                                                             │
 │    ExecutionResult {                                        │
 │      success: true,                                        │
