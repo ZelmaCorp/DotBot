@@ -5,9 +5,9 @@ This document provides comprehensive API documentation for integrating DotBot in
 ## Table of Contents
 
 - [Getting Started](#getting-started)
-- [Backend API](#backend-api) ← NEW in v0.2.0
-- [OpenAPI Specification](#openapi-specification) ← NEW in v0.2.0
-- [Integration Testing](#integration-testing) ← NEW in v0.2.0
+- [Backend API](#backend-api)
+- [OpenAPI Specification](#openapi-specification)
+- [Integration Testing](#integration-testing)
 - [Core Concepts](#core-concepts)
 - [Multi-Network Configuration](#multi-network-configuration)
 - [DotBot Core Multi-Network Support](#dotbot-core-multi-network-support)
@@ -52,8 +52,8 @@ npm run dev:frontend
 DotBot/
 ├── package.json         # Workspace root (4 workspaces)
 ├── lib/
-│   ├── dotbot-core/     # Shared blockchain logic
-│   └── dotbot-express/  # Express integration
+│   ├── dotbot-core/     # Shared core library (frontend + backend)
+│   └── dotbot-express/  # Express integration (backend routes, middleware, Chopsticks)
 ├── backend/             # TypeScript/Express backend
 └── frontend/            # React frontend
 ```
@@ -66,7 +66,7 @@ If using DotBot libraries in your own project:
 npm install @polkadot/api @polkadot/util @polkadot/util-crypto
 ```
 
-**Note:** In v0.2.0, `@dotbot/core` and `@dotbot/express` are workspace packages. Future versions will publish to npm for standalone installation.
+**Note:** `@dotbot/core` and `@dotbot/express` are currently workspace packages within this monorepo. Future versions will publish to npm for standalone installation.
 
 ### Basic Setup
 
@@ -105,12 +105,12 @@ const result = await dotbot.chat("Send 5 DOT to Alice", {
 console.log(result.response);  // Text or execution plan; result.executed is false until user approves
 ```
 
-**Why DotBot?**
-- 🎯 Natural language interface - just chat!
-- 🤖 Handles agents, orchestration, and execution automatically
-- 🔐 Manages signing requests and user confirmations
-- 📊 Provides execution status updates
-- ✨ Network-aware (correct tokens, knowledge, etc.)
+**Why use the high-level API?**
+- Natural language interface
+- Handles agents, orchestration, and execution automatically
+- Manages signing requests and user confirmations
+- Provides execution status updates
+- Network-aware (correct tokens, LLM knowledge, etc.)
 
 ---
 
@@ -173,7 +173,7 @@ DotBot has multi-network infrastructure:
 | Polkadot | DOT | 10 | Mainnet | ✅ **Full Support** | Production operations |
 | Westend | WND | 12 | Testnet | ✅ **Full Support** | Safe testing |
 | Paseo | PAS | 10 | Testnet | ✅ **Full Support** | Safe testing (SS58 format 0) |
-| Kusama | KSM | 12 | Canary | ⚠️ **Partial** | Kusama ecosystem (coming soon) |
+| Kusama | KSM | 12 | Canary | ⚠️ **Partial** | Infrastructure ready; LLM knowledge base not yet implemented |
 
 **Status Legend:**
 - ✅ **Full Support**: Complete knowledge base + RPC infrastructure
@@ -187,7 +187,7 @@ DotBot has multi-network infrastructure:
 
 ## Backend API
 
-**NEW** in v0.2.0: DotBot backend provides REST API endpoints for AI chat and blockchain operations.
+The DotBot backend provides REST API endpoints for AI chat and blockchain operations. The backend runs AI provider communication server-side (keeping API keys secure), while `@dotbot/core` is used by both the backend and the frontend (in client-side mode).
 
 ### Architecture
 
@@ -197,10 +197,11 @@ Frontend ←HTTP→ Backend (Express.js) ←→ @dotbot/core ←→ Polkadot Net
               AI Providers (ASI-One, Claude)
 ```
 
-**Key Benefits:**
+**Key points:**
 - **Secure API Key Management**: AI provider keys stored server-side
 - **Session Management**: Persistent DotBot instances across requests
-- **Unified Interface**: Single API for chat + blockchain operations
+- **Shared Core**: `@dotbot/core` used in both backend and frontend (client-side mode)
+- **Multiple Modes**: Backend-driven AI + client-side blockchain ops, or fully client-side when keys are provided directly
 
 ### Base URL
 
@@ -486,7 +487,7 @@ Delete a session and clean up resources.
 
 ### Simulation Endpoints
 
-**NEW** in v0.2.2: Backend simulation endpoints for Chopsticks integration.
+Backend simulation endpoints for Chopsticks integration.
 
 #### `POST /api/simulation/simulate`
 
@@ -666,7 +667,7 @@ if (chatResult.plan && userApproved) {
 
 ## OpenAPI Specification
 
-**NEW** in v0.2.0: Complete API contract defined in `backend/openapi.yaml`.
+The API contract is defined in `backend/openapi.yaml`.
 
 ### Overview
 
@@ -800,7 +801,7 @@ components:
 
 ## Integration Testing
 
-**NEW** in v0.2.0: OpenAPI-based integration testing ensures API compliance.
+OpenAPI-based integration tests validate backend implementation against the specification.
 
 ### Overview
 
@@ -968,7 +969,7 @@ All agents return a standardized result structure:
 interface AgentResult {
   description: string;              // Human-readable description
   extrinsic: SubmittableExtrinsic; // Ready-to-sign transaction
-  estimatedFee?: string;           // Fee in Planck (1 DOT = 10^10 Planck)
+  estimatedFee?: string;           // Fee in smallest unit (decimals vary by network, e.g. 10 for DOT)
   warnings?: string[];             // Important notices for user
   metadata?: Record<string, any>;  // Additional contextual data
   data?: any;                      // For non-extrinsic results
@@ -1041,9 +1042,11 @@ console.log(polkadotConfig.isTestnet);  // false
 
 ### Multi-Network Factory Functions
 
+These helpers create and return **RpcManager** instances (see `lib/dotbot-core/rpcManager/`). Each RpcManager handles health, failover, and endpoint selection for one chain.
+
 #### `createRpcManagersForNetwork()`
 
-Create network-specific RPC managers with pre-configured endpoints.
+Create network-specific RPC managers (RpcManager instances) with pre-configured endpoints.
 
 ```typescript
 function createRpcManagersForNetwork(
@@ -1279,13 +1282,13 @@ function formatKnowledgeBaseForNetwork(network: Network): string
 ```typescript
 interface DotBotConfig {
   wallet: InjectedAccountWithMeta;
-  network?: Network;  // ← NEW in v0.2.0
+  network?: Network;
   relayChainManager?: RpcManager;  // Optional if using network param
   assetHubManager?: RpcManager;    // Optional if using network param
   onSigningRequest?: (request: SigningRequest) => void;
   onBatchSigningRequest?: (request: BatchSigningRequest) => void;
   onSimulationStatus?: (status: SimulationStatus) => void;
-  disableChatPersistence?: boolean;  // ← NEW in v0.2.0
+  disableChatPersistence?: boolean;
 }
 
 static async create(config: DotBotConfig): Promise<DotBot>
@@ -2909,7 +2912,7 @@ Manages multiple RPC endpoints with health monitoring and failover.
 constructor(
   endpoints: string[],
   options?: RpcManagerOptions,
-  storageKey?: string  // ← NEW in v0.2.0
+  storageKey?: string
 )
 ```
 
