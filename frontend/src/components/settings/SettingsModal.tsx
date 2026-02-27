@@ -109,7 +109,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="settings-option-label">Enable Transaction Simulation</div>
                 <div className="settings-option-description">
                   Simulate transactions using Chopsticks before signing to preview effects and catch errors early.
-                  This adds 1-3 seconds of latency but improves safety by validating transactions before execution.
+                  This adds some latency but improves safety by validating transactions before execution.
                 </div>
               </div>
               <label className="settings-toggle">
@@ -121,22 +121,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span className="settings-toggle-slider"></span>
               </label>
             </div>
-          </div>
-
-          {/* Future settings sections - TODO */}
-          <div className="settings-section">
-            <h3 className="settings-section-title">General</h3>
-            <div className="settings-placeholder">TODO: General settings</div>
-          </div>
-
-          <div className="settings-section">
-            <h3 className="settings-section-title">Advanced</h3>
-            <div className="settings-placeholder">TODO: Advanced settings</div>
-          </div>
-
-          <div className="settings-section">
-            <h3 className="settings-section-title">About</h3>
-            <div className="settings-placeholder">TODO: About info</div>
           </div>
         </div>
       </div>

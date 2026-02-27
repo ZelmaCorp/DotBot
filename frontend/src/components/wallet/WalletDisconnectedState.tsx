@@ -20,7 +20,7 @@ interface WalletDisconnectedStateProps {
   network: Network;
   onConnectAccount: (account: WalletAccount) => void;
   onEnableWallet: () => void;
-  onRefreshAccounts: () => void;
+  onRefreshAccounts: () => void | Promise<number>;
   onNetworkSwitch?: (network: Network) => void;
 }
 
