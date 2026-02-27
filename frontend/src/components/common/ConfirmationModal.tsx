@@ -2,9 +2,11 @@
  * ConfirmationModal Component
  * 
  * A reusable modal for confirmation dialogs (delete, confirm actions, etc.)
+ * Renders via portal into document.body so it always stacks above everything.
  */
 
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, AlertTriangle } from 'lucide-react';
 import '../../styles/confirmation-modal.css';
 
@@ -61,8 +63,6 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     };
   }, [isOpen, onClose, isLoading]);
 
-  if (!isOpen) return null;
-
   const handleConfirm = () => {
     if (!isLoading) {
       onConfirm();
@@ -75,7 +75,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     }
   };
 
-  return (
+  const modalContent = isOpen ? (
     <div className="confirmation-modal-overlay" onClick={handleOverlayClick}>
       <div className="confirmation-modal" onClick={(e) => e.stopPropagation()}>
         <div className="confirmation-modal-header">
@@ -117,7 +117,9 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         </div>
       </div>
     </div>
-  );
+  ) : null;
+
+  return createPortal(modalContent, document.body);
 };
 
 export default ConfirmationModal;

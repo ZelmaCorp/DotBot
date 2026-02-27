@@ -18,21 +18,9 @@ body.modal-open > *:not(.confirmation-modal-overlay) {
   pointer-events: none !important;
 }
 
-/* Specifically prevent interaction with chat history cards when modal is open */
-body.modal-open .chat-history-card,
-body.modal-open .chat-history-card * {
+/* Block interaction with content behind the overlay (no extra dimming of cards) */
+body.modal-open > *:not(.confirmation-modal-overlay) {
   pointer-events: none !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
-  -moz-user-select: none !important;
-  -ms-user-select: none !important;
-  cursor: default !important;
-}
-
-/* Dim the selected card when modal is open */
-body.modal-open .chat-history-card.selected {
-  opacity: 0.5 !important;
-  filter: brightness(0.7);
 }
 
 /* Allow selection and interaction only within the modal */
@@ -45,19 +33,21 @@ body.modal-open .confirmation-modal-overlay * {
   pointer-events: auto !important;
 }
 
+/* Full-screen overlay behind the modal: entire viewport is darkened */
 .confirmation-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  /* Lighter dim so background stays visible; parent/body does not become black */
-  background-color: rgba(0, 0, 0, 0.4);
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.75);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10000;
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(4px);
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;
