@@ -642,9 +642,16 @@ export class ScenarioExecutor {
       failed: chatResult.failed,
     } : undefined;
 
+    // Step succeeds only if no execution ran, or execution ran and succeeded (no failures)
+    const stepSuccess = !executionStats
+      ? true
+      : executionStats.executed
+        ? executionStats.success && executionStats.failed === 0
+        : true;
+
     return {
       stepId: step.id,
-      success: true,
+      success: stepSuccess,
       startTime,
       endTime,
       duration: endTime - startTime,
@@ -655,6 +662,7 @@ export class ScenarioExecutor {
       },
       executionPlan,
       executionStats,
+      executionErrors: chatResult?.executionErrors,
     };
   }
 

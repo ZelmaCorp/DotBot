@@ -526,7 +526,20 @@ export class ScenarioEngine {
     this.clearPendingNotifyTimeout();
     if (this.executor) {
       this.log('info', `[ScenarioEngine] Execution ${executionId} complete (all terminal); notifying executor`);
-      this.executor.notifyResponseReceived(this.pendingNotify.chatResult);
+      const completed = state.completedItems ?? state.items.filter((i: any) => i.status === 'completed' || i.status === 'finalized').length;
+      const failed = state.failedItems ?? state.items.filter((i: any) => i.status === 'failed').length;
+      const executionErrors = (state.items || [])
+        .filter((i: any) => i.status === 'failed')
+        .map((i: any) => i.error || 'Unknown error');
+      const updatedChatResult: ChatResult = {
+        ...this.pendingNotify.chatResult,
+        executed: true,
+        success: failed === 0 && completed > 0,
+        completed,
+        failed,
+        executionErrors: executionErrors.length > 0 ? executionErrors : undefined,
+      };
+      this.executor.notifyResponseReceived(updatedChatResult);
     }
     this.emit({ type: 'execution-complete', executionId, state });
     this.pendingNotify = null;
@@ -757,6 +770,16 @@ export class ScenarioEngine {
       const totalExecuted = result.stepResults.reduce((sum, s) => sum + (s.executionStats?.completed || 0), 0);
       const totalFailed = result.stepResults.reduce((sum, s) => sum + (s.executionStats?.failed || 0), 0);
       lines.push(`Executions: ${totalExecuted} completed${totalFailed > 0 ? `, ${totalFailed} failed` : ''}`);
+    }
+
+    // Execution errors (e.g. "Transaction Invalid") when execution ran but had failures
+    const executionErrors = evaluation.executionErrors ?? result.stepResults.flatMap(s => s.executionErrors ?? []);
+    if (executionErrors.length > 0) {
+      lines.push('');
+      lines.push('Execution errors:');
+      executionErrors.forEach((err, idx) => {
+        lines.push(`  ${idx + 1}. ${err}`);
+      });
     }
     
     // Get detailed evaluation results from evaluator
@@ -1456,15 +1479,19 @@ export class ScenarioEngine {
                     item.status === 'completed' || item.status === 'finalized'
                   ).length;
                   const failed = latestState.items.filter(item => item.status === 'failed').length;
-                  
+                  const executionErrors = latestState.items
+                    .filter(item => item.status === 'failed')
+                    .map(item => item.error || 'Unknown error');
                   return {
                     ...result,
+                    success: result.success && failed === 0 && completed > 0,
                     executionStats: {
                       executed: true,
                       success: failed === 0 && completed > 0,
                       completed,
                       failed,
                     },
+                    executionErrors: executionErrors.length > 0 ? executionErrors : undefined,
                   };
                 }
               }
