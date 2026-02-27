@@ -7,7 +7,7 @@ interface WalletStore extends WalletState {
   enableWallet: () => Promise<void>;
   connectAccount: (account: WalletAccount) => Promise<void>;
   disconnect: () => Promise<void>;
-  refreshAccounts: () => Promise<void>;
+  refreshAccounts: () => Promise<number>;
   checkWalletStatus: () => Promise<void>;
   setError: (error: string | null) => void;
   clearError: () => void;
@@ -138,6 +138,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
   refreshAccounts: async () => {
     const { enableWallet } = get();
     await enableWallet();
+    const err = get().error;
+    if (err) {
+      throw new Error(err);
+    }
+    return get().availableWallets.flatMap(w => w.accounts).length;
   },
 
   checkWalletStatus: async () => {
