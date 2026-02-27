@@ -181,8 +181,6 @@ DotBot has multi-network infrastructure:
 
 **Kusama Note:** Infrastructure is ready (RPC endpoints, factory functions), but Kusama-specific knowledge base is not yet implemented. Operations will work but LLM context will use Polkadot information (may mention wrong parachains/DEXes).
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 ## Backend API
@@ -319,9 +317,9 @@ console.log(data.response);
 
 Full DotBot functionality with blockchain operations.
 
-#### `POST /api/dotbot/initialize`
+#### `POST /api/dotbot/session`
 
-Initialize a new DotBot session.
+Create or get a DotBot session.
 
 **Request:**
 ```json
@@ -332,7 +330,8 @@ Initialize a new DotBot session.
     "source": "polkadot-js"
   },
   "network": "westend",
-  "environment": "testnet"
+  "environment": "testnet",
+  "sessionId": "optional-custom-session-id"
 }
 ```
 
@@ -340,17 +339,17 @@ Initialize a new DotBot session.
 - `wallet` (object, required): Wallet account information
 - `network` (string, optional): Network identifier. Default: `'polkadot'`
 - `environment` (string, optional): Environment (`'mainnet'` | `'testnet'`). Auto-detected from network
+- `sessionId` (string, optional): Custom session ID. If omitted, derived from wallet + environment
 
 **Response:**
 ```json
 {
+  "success": true,
   "sessionId": "session_1234567890_abc",
-  "wallet": {
-    "address": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
-    "name": "Alice"
-  },
+  "environment": "testnet",
   "network": "westend",
-  "environment": "testnet"
+  "wallet": { "address": "...", "name": "Alice", "source": "polkadot-js" },
+  "timestamp": "2026-01-14T12:00:00.000Z"
 }
 ```
 
@@ -370,7 +369,7 @@ Send a message to DotBot (with blockchain operations support).
 ```
 
 **Parameters:**
-- `sessionId` (string, required): Session ID from `/initialize`
+- `sessionId` (string, required): Session ID from `POST /api/dotbot/session`
 - `message` (string, required): User's message
 - `provider` (string, optional): AI provider. Default: `'asi-one'`
 
@@ -398,33 +397,17 @@ Send a message to DotBot (with blockchain operations support).
 
 ---
 
-#### `POST /api/dotbot/execute`
+#### `POST /api/dotbot/session/:sessionId/execution/:executionId/start`
 
-Execute a prepared transaction (after user approval).
+Start execution of a prepared transaction (after user approval).
 
-**Request:**
-```json
-{
-  "sessionId": "session_1234567890_abc",
-  "executionId": "exec_1234567890_xyz"
-}
-```
-
-**Parameters:**
+**Parameters (path):**
 - `sessionId` (string, required): Session ID
-- `executionId` (string, required): Execution ID from chat response
+- `executionId` (string, required): Execution ID from the chat response (ExecutionMessage)
 
-**Response:**
-```json
-{
-  "status": "completed",
-  "result": {
-    "success": true,
-    "txHash": "0x1234...",
-    "blockHash": "0x5678..."
-  }
-}
-```
+**Request body:** Optional; backend may accept additional options.
+
+**Response:** Execution status and result (e.g. success, txHash, blockHash) as the execution progresses or completes.
 
 ---
 
@@ -446,28 +429,11 @@ Get session details.
 
 ---
 
-#### `GET /api/dotbot/history/:sessionId`
+#### `GET /api/dotbot/session/:sessionId/chats`
 
-Get conversation history for a session.
+List chat instances for a session.
 
-**Response:**
-```json
-{
-  "sessionId": "session_1234567890_abc",
-  "messages": [
-    {
-      "type": "user",
-      "content": "Send 2 DOT to Bob",
-      "timestamp": 1705233600000
-    },
-    {
-      "type": "bot",
-      "content": "I've prepared a transfer...",
-      "timestamp": 1705233601000
-    }
-  ]
-}
-```
+**Response:** Array of chat instances (ids, metadata). Use `GET /api/dotbot/session/:sessionId/chats/:chatId` to load a specific chat and its conversation items.
 
 ---
 
@@ -575,8 +541,6 @@ Simulate multiple transactions sequentially on a single fork.
 
 **Note:** These endpoints are used internally by `@dotbot/core` client. Frontend code should use the high-level simulation functions, not call these endpoints directly.
 
-**Version Added:** v0.2.2 (January 2026)
-
 ---
 
 ### Error Responses
@@ -615,7 +579,7 @@ class DotBotClient {
   constructor(private baseUrl: string) {}
 
   async initialize(wallet: WalletAccount, network?: Network) {
-    const response = await fetch(`${this.baseUrl}/api/dotbot/initialize`, {
+    const response = await fetch(`${this.baseUrl}/api/dotbot/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ wallet, network })
@@ -634,11 +598,10 @@ class DotBotClient {
   }
 
   async execute(sessionId: string, executionId: string) {
-    const response = await fetch(`${this.baseUrl}/api/dotbot/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, executionId })
-    });
+const response = await fetch(`${this.baseUrl}/api/dotbot/session/${sessionId}/execution/${executionId}/start`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' }
+});
     return await response.json();
   }
 }
@@ -660,8 +623,6 @@ if (chatResult.plan && userApproved) {
   console.log('Transaction:', execResult.result.txHash);
 }
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -709,7 +670,7 @@ tags:
 paths:
   /api/health: ...
   /api/chat: ...
-  /api/dotbot/initialize: ...
+  /api/dotbot/session: ...
   /api/dotbot/chat: ...
   # ... (full spec in openapi.yaml)
 
@@ -794,8 +755,6 @@ components:
           items:
             $ref: '#/components/schemas/ConversationMessage'
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -955,8 +914,6 @@ Integration tests run in CI pipeline:
   run: npm run test:integration --workspace=backend
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 ## Core Concepts
@@ -1082,8 +1039,6 @@ Each network uses separate localStorage keys for health tracking:
 - Westend: `dotbot_rpc_health_westend_relay`, `dotbot_rpc_health_westend_asset_hub`
 - Paseo: `dotbot_rpc_health_paseo_relay`, `dotbot_rpc_health_paseo_asset_hub`
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### Network-Specific Factory Functions
@@ -1118,8 +1073,6 @@ const relayApi = await relayManager.getReadApi();
 ```
 
 **Use Case:** When you only need one chain or want fine-grained control.
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -1269,15 +1222,13 @@ function formatKnowledgeBaseForNetwork(network: Network): string
 
 **Full documentation:** See `lib/dotbot-core/prompts/system/knowledge/networkUtils.ts`
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 ### DotBot Core Multi-Network Support
 
 #### `DotBot.create()`
 
-**UPDATED** in v0.2.0 to support network parameter and chat management:
+Supports network parameter and chat management:
 
 ```typescript
 interface DotBotConfig {
@@ -1365,8 +1316,6 @@ if (dotbot.getNetwork() === 'westend') {
   console.log('Running on testnet - safe to experiment!');
 }
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -1469,8 +1418,6 @@ private async prepareExecution(plan: ExecutionPlan): Promise<void>
 3. UI shows ExecutionFlow component for user review
 4. Does NOT execute - waits for user approval
 
-**Version Added:** v0.2.0 (PR #44, January 2026)
-
 ---
 
 #### `DotBot.startExecution()`
@@ -1509,8 +1456,6 @@ await dotbot.startExecution(executionMessage.executionId);
 - Error if executionId not found
 - Error if execution rebuild fails
 
-**Version Added:** v0.2.0 (PR #44, January 2026)
-
 ---
 
 #### `DotBot.switchEnvironment()`
@@ -1547,8 +1492,6 @@ await dotbot.switchEnvironment('testnet');  // Uses Westend
 await dotbot.switchEnvironment('mainnet', 'kusama');
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.clearHistory()`
@@ -1569,8 +1512,6 @@ await dotbot.clearHistory();
 console.log('Started fresh chat:', dotbot.currentChat.id);
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.getEnvironment()`
@@ -1589,8 +1530,6 @@ if (dotbot.getEnvironment() === 'testnet') {
   console.log('⚠️ Using testnet - safe to experiment!');
 }
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -1618,8 +1557,6 @@ const testnetChats = manager.getInstancesByEnvironment('testnet');
 await manager.deleteInstance('chat-id-123');
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.currentChat`
@@ -1646,8 +1583,6 @@ const execution = dotbot.currentChat?.getExecutionArray(executionId);
 
 **See:** ChatInstance API for full details
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.getAllMessages()`
@@ -1672,8 +1607,6 @@ messages.forEach(item => {
 });
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.getHistory()`
@@ -1695,8 +1628,6 @@ const history = dotbot.getHistory();
 const response = await llm.chat(message, { history });
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.getExecutionArrayState()`
@@ -1716,8 +1647,6 @@ if (state) {
   console.log(`Execution: ${state.items.length} items, ${state.items.filter(i => i.status === 'completed').length} completed`);
 }
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -1747,8 +1676,6 @@ console.log('Relay Chain:', health.relayChain.current);
 console.log('Asset Hub:', health.assetHub.current);
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.getConnectedEndpoints()`
@@ -1770,8 +1697,6 @@ const endpoints = dotbot.getConnectedEndpoints();
 console.log('Relay Chain:', endpoints.relayChain);
 console.log('Asset Hub:', endpoints.assetHub || 'Not connected');
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -1807,8 +1732,6 @@ if (balance.assetHub) {
 }
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.getChainInfo()`
@@ -1830,8 +1753,6 @@ const info = await dotbot.getChainInfo();
 console.log(`Connected to ${info.chain} (${info.version})`);
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.getApi()`
@@ -1849,8 +1770,6 @@ getApi(): ApiPromise
 const api = dotbot.getApi();
 const balance = await api.query.system.account(address);
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -1872,8 +1791,6 @@ if (assetHubApi) {
 }
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.getWallet()`
@@ -1892,8 +1809,6 @@ const wallet = dotbot.getWallet();
 console.log('Address:', wallet.address);
 console.log('Source:', wallet.source);
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -1924,8 +1839,6 @@ await dotbot.loadChatInstance('chat_1234567890_abc');
 console.log('Loaded chat:', dotbot.currentChat?.id);
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `DotBot.disconnect()`
@@ -1946,8 +1859,6 @@ async disconnect(): Promise<void>
 // Cleanup when done
 await dotbot.disconnect();
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -2896,8 +2807,6 @@ disableSimulation(); // Same as updateSimulationConfig({ enabled: false })
 
 **UI Control:** SettingsModal provides a toggle for simulation enable/disable.
 
-**Version Added:** v0.2.1 (January 2026)
-
 ---
 
 ## Utilities API
@@ -3220,8 +3129,6 @@ const engine = new ScenarioEngine();
 await engine.initialize();
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `ScenarioEngine.runScenario()`
@@ -3260,8 +3167,6 @@ const scenario: Scenario = {
 const result = await engine.runScenario(scenario);
 console.log(`Score: ${result.evaluation.score}/100`);
 ```
-
-**Version Added:** v0.2.0 (January 2026). Expression system and ExpressionValidator: February 2026.
 
 ---
 
@@ -3315,8 +3220,6 @@ const multisig = await entityCreator.createMultisigEntity('MyMultisig', {
 });
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `EntityCreator.createKeypairEntity()`
@@ -3334,8 +3237,6 @@ async createKeypairEntity(name: string): Promise<TestEntity>
 - `TestEntity`: Entity with address, keypair, mnemonic
 
 **Note:** Same name + seedPrefix → same address (deterministic)
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3357,8 +3258,6 @@ async createMultisigEntity(
 
 **Returns:**
 - `TestEntity`: Multisig entity with calculated address
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3417,8 +3316,6 @@ await allocator.allocateLocalState({
 });
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `StateAllocator.allocateBalance()`
@@ -3443,8 +3340,6 @@ async allocateBalance(
 - **Synthetic**: Tracks in memory
 - **Emulated**: Sets via Chopsticks `setStorage()` (requires backend server, currently disabled)
 - **Live**: Creates real transfer transaction
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3471,8 +3366,6 @@ await allocator.allocateLocalState({
   }),
 });
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3504,8 +3397,6 @@ function createScenarioExecutor(
 
 **Returns:**
 - `ScenarioExecutor`: Executor instance
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3542,8 +3433,6 @@ executor.addEventListener((event) => {
 const results = await executor.executeScenario(scenario);
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 ### Evaluator
@@ -3573,8 +3462,6 @@ function createEvaluator(
 
 **Returns:**
 - `Evaluator`: Evaluator instance
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3612,8 +3499,6 @@ console.log(`Score: ${result.score}/100`);
 console.log(`Passed: ${result.passed}`);
 ```
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `Evaluator.generateReport()`
@@ -3629,8 +3514,6 @@ generateReport(
 
 **Returns:**
 - `EvaluationReport`: Complete report with performance metrics, raw data
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3664,8 +3547,6 @@ interface Scenario {
 - `'stress'`: Performance tests
 - `'multi-step'`: Complex flows
 
-**Version Added:** v0.2.0 (January 2026)
-
 ---
 
 #### `ScenarioStep`
@@ -3679,8 +3560,6 @@ type ScenarioStep =
   | { type: 'wait'; duration: number }
   | { type: 'assert'; assertion: ScenarioAssertion };
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3702,8 +3581,6 @@ interface ScenarioExpectation {
   description?: string;
 }
 ```
-
-**Version Added:** v0.2.0 (January 2026)
 
 ---
 
@@ -3907,8 +3784,6 @@ disableSimulation();
 **Default:** `enabled: true` (simulation enabled by default)
 
 **UI Control:** SettingsModal provides toggle for simulation enable/disable.
-
-**Version Added:** v0.2.1 (January 2026)
 
 ---
 
