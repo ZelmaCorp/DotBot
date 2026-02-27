@@ -6,7 +6,7 @@ Welcome to DotBot's documentation. This guide will help you understand what DotB
 
 DotBot is a ChatGPT-like web application that makes interacting with the Polkadot ecosystem simple and intuitive. Instead of navigating complex dApps and understanding technical details, users can perform blockchain operations through natural language conversations.
 
-**Architecture:** DotBot consists of a React frontend, TypeScript/Express backend, and shared core libraries in a monorepo structure. The backend securely manages AI provider API keys, while the shared `@dotbot/core` library handles blockchain operations for both frontend and backend.
+**Architecture:** DotBot is built around two libraries: **`@dotbot/core`** (core logic) and **`@dotbot/express`** (Express helper). The core is designed to support **multiple setups** — the developer decides where it runs (e.g. frontend + backend, frontend only, or backend only), with pluggable signers and AI. We currently implement and test the **frontend + backend** setup: React frontend, Express backend, shared `@dotbot/core`; the backend manages AI API keys, and the frontend runs signing and broadcast where the wallet is.
 
 ### Core Concept
 
@@ -26,7 +26,7 @@ Transaction executes on-chain
 2. **User Control**: You always control your private keys and approve transactions
 3. **Environment Support**: Clear separation between mainnet and testnet environments
 4. **Multi-Chain Ready**: Built for Polkadot, Kusama, and parachains
-5. **Production-Safe**: Automatic fallbacks and runtime capability detection
+5. **Production-safety in mind**: Automatic fallbacks and runtime capability detection (POC/alpha; not guaranteed production-ready)
 6. **Chat History**: Persistent conversation history with search and filtering
 
 ## Quick Start
@@ -77,18 +77,18 @@ That's it! DotBot handles the complexity behind the scenes.
 
 ## Architecture Overview
 
-DotBot follows a clean, scalable monorepo architecture:
+DotBot follows a clean, scalable monorepo architecture. The diagram below describes the **current, implemented-and-tested setup** (frontend + backend). The core supports other setups too (developer decides); we don’t yet robustly test those.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                  Frontend (React)                       │
 │               ChatGPT-like web interface                │
-│         Uses @dotbot/core for blockchain ops            │
+│                  Uses @dotbot/core                      │
 └─────────────────────────────────────────────────────────┘
                             ↓ HTTP API
 ┌─────────────────────────────────────────────────────────┐
 │              Backend (TypeScript/Express)               │
-│         @dotbot/express routes & middleware             │
+│         @dotbot/express (routes & middleware)           │
 │      Secure AI provider API key management              │
 │          Session management for DotBot instances        │
 └─────────────────────────────────────────────────────────┘
@@ -96,7 +96,7 @@ DotBot follows a clean, scalable monorepo architecture:
 ┌─────────────────────────────────────────────────────────┐
 │             @dotbot/core (Shared Library)               │
 │  DotBot class (dotbot.ts) + dotbot/*.ts logic modules   │
-│  Agents: Asset Transfer (others planned)                 │
+│  Agents: Asset Transfer (others planned)                │
 │  - Validate input, create production-safe extrinsics    │
 │  Execution Engine:                                      │
 │  - Optional Chopsticks simulation                       │
@@ -230,7 +230,7 @@ DotBot supports multiple environments with clear separation:
 
 ## Chat History
 
-**NEW** in v0.2.0: Persistent chat history with search capability.
+Persistent chat history with search capability.
 
 - All conversations saved to localStorage (or external storage)
 - Search by title, content, or date
@@ -297,7 +297,7 @@ Smart endpoint management:
 
 ### 6. ScenarioEngine Testing Framework
 
-**NEW** in v0.2.0; **enhanced** with expression system:
+ScenarioEngine (with expression system):
 - Deterministic test entity creation
 - **Expression system**: Comparison operators (`gte`, `lte`, `between`, `matches`, `in`, etc.) and logical operators (`all`, `any`, `not`, `when`/`then`/`else`) in expectations; backward compatible with existing scenarios
 - **ExpressionValidator**: Validates expectations at scenario load time (circular refs, nesting depth, invalid operators)
@@ -407,9 +407,10 @@ const result = await agent.batchTransfer({
 
 ## Next Steps
 
-- **[Architecture Guide](./ARCHITECTURE.md)** - Understand design decisions
-- **[API Reference](./API.md)** - Integrate DotBot into your application
-- **[Contributing](../README.md#contributing)** - Help improve DotBot
+- **[Architecture Guide](./ARCHITECTURE.md)** - Design decisions and structure
+- **[API Reference](./API.md)** - Backend and core API
+- **[DevOps Guide](./DEVOPS.md)** - Deployment and CI/CD
+- **[Contributing](../README.md#contributing)** - How to contribute
 
 ## Getting Help
 
@@ -427,7 +428,7 @@ Every agent returns a standardized result:
 interface AgentResult {
   description: string;              // Human-readable description
   extrinsic: SubmittableExtrinsic; // Ready-to-sign transaction
-  estimatedFee?: string;           // Fee in Planck
+  estimatedFee?: string;           // Fee in smallest unit (decimals vary by network)
   warnings?: string[];             // Important notices
   metadata?: Record<string, any>;  // Additional data
   resultType: 'extrinsic' | 'data';
@@ -436,7 +437,7 @@ interface AgentResult {
 }
 ```
 
-### Execution Flow (v0.2.0)
+### Execution Flow
 
 1. **LLM Phase**: User message → LLM generates ExecutionPlan
 2. **Preparation Phase**: `prepareExecution()` orchestrates plan, adds ExecutionMessage to chat
@@ -447,7 +448,7 @@ interface AgentResult {
 7. **Broadcasting Phase**: Sends signed transaction to network
 8. **Monitoring Phase**: Waits for finalization, updates ExecutionMessage in chat
 
-**Note:** Execution now requires explicit user approval (two-step pattern: prepare → approve → execute).
+**Note:** Execution requires explicit user approval (two-step pattern: prepare → approve → execute). When using the backend API, LLM and plan preparation run server-side; simulation, signing, and broadcast run on the client.
 
 ### Error Handling
 
@@ -484,5 +485,5 @@ DotBot handles this complexity automatically.
 
 ## License
 
-MIT License - See [LICENSE](../LICENSE) for details
+GNU General Public License v3.0 - See [LICENSE](../LICENSE) for details.
 
