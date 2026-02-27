@@ -642,9 +642,20 @@ export class ScenarioExecutor {
       failed: chatResult.failed,
     } : undefined;
 
+    // Step success: no executionStats → pass (e.g. text-only response).
+    // executionStats.executed false → pass (plan prepared but not run yet; e.g. timeout or step only checks plan).
+    // executionStats.executed true → pass only if execution succeeded (success && failed === 0).
+    // Note: Scenarios that *expect* execution to fail (e.g. "insufficient funds") need an expectation that
+    // accepts execution failure; otherwise the scenario will correctly fail when execution fails.
+    const stepSuccess = !executionStats
+      ? true
+      : executionStats.executed
+        ? executionStats.success && executionStats.failed === 0
+        : true;
+
     return {
       stepId: step.id,
-      success: true,
+      success: stepSuccess,
       startTime,
       endTime,
       duration: endTime - startTime,
@@ -655,6 +666,7 @@ export class ScenarioExecutor {
       },
       executionPlan,
       executionStats,
+      executionErrors: chatResult?.executionErrors,
     };
   }
 

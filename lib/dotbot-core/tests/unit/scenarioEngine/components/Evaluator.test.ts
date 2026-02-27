@@ -337,6 +337,218 @@ describe('Evaluator', () => {
     });
   });
 
+  describe('Execution failure detection', () => {
+    const scenarioWithExecutionExpectation: Scenario = {
+      id: 'test-1',
+      name: 'Test',
+      description: 'Test',
+      category: 'happy-path',
+      steps: [],
+      expectations: [
+        { responseType: 'execution' },
+        { expectedAgent: 'AssetTransferAgent' },
+      ],
+    };
+
+    it('should fail scenario when any step has execution ran but failed (failed > 0)', () => {
+      const stepResults: StepResult[] = [{
+        stepId: 'step-1',
+        success: false,
+        startTime: 0,
+        endTime: 100,
+        duration: 100,
+        response: { type: 'execution', content: 'Prepared transfer' },
+        executionPlan: {
+          id: 'plan-1',
+          steps: [{ agentClassName: 'AssetTransferAgent', functionName: 'transfer', parameters: {}, description: 'Transfer', executionType: 'extrinsic' }],
+          requiresApproval: false,
+        },
+        executionStats: { executed: true, success: false, completed: 0, failed: 1 },
+        executionErrors: ['Transaction Invalid'],
+      }];
+
+      const result = evaluator.evaluate(scenarioWithExecutionExpectation, stepResults);
+
+      expect(result.passed).toBe(false);
+      expect(result.executionErrors).toEqual(['Transaction Invalid']);
+      expect(result.expectations.every(e => e.met)).toBe(true);
+    });
+
+    it('should fail scenario when any step has execution ran but success is false', () => {
+      const stepResults: StepResult[] = [{
+        stepId: 'step-1',
+        success: false,
+        startTime: 0,
+        endTime: 100,
+        duration: 100,
+        response: { type: 'execution', content: 'Prepared transfer' },
+        executionPlan: {
+          id: 'plan-1',
+          steps: [{ agentClassName: 'AssetTransferAgent', functionName: 'transfer', parameters: {}, description: 'Transfer', executionType: 'extrinsic' }],
+          requiresApproval: false,
+        },
+        executionStats: { executed: true, success: false, completed: 1, failed: 1 },
+        executionErrors: ['Insufficient balance'],
+      }];
+
+      const result = evaluator.evaluate(scenarioWithExecutionExpectation, stepResults);
+
+      expect(result.passed).toBe(false);
+      expect(result.executionErrors).toContain('Insufficient balance');
+    });
+
+    it('should aggregate executionErrors from all steps', () => {
+      const stepResults: StepResult[] = [
+        {
+          stepId: 'step-1',
+          success: false,
+          startTime: 0,
+          endTime: 100,
+          duration: 100,
+          response: { type: 'execution', content: 'Plan' },
+          executionStats: { executed: true, success: false, completed: 0, failed: 1 },
+          executionErrors: ['Transaction Invalid'],
+        },
+        {
+          stepId: 'step-2',
+          success: true,
+          startTime: 100,
+          endTime: 200,
+          duration: 100,
+          response: { type: 'text', content: 'OK' },
+        },
+      ];
+
+      const scenario: Scenario = { ...scenarioWithExecutionExpectation, expectations: [] };
+      const result = evaluator.evaluate(scenario, stepResults);
+
+      expect(result.passed).toBe(false);
+      expect(result.executionErrors).toEqual(['Transaction Invalid']);
+    });
+
+    it('should pass when expectations pass and no execution failure', () => {
+      const stepResults: StepResult[] = [{
+        stepId: 'step-1',
+        success: true,
+        startTime: 0,
+        endTime: 100,
+        duration: 100,
+        response: { type: 'execution', content: 'Prepared transfer' },
+        executionPlan: {
+          id: 'plan-1',
+          steps: [{ agentClassName: 'AssetTransferAgent', functionName: 'transfer', parameters: {}, description: 'Transfer', executionType: 'extrinsic' }],
+          requiresApproval: false,
+        },
+        executionStats: { executed: true, success: true, completed: 1, failed: 0 },
+      }];
+
+      const result = evaluator.evaluate(scenarioWithExecutionExpectation, stepResults);
+
+      expect(result.passed).toBe(true);
+      expect(result.executionErrors).toBeUndefined();
+    });
+
+    it('should not treat missing executionStats as execution failure', () => {
+      const stepResults: StepResult[] = [{
+        stepId: 'step-1',
+        success: true,
+        startTime: 0,
+        endTime: 100,
+        duration: 100,
+        response: { type: 'text', content: 'Just text' },
+      }];
+
+      const scenario: Scenario = { ...scenarioWithExecutionExpectation, expectations: [{ shouldContain: ['text'] }] };
+      const result = evaluator.evaluate(scenario, stepResults);
+
+      expect(result.passed).toBe(true);
+      expect(result.executionErrors).toBeUndefined();
+    });
+
+    it('should not treat executed: false as execution failure (plan prepared but not run)', () => {
+      const stepResults: StepResult[] = [{
+        stepId: 'step-1',
+        success: true,
+        startTime: 0,
+        endTime: 100,
+        duration: 100,
+        response: { type: 'execution', content: 'Prepared transfer' },
+        executionPlan: {
+          id: 'plan-1',
+          steps: [{ agentClassName: 'AssetTransferAgent', functionName: 'transfer', parameters: {}, description: 'Transfer', executionType: 'extrinsic' }],
+          requiresApproval: false,
+        },
+        executionStats: { executed: false, success: false, completed: 0, failed: 0 },
+      }];
+
+      const result = evaluator.evaluate(scenarioWithExecutionExpectation, stepResults);
+
+      expect(result.passed).toBe(true);
+      expect(result.executionErrors).toBeUndefined();
+    });
+
+    it('should fail when first step succeeds but second step has execution failure', () => {
+      const stepResults: StepResult[] = [
+        {
+          stepId: 'step-1',
+          success: true,
+          startTime: 0,
+          endTime: 100,
+          duration: 100,
+          response: { type: 'execution', content: 'Plan' },
+          executionStats: { executed: true, success: true, completed: 1, failed: 0 },
+        },
+        {
+          stepId: 'step-2',
+          success: false,
+          startTime: 100,
+          endTime: 200,
+          duration: 100,
+          response: { type: 'execution', content: 'Plan 2' },
+          executionStats: { executed: true, success: false, completed: 0, failed: 1 },
+          executionErrors: ['Broadcast failed'],
+        },
+      ];
+
+      const scenario: Scenario = { ...scenarioWithExecutionExpectation, expectations: [] };
+      const result = evaluator.evaluate(scenario, stepResults);
+
+      expect(result.passed).toBe(false);
+      expect(result.executionErrors).toContain('Broadcast failed');
+    });
+
+    it('should include multiple errors when multiple steps have execution failures', () => {
+      const stepResults: StepResult[] = [
+        {
+          stepId: 'step-1',
+          success: false,
+          startTime: 0,
+          endTime: 100,
+          duration: 100,
+          response: { type: 'execution', content: 'Plan' },
+          executionStats: { executed: true, success: false, completed: 0, failed: 1 },
+          executionErrors: ['Transaction Invalid'],
+        },
+        {
+          stepId: 'step-2',
+          success: false,
+          startTime: 100,
+          endTime: 200,
+          duration: 100,
+          response: { type: 'execution', content: 'Plan 2' },
+          executionStats: { executed: true, success: false, completed: 0, failed: 1 },
+          executionErrors: ['Insufficient balance'],
+        },
+      ];
+
+      const scenario: Scenario = { ...scenarioWithExecutionExpectation, expectations: [] };
+      const result = evaluator.evaluate(scenario, stepResults);
+
+      expect(result.passed).toBe(false);
+      expect(result.executionErrors).toEqual(['Transaction Invalid', 'Insufficient balance']);
+    });
+  });
+
   describe('Report Generation', () => {
     it('should generate detailed report with performance metrics', () => {
       const scenario: Scenario = {

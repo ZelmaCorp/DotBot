@@ -175,14 +175,30 @@ export class Evaluator {
     this.lastExpectationResults = expectationResults;
 
     const { passed, score } = this.calculateOverallScore(expectationResults);
-    const summary = this.generateSummary(scenario, expectationResults, passed, score);
+
+    // If any step had execution run but fail (e.g. "Transaction Invalid"), scenario fails
+    const executionFailed = stepResults.some(
+      s => s.executionStats?.executed && (s.executionStats.failed > 0 || !s.executionStats.success)
+    );
+    const allExecutionErrors = stepResults.flatMap(s => s.executionErrors ?? []);
+    const finalPassed = passed && !executionFailed;
+
+    if (executionFailed) {
+      this.emit({
+        type: 'log',
+        level: 'warn',
+        message: `Execution failure detected: ${allExecutionErrors.length} error(s) - scenario will fail`,
+      });
+    }
+
+    const summary = this.generateSummary(scenario, expectationResults, finalPassed, score);
     const recommendations = this.generateRecommendations(scenario, expectationResults);
 
     // Emit detailed evaluation log (LLM-consumable)
-    this.emitEvaluationLog(scenario, expectationResults, passed, score, recommendations);
+    this.emitEvaluationLog(scenario, expectationResults, finalPassed, score, recommendations);
 
     return {
-      passed,
+      passed: finalPassed,
       score,
       expectations: expectationResults.map(r => ({
         expectation: r.expectation,
@@ -191,6 +207,7 @@ export class Evaluator {
       })),
       summary,
       recommendations: recommendations.length > 0 ? recommendations : undefined,
+      executionErrors: allExecutionErrors.length > 0 ? allExecutionErrors : undefined,
     };
   }
   

@@ -66,6 +66,8 @@ export interface ChatResult {
   success: boolean;
   completed: number;
   failed: number;
+  /** Error messages from execution items that failed (e.g. "Transaction Invalid"). */
+  executionErrors?: string[];
   /** True when backend ran simulation. */
   backendSimulated?: boolean;
 }
