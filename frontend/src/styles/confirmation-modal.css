@@ -1,11 +1,9 @@
 /* Confirmation Modal Styles */
 
-/* Prevent interaction with body content when modal is open */
+/* Prevent interaction with body content when modal is open.
+   Do NOT set position:fixed on body - it makes the viewport go black. */
 body.modal-open {
   overflow: hidden !important;
-  position: fixed;
-  width: 100%;
-  height: 100%;
   /* Prevent text selection on entire page */
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -53,19 +51,19 @@ body.modal-open .confirmation-modal-overlay * {
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.7);
+  /* Lighter dim so background stays visible; parent/body does not become black */
+  background-color: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10000;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(3px);
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
   touch-action: none;
-  /* Ensure overlay captures all events */
   cursor: default;
 }
 
