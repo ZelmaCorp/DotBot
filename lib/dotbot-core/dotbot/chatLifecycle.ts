@@ -43,10 +43,13 @@ export async function initializeChatInstance(dotbot: DotBotInstance): Promise<vo
           dotbot.chatLogger.debug({ chatId: dotbot.currentChat!.id }, 'Execution sessions initialized for chat (background)');
         })
         .catch((error: unknown) => {
-          dotbot.chatLogger.warn(
-            { chatId: dotbot.currentChat?.id, error: error instanceof Error ? error.message : String(error) },
+          const err = error instanceof Error ? error : new Error(String(error));
+          const msg = err.message;
+          dotbot.chatLogger.error(
+            { chatId: dotbot.currentChat?.id, error: msg },
             'Failed to init execution sessions in background (will retry when user runs execution)'
           );
+          dotbot.emit?.({ type: DotBotEventType.RPC_CONNECTION_FAILED, error: err, context: 'background_init' });
         });
     }
   } catch (error) {
@@ -67,10 +70,13 @@ function initSessionsForCurrentChat(dotbot: DotBotInstance): void {
       dotbot.chatLogger.debug({ chatId: dotbot.currentChat!.id }, 'Execution sessions initialized (background)');
     })
     .catch((error: unknown) => {
-      dotbot.chatLogger.warn(
-        { chatId: dotbot.currentChat?.id, error: error instanceof Error ? error.message : String(error) },
+      const err = error instanceof Error ? error : new Error(String(error));
+      const msg = err.message;
+      dotbot.chatLogger.error(
+        { chatId: dotbot.currentChat?.id, error: msg },
         'Failed to init execution sessions in background (will retry when user runs execution)'
       );
+      dotbot.emit?.({ type: DotBotEventType.RPC_CONNECTION_FAILED, error: err, context: 'background_init' });
     });
 }
 
