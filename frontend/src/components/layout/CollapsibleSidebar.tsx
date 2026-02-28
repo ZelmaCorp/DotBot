@@ -80,35 +80,30 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
       <div className="sidebar-footer">
         {isExpanded ? (
           <div className="sidebar-footer-expanded">
-            <div className="sidebar-footer-powered">
-              <img 
-                src={fetchAiLogo} 
-                alt="Fetch.ai" 
-                className="sidebar-footer-logo"
-              />
-              <div className="sidebar-footer-text">
-                Powered by ASI.One
+            <div className="sidebar-footer-rows">
+              <div className="sidebar-footer-powered">
+                <div className="sidebar-footer-logo-wrap">
+                  <img
+                    src={fetchAiLogo}
+                    alt="Fetch.ai"
+                    className="sidebar-footer-logo"
+                  />
+                </div>
+                <div className="sidebar-footer-text">
+                  Powered by ASI.One
+                </div>
               </div>
-            </div>
-            <div className="sidebar-footer-powered">
-              <div className="sidebar-footer-logo-wrap">
-                <img 
-                  src="https://wiki.polkadot.network/img/logo-polkadot.svg"
-                  alt="Polkadot"
-                  className="sidebar-footer-logo sidebar-footer-polkadot-logo"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                    e.currentTarget.parentElement?.querySelector('.sidebar-footer-polkadot-placeholder')?.classList.add('visible');
-                  }}
-                />
-                <span className="sidebar-footer-polkadot-placeholder" aria-hidden>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="10" fill="#E6007A"/>
-                  </svg>
-                </span>
-              </div>
-              <div className="sidebar-footer-text">
-                Powered by Polkadot
+              <div className="sidebar-footer-powered">
+                <div className="sidebar-footer-logo-wrap">
+                  <img
+                    src={fetchAiLogo}
+                    alt="Polkadot"
+                    className="sidebar-footer-logo"
+                  />
+                </div>
+                <div className="sidebar-footer-text">
+                  Powered by Polkadot
+                </div>
               </div>
             </div>
           </div>
