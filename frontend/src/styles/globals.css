@@ -401,8 +401,10 @@ body {
 
 .sidebar-footer-collapsed {
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
+  gap: 16px;
   opacity: 1;
   transition: opacity 0.3s ease-in-out 0.1s;
 }
@@ -411,14 +413,12 @@ body {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-  filter: brightness(0) saturate(100%) invert(25%) sepia(10%) saturate(1071%) hue-rotate(227deg) brightness(90%) contrast(89%);
 }
 
 .sidebar-footer-logo-collapsed {
   width: 20px;
   height: 20px;
   flex-shrink: 0;
-  filter: brightness(0) saturate(100%) invert(25%) sepia(10%) saturate(1071%) hue-rotate(227deg) brightness(90%) contrast(89%);
 }
 
 [data-theme="dark"] .sidebar-footer-logo,

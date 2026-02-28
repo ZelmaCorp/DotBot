@@ -110,9 +110,14 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
           </div>
         ) : (
           <div className="sidebar-footer-collapsed">
-            <img 
-              src={fetchAiLogo} 
-              alt="Fetch.ai" 
+            <img
+              src={fetchAiLogo}
+              alt="Fetch.ai"
+              className="sidebar-footer-logo-collapsed"
+            />
+            <img
+              src={polkadotLogo}
+              alt="Polkadot"
               className="sidebar-footer-logo-collapsed"
             />
           </div>
