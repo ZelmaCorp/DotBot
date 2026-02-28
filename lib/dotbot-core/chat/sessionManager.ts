@@ -16,6 +16,8 @@ export class ExecutionSessionManager {
   private relayChainSession: ExecutionSession | null = null;
   private assetHubSession: ExecutionSession | null = null;
   private sessionsInitialized = false;
+  /** In-flight init promise: concurrent callers await this (coalescing / single-flight), not debounce */
+  private initPromise: Promise<void> | null = null;
   private chatId: string;
   private chatLogger = createSubsystemLogger(Subsystem.CHAT);
 
@@ -25,7 +27,8 @@ export class ExecutionSessionManager {
 
   /**
    * Initialize execution sessions for this chat
-   * Creates and stores RPC sessions that will be reused for all executions in this chat
+   * Creates and stores RPC sessions that will be reused for all executions in this chat.
+   * Safe to call concurrently: if init is already in progress, callers await the same promise.
    */
   async initialize(
     relayChainManager: RpcManager,
@@ -34,11 +37,28 @@ export class ExecutionSessionManager {
     if (this.sessionsInitialized) {
       return;
     }
-    
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
+    }
+
+    this.initPromise = this.doInitialize(relayChainManager, assetHubManager);
+    try {
+      await this.initPromise;
+    } catch (error) {
+      this.initPromise = null;
+      throw error;
+    }
+  }
+
+  private async doInitialize(
+    relayChainManager: RpcManager,
+    assetHubManager: RpcManager
+  ): Promise<void> {
     try {
       // Create Relay Chain session
       this.relayChainSession = await relayChainManager.createExecutionSession();
-      
+
       // Create Asset Hub session (optional)
       try {
         this.assetHubSession = await assetHubManager.createExecutionSession();
@@ -46,7 +66,7 @@ export class ExecutionSessionManager {
         // Asset Hub session creation failed - this is expected in some cases
         this.assetHubSession = null;
       }
-      
+
       this.sessionsInitialized = true;
     } catch (error) {
       this.cleanup();
@@ -115,6 +135,7 @@ export class ExecutionSessionManager {
       this.assetHubSession = null;
     }
     this.sessionsInitialized = false;
+    this.initPromise = null;
     this.chatLogger.debug({ chatId: this.chatId }, 'Cleaned up execution sessions for chat');
   }
 
