@@ -1,0 +1,60 @@
+/* AlertModal – logger error/warn popup */
+
+.alert-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  backdrop-filter: blur(4px);
+}
+
+.alert-modal {
+  background-color: var(--bg-primary);
+  border-radius: 12px;
+  max-width: 480px;
+  width: 100%;
+  padding: 20px 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-primary);
+}
+
+.alert-modal--warn {
+  border-left: 4px solid var(--warning-color, #f59e0b);
+}
+
+.alert-modal--error {
+  border-left: 4px solid var(--error-color, #dc2626);
+}
+
+.alert-modal-title {
+  margin: 0 0 12px;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.alert-modal-message {
+  margin: 0 0 20px;
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.alert-modal-ok {
+  padding: 8px 20px;
+  border-radius: 8px;
+  border: none;
+  background-color: var(--warning-color, #f59e0b);
+  color: #111827;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.alert-modal-ok:hover {
+  background-color: var(--warning-color-hover, #d97706);
+}
