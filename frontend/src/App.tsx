@@ -19,6 +19,7 @@ import ChatHistory from './components/history/ChatHistory';
 import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOverlay';
 import { ScenarioEngineProvider } from './components/scenarioEngine/context/ScenarioEngineContext';
 import LoadingOverlay from './components/common/LoadingOverlay';
+import AlertModal from './components/common/AlertModal';
 import { DotBot, Environment, ScenarioEngine, SigningRequest, BatchSigningRequest, DotBotEventType } from '@dotbot/core';
 import type { ChatInstanceData, ExecutionMessage, Network } from '@dotbot/core';
 import { useWalletStore } from './stores/walletStore';
@@ -35,6 +36,7 @@ import {
   type WalletAccount,
 } from './services/dotbotApi';
 import { subscribeBackendGoingDown } from './services/backendStatus';
+import { LOGGER_UI_EVENT, appLogger, installConsoleToModal, type LoggerUIEventDetail } from './utils/appLogger';
 import './styles/globals.css';
 import './styles/chat-history.css';
 import './styles/chat-history-card.css';
@@ -84,7 +86,33 @@ const AppContent: React.FC = () => {
 
   // Backend deploy warning (blue-green shutdown notice)
   const [backendGoingDown, setBackendGoingDown] = useState(false);
-  
+
+  // Logger UI: errors/warnings from appLogger (and console.error/warn) show in modal
+  const [loggerModal, setLoggerModal] = useState<{
+    message: string;
+    title: string;
+    variant: 'error' | 'warn';
+  } | null>(null);
+
+  useEffect(() => {
+    installConsoleToModal();
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { message, level } = (e as CustomEvent<LoggerUIEventDetail>).detail ?? {};
+      if (typeof message === 'string' && message) {
+        setLoggerModal({
+          message,
+          title: level === 'warn' ? 'Warning' : 'Error',
+          variant: level === 'warn' ? 'warn' : 'error',
+        });
+      }
+    };
+    window.addEventListener(LOGGER_UI_EVENT, handler);
+    return () => window.removeEventListener(LOGGER_UI_EVENT, handler);
+  }, []);
+
   // Cleanup ScenarioEngine on unmount to prevent subscription leaks
   useEffect(() => {
     return () => {
@@ -739,6 +767,14 @@ const AppContent: React.FC = () => {
             </button>
           </div>
         )}
+
+        <AlertModal
+          isOpen={!!loggerModal}
+          title={loggerModal?.title ?? 'Error'}
+          message={loggerModal?.message ?? ''}
+          variant={loggerModal?.variant ?? 'error'}
+          onClose={() => setLoggerModal(null)}
+        />
 
         {/* Main Body */}
         <div className="main-body">
