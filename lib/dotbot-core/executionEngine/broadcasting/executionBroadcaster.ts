@@ -8,13 +8,18 @@ import { ApiPromise } from '@polkadot/api';
 import { SubmittableExtrinsic } from '@polkadot/api/types';
 import { ExecutionResult } from '../types';
 
+/** Callback when tx is in a block (before finality). Used for UI "Confirming..." state. */
+export type BroadcastStatus = 'in_block';
+
 /**
- * Broadcast transaction and monitor status
+ * Broadcast transaction and monitor status.
+ * Optional onStatus('in_block') is called when the tx is in a block, before finalization.
  */
 export async function broadcastTransaction(
   extrinsic: SubmittableExtrinsic<'promise'>,
   api: ApiPromise,
-  timeout: number
+  timeout: number,
+  onStatus?: (status: BroadcastStatus) => void
 ): Promise<ExecutionResult> {
   return new Promise<ExecutionResult>((resolve, reject) => {
     const timeoutHandle = setTimeout(() => {
@@ -23,7 +28,7 @@ export async function broadcastTransaction(
 
     try {
       extrinsic.send((result) => {
-        handleTransactionResult(result, api, extrinsic, timeoutHandle, resolve);
+        handleTransactionResult(result, api, extrinsic, timeoutHandle, resolve, onStatus);
       }).catch((error: Error) => {
         clearTimeout(timeoutHandle);
         reject(error);
@@ -40,8 +45,12 @@ function handleTransactionResult(
   api: ApiPromise,
   extrinsic: SubmittableExtrinsic<'promise'>,
   timeoutHandle: NodeJS.Timeout,
-  resolve: (value: ExecutionResult) => void
+  resolve: (value: ExecutionResult) => void,
+  onStatus?: (status: BroadcastStatus) => void
 ): void {
+  if (result.status.isInBlock && onStatus) {
+    onStatus('in_block');
+  }
   if (result.status.isFinalized) {
     clearTimeout(timeoutHandle);
     const blockHash = result.status.asFinalized.toString();

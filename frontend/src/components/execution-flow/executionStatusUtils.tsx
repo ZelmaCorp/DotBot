@@ -6,7 +6,13 @@
 import { CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react';
 import { ExecutionItem } from '@dotbot/core/executionEngine/types';
 
-const SPIN_STATUSES: Array<ExecutionItem['status']> = ['executing', 'signing', 'broadcasting', 'pending'];
+const SPIN_STATUSES: Array<ExecutionItem['status']> = [
+  'executing',
+  'signing',
+  'broadcasting',
+  'in_block',
+  'pending',
+];
 
 /** When frozen (historical snapshot), never show spinning. */
 export const getStatusIcon = (status: ExecutionItem['status'], isFrozen = false) => {
@@ -21,10 +27,9 @@ export const getStatusIcon = (status: ExecutionItem['status'], isFrozen = false)
       return <XCircle className="status-icon status-cancelled" />;
     case 'signing':
     case 'broadcasting':
+    case 'in_block':
     case 'executing':
       return <Loader2 className={`status-icon status-executing${spin}`} />;
-    case 'in_block':
-      return <Clock className="status-icon status-in-block" />;
     case 'ready':
       return <Clock className="status-icon status-ready" />;
     case 'pending':
@@ -47,7 +52,7 @@ export const getStatusLabel = (status: ExecutionItem['status'], simulationEnable
     case 'broadcasting':
       return 'Broadcasting...';
     case 'in_block':
-      return 'In Block';
+      return 'Confirming...';
     case 'finalized':
       return 'Finalized';
     case 'completed':
