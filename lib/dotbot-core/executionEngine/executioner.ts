@@ -32,7 +32,7 @@ import {
   encodeAddressForChain,
   SigningContext,
 } from './signing/executionSigner';
-import { broadcastTransaction } from './broadcasting/executionBroadcaster';
+import { broadcastTransaction, type BroadcastStatus } from './broadcasting/executionBroadcaster';
 import { markItemAsFailed, markItemAsFailedAndThrow, extractErrorMessage } from './errorHandlers';
 
 /**
@@ -452,7 +452,14 @@ export class Executioner {
     timeout: number
   ): Promise<void> {
     executionArray.updateStatus(item.id, 'broadcasting');
-    const result = await broadcastTransaction(signedExtrinsic, apiForExtrinsic, timeout);
+    const result = await broadcastTransaction(
+      signedExtrinsic,
+      apiForExtrinsic,
+      timeout,
+      (status: BroadcastStatus) => {
+        if (status === 'in_block') executionArray.updateStatus(item.id, 'in_block');
+      }
+    );
 
     if (result.success) {
       executionArray.updateStatus(item.id, 'finalized');
@@ -515,8 +522,15 @@ export class Executioner {
     const signedBatchExtrinsic = await signExtrinsic(batchExtrinsic, encodedSenderAddress, this.signer);
 
     this.updateBatchStatus(items, 'broadcasting', executionArray);
-    const result = await broadcastTransaction(signedBatchExtrinsic, apiForBatch, timeout);
-    
+    const result = await broadcastTransaction(
+      signedBatchExtrinsic,
+      apiForBatch,
+      timeout,
+      (status: BroadcastStatus) => {
+        if (status === 'in_block') this.updateBatchStatus(items, 'in_block', executionArray);
+      }
+    );
+
     if (result.success) {
       items.forEach(item => {
         executionArray.updateStatus(item.id, 'finalized');
