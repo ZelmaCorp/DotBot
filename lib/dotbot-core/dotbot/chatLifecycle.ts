@@ -42,7 +42,7 @@ export async function initializeChatInstance(dotbot: DotBotInstance): Promise<vo
         .then(() => {
           dotbot.chatLogger.debug({ chatId: dotbot.currentChat!.id }, 'Execution sessions initialized for chat (background)');
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           dotbot.chatLogger.warn(
             { chatId: dotbot.currentChat?.id, error: error instanceof Error ? error.message : String(error) },
             'Failed to init execution sessions in background (will retry when user runs execution)'
@@ -66,7 +66,7 @@ function initSessionsForCurrentChat(dotbot: DotBotInstance): void {
     .then(() => {
       dotbot.chatLogger.debug({ chatId: dotbot.currentChat!.id }, 'Execution sessions initialized (background)');
     })
-    .catch((error) => {
+    .catch((error: unknown) => {
       dotbot.chatLogger.warn(
         { chatId: dotbot.currentChat?.id, error: error instanceof Error ? error.message : String(error) },
         'Failed to init execution sessions in background (will retry when user runs execution)'
