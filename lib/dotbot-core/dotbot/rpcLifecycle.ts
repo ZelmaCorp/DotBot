@@ -40,7 +40,7 @@ export async function ensureRpcConnectionsReady(dotbot: DotBotInstance): Promise
       );
       dotbot._setAssetHubApi(assetHubApi);
     } catch (error) {
-      dotbot.rpcLogger.warn({ error: error instanceof Error ? error.message : String(error) }, 'Asset Hub connection failed, will retry when needed');
+      dotbot.rpcLogger.error({ error: error instanceof Error ? error.message : String(error) }, 'Asset Hub connection failed, will retry when needed');
     }
   } else {
     assetHubApi = dotbot.assetHubApi;
