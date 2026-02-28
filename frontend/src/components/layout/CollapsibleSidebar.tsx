@@ -3,6 +3,7 @@ import dotbotLogo from '../../assets/dotbot-logo.svg';
 import iconWrite from '../../assets/icon-write.svg';
 import iconSearch from '../../assets/icon-search.svg';
 import fetchAiLogo from '../../assets/fetch_ai.svg';
+import polkadotLogo from '../../assets/polkadot.svg';
 
 interface SidebarProps {
   onNewChat: () => void;
@@ -80,20 +81,43 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
       <div className="sidebar-footer">
         {isExpanded ? (
           <div className="sidebar-footer-expanded">
-            <img 
-              src={fetchAiLogo} 
-              alt="Fetch.ai" 
-              className="sidebar-footer-logo"
-            />
-            <div className="sidebar-footer-text">
-              Powered by ASI.One
+            <div className="sidebar-footer-rows">
+              <div className="sidebar-footer-powered">
+                <div className="sidebar-footer-logo-wrap">
+                  <img
+                    src={fetchAiLogo}
+                    alt="Fetch.ai"
+                    className="sidebar-footer-logo"
+                  />
+                </div>
+                <div className="sidebar-footer-text">
+                  Powered by ASI.One
+                </div>
+              </div>
+              <div className="sidebar-footer-powered">
+                <div className="sidebar-footer-logo-wrap">
+                  <img
+                    src={polkadotLogo}
+                    alt="Polkadot"
+                    className="sidebar-footer-logo"
+                  />
+                </div>
+                <div className="sidebar-footer-text">
+                  Powered by Polkadot
+                </div>
+              </div>
             </div>
           </div>
         ) : (
           <div className="sidebar-footer-collapsed">
-            <img 
-              src={fetchAiLogo} 
-              alt="Fetch.ai" 
+            <img
+              src={fetchAiLogo}
+              alt="Fetch.ai"
+              className="sidebar-footer-logo-collapsed"
+            />
+            <img
+              src={polkadotLogo}
+              alt="Polkadot"
               className="sidebar-footer-logo-collapsed"
             />
           </div>

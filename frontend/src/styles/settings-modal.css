@@ -232,3 +232,21 @@
   background-color: #f9fafb;
 }
 
+/* Light theme: visible toggle track and knob */
+[data-theme="light"] .settings-toggle-slider {
+  background-color: #d1d5db;
+}
+
+[data-theme="light"] .settings-toggle-slider:before {
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] .settings-toggle input:checked + .settings-toggle-slider {
+  background-color: #7c3aed;
+}
+
+[data-theme="light"] .settings-toggle input:checked + .settings-toggle-slider:before {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
