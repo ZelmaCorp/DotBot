@@ -14,6 +14,10 @@ interface SettingsModalProps {
   onClose: () => void;
   scenarioEngineEnabled: boolean;
   onToggleScenarioEngine: (enabled: boolean) => void;
+  /** Disable the toggle when DotBot isn't ready or RPC/setup is in progress (ScenarioEngine only openable after connection). */
+  scenarioEngineToggleDisabled?: boolean;
+  /** Show "Setting up..." when ScenarioEngine is connecting / initializing (RPC, etc.). */
+  scenarioEngineInitializing?: boolean;
   isMainnet: boolean;
 }
 
@@ -22,6 +26,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   scenarioEngineEnabled,
   onToggleScenarioEngine,
+  scenarioEngineToggleDisabled = false,
+  scenarioEngineInitializing = false,
   isMainnet,
 }) => {
   // Read current simulation config state
@@ -83,6 +89,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   {isMainnet && (
                     <span className="settings-warning"> (Only available on Testnet)</span>
                   )}
+                  {scenarioEngineInitializing && (
+                    <span className="settings-option-status" aria-live="polite">
+                      <span className="settings-option-status-spinner" aria-hidden />
+                      Connecting…
+                    </span>
+                  )}
                 </div>
               </div>
               <label className="settings-toggle">
@@ -90,7 +102,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   type="checkbox"
                   checked={scenarioEngineEnabled}
                   onChange={(e) => onToggleScenarioEngine(e.target.checked)}
-                  disabled={isMainnet}
+                  disabled={isMainnet || scenarioEngineToggleDisabled}
                 />
                 <span className="settings-toggle-slider"></span>
               </label>
