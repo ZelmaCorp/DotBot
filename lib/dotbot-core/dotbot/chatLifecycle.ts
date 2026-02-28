@@ -36,15 +36,18 @@ export async function initializeChatInstance(dotbot: DotBotInstance): Promise<vo
       dotbot.chatLogger.info({ chatId: dotbot.currentChat.id, action: 'created' }, `Created new chat: ${dotbot.currentChat.id}`);
     }
     if (dotbot.currentChat) {
-      try {
-        await dotbot.currentChat.initializeExecutionSessions(dotbot.relayChainManager, dotbot.assetHubManager);
-        dotbot.chatLogger.debug({ chatId: dotbot.currentChat.id }, 'Execution sessions initialized for chat');
-      } catch (error) {
-        dotbot.chatLogger.warn(
-          { chatId: dotbot.currentChat.id, error: error instanceof Error ? error.message : String(error) },
-          'Failed to init execution sessions (will retry during execution)'
-        );
-      }
+      // Start RPC session init in background so UI doesn't block; first execution will await if needed
+      void dotbot.currentChat
+        .initializeExecutionSessions(dotbot.relayChainManager, dotbot.assetHubManager)
+        .then(() => {
+          dotbot.chatLogger.debug({ chatId: dotbot.currentChat!.id }, 'Execution sessions initialized for chat (background)');
+        })
+        .catch((error) => {
+          dotbot.chatLogger.warn(
+            { chatId: dotbot.currentChat?.id, error: error instanceof Error ? error.message : String(error) },
+            'Failed to init execution sessions in background (will retry when user runs execution)'
+          );
+        });
     }
   } catch (error) {
     dotbot.chatLogger.error(
@@ -55,17 +58,20 @@ export async function initializeChatInstance(dotbot: DotBotInstance): Promise<vo
   }
 }
 
-async function initSessionsForCurrentChat(dotbot: DotBotInstance): Promise<void> {
+/** Start execution session init in background; do not block. First execution will await sessions when needed. */
+function initSessionsForCurrentChat(dotbot: DotBotInstance): void {
   if (!dotbot.currentChat) return;
-  try {
-    await dotbot.currentChat.initializeExecutionSessions(dotbot.relayChainManager, dotbot.assetHubManager);
-    dotbot.chatLogger.debug({ chatId: dotbot.currentChat.id }, 'Execution sessions initialized');
-  } catch (error) {
-    dotbot.chatLogger.warn(
-      { chatId: dotbot.currentChat.id, error: error instanceof Error ? error.message : String(error) },
-      'Failed to init execution sessions (will retry during execution)'
-    );
-  }
+  void dotbot.currentChat
+    .initializeExecutionSessions(dotbot.relayChainManager, dotbot.assetHubManager)
+    .then(() => {
+      dotbot.chatLogger.debug({ chatId: dotbot.currentChat!.id }, 'Execution sessions initialized (background)');
+    })
+    .catch((error) => {
+      dotbot.chatLogger.warn(
+        { chatId: dotbot.currentChat?.id, error: error instanceof Error ? error.message : String(error) },
+        'Failed to init execution sessions in background (will retry when user runs execution)'
+      );
+    });
 }
 
 /** Start new chat (new ChatInstance, init sessions). */
@@ -81,7 +87,7 @@ export async function clearHistory(dotbot: DotBotInstance): Promise<void> {
     dotbot.chatManager,
     dotbot.chatPersistenceEnabled
   );
-  await initSessionsForCurrentChat(dotbot);
+  initSessionsForCurrentChat(dotbot);
   dotbot.chatLogger.info({ chatId: dotbot.currentChat!.id }, 'Started new chat');
 }
 
@@ -128,7 +134,7 @@ export async function loadChatInstance(dotbot: DotBotInstance, chatId: string): 
     dotbot.rpcLogger.debug({ network: chatData.network }, 'loadChatInstance: RPC managers for network switch, lazy load when needed');
   }
   dotbot.currentChat = new ChatInstance(chatData, dotbot.chatManager, dotbot.chatPersistenceEnabled);
-  await initSessionsForCurrentChat(dotbot);
+  initSessionsForCurrentChat(dotbot);
   dotbot.chatLogger.info(
     { chatId: dotbot.currentChat.id, messageCount: dotbot.currentChat.getDisplayMessages().length, executionCount: dotbot.currentChat.getDisplayMessages().filter((m: { type: string }) => m.type === 'execution').length },
     'Loaded chat instance (RPCs connect lazily when execution starts)'
