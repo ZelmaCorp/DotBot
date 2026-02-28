@@ -3,6 +3,7 @@ import dotbotLogo from '../../assets/dotbot-logo.svg';
 import iconWrite from '../../assets/icon-write.svg';
 import iconSearch from '../../assets/icon-search.svg';
 import fetchAiLogo from '../../assets/fetch_ai.svg';
+import polkadotLogo from '../../assets/polkadot.svg';
 
 interface SidebarProps {
   onNewChat: () => void;
@@ -96,7 +97,7 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
               <div className="sidebar-footer-powered">
                 <div className="sidebar-footer-logo-wrap">
                   <img
-                    src={fetchAiLogo}
+                    src={polkadotLogo}
                     alt="Polkadot"
                     className="sidebar-footer-logo"
                   />
