@@ -1613,6 +1613,18 @@ body {
   }
 }
 
+[data-theme="light"] .typing-indicator {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .typing-indicator .typing-label {
+  color: #6b7280;
+}
+
+[data-theme="light"] .typing-dot {
+  background-color: #4b5563;
+}
+
 /* Scrollbar styles */
 .chat-messages::-webkit-scrollbar {
   width: 6px;
