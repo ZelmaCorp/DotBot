@@ -30,11 +30,11 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     recipient: "Alice",
   }),
   
-  // Basic transfer that should FAIL (insufficient balance) — amount is dynamic so we never guess (works on Paseo 1000 PAS, Westend, etc.; no burnt amount)
+  // Basic transfer that should FAIL (insufficient balance) — amount = moreThanBalance() so always above balance (works on any network; no guess, no burn)
   insufficientBalanceScenario({
     id: "happy-path-002",
     name: "Insufficient Balance (Should Fail)",
-    amount: "{{calc:balancePlusAmount(0.01)}}",
+    amount: "{{calc:moreThanBalance()}}",
     recipient: "Alice",
   }),
   

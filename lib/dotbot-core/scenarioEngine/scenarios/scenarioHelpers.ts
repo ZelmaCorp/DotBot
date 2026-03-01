@@ -226,8 +226,8 @@ export function transferScenario(config: {
 
 /**
  * Insufficient balance scenario.
- * Use a dynamic amount so we never guess: e.g. amount: '{{calc:balancePlusAmount(0.01)}}'
- * (current balance + 0.01 is always insufficient, works on any network and burns nothing).
+ * Use dynamic amount so we never guess: amount: '{{calc:moreThanBalance()}}'
+ * (returns balance+1 or 1 if balance 0; always insufficient, works on any network).
  */
 export function insufficientBalanceScenario(config: {
   id: string;
