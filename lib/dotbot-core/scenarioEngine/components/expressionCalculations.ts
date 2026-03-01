@@ -144,6 +144,29 @@ export async function calculateBalancePlusAmount(
 }
 
 /**
+ * Single-transfer insufficient balance: amount that is always more than current balance.
+ * Use for "should fail (insufficient balance)" tests. Returns balance + 1, or 1 if balance is 0,
+ * so we never accidentally request a transferable amount (e.g. 0.01 when balance is 0).
+ * No args.
+ */
+export async function calculateMoreThanBalance(
+  _args: string[],
+  context: CalculationContext
+): Promise<string> {
+  const userAddress = await context.getUserAddress();
+  const { balance } = await queryBalance(context.api, userAddress);
+  const result = balance > 0 ? balance + 1 : 1;
+
+  context.emit?.({
+    type: 'log',
+    level: 'info',
+    message: `More-than-balance: balance ${balance.toFixed(4)} → amount ${result.toFixed(2)} (always insufficient)`
+  });
+
+  return result.toFixed(2);
+}
+
+/**
  * Calculate a safe transfer amount that would succeed individually
  * 
  * Args: [reserveAmount, estimatedFee]
@@ -184,6 +207,7 @@ export const CALCULATION_FUNCTIONS: Record<
   (args: string[], context: CalculationContext) => Promise<string>
 > = {
   insufficientBalance: calculateInsufficientBalance,
+  moreThanBalance: calculateMoreThanBalance,
   currentBalance: getCurrentBalance,
   balanceMinusAmount: calculateBalanceMinusAmount,
   balancePlusAmount: calculateBalancePlusAmount,
