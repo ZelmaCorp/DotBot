@@ -30,11 +30,11 @@ export const HAPPY_PATH_TESTS: Scenario[] = [
     recipient: "Alice",
   }),
   
-  // Basic transfer that should FAIL (insufficient balance)
+  // Basic transfer that should FAIL (insufficient balance) — amount is dynamic so we never guess (works on Paseo 1000 PAS, Westend, etc.; no burnt amount)
   insufficientBalanceScenario({
     id: "happy-path-002",
-    name: "Large Transfer to Alice (Should Fail)",
-    amount: "100",
+    name: "Insufficient Balance (Should Fail)",
+    amount: "{{calc:balancePlusAmount(0.01)}}",
     recipient: "Alice",
   }),
   
@@ -130,22 +130,19 @@ export const AMBIGUITY_TESTS: Scenario[] = [];
 
 export const EDGE_CASE_TESTS: Scenario[] = [
   // Multi-transaction: Two sequential transfers where second would fail (insufficient balance)
-  // DYNAMIC TEST: Uses runtime balance calculation!
-  // IMPORTANT: Single prompt generates ONE ExecutionFlow with 2 transactions, allowing simulation to detect failure
-  // Both transfers would succeed individually, but second fails after first executes
+  // DYNAMIC: First transfer is a small fixed amount (minimal burn); second amount is runtime-calculated so it exceeds remaining balance.
+  // Single prompt = ONE ExecutionFlow with 2 transactions; works on any network (Paseo 1000 PAS, Westend, etc.).
   {
     id: 'edge-case-001',
     name: 'Multi-Transaction: Second Transfer Insufficient Balance (Dynamic)',
-    description: 'Two sequential transfers where each would succeed individually, but the second fails after the first executes. Uses dynamic balance calculation to ensure first transfer is safe (less than balance) and second transfer exceeds remaining balance. Works regardless of account balance (3 WND, 7 WND, 20 WND, etc.).',
+    description: 'Two sequential transfers: first is a small amount (0.1), second is calculated at runtime to exceed remaining balance so it fails. Minimal burn; works regardless of account balance.',
     category: 'edge-case',
     tags: ['multi-transaction', 'sequential', 'insufficient-balance', 'dynamic', 'runtime-calculation'],
     steps: [
       {
         id: 'step-1',
         type: 'prompt',
-        // Single prompt generates ONE ExecutionFlow with 2 transactions.
-        // First: 0.5 (small). Second: calc returns (remaining + 0.2) so second transfer fails after first.
-        input: 'Send 0.5 {{TOKEN}} to Alice, then send {{calc:insufficientBalance(0.5, 0.01)}} {{TOKEN}} to Bob',
+        input: 'Send 0.1 {{TOKEN}} to Alice, then send {{calc:insufficientBalance(0.1, 0.01)}} {{TOKEN}} to Bob',
       },
     ],
     expectations: [
