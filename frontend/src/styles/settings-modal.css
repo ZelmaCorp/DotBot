@@ -132,6 +132,28 @@
   font-weight: 500;
 }
 
+.settings-option-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  margin-left: 0.35em;
+  color: var(--accent-color, #6366f1);
+  font-weight: 500;
+}
+
+.settings-option-status-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-color, #6366f1);
+  border-radius: 50%;
+  animation: settings-spinner 0.7s linear infinite;
+}
+
+@keyframes settings-spinner {
+  to { transform: rotate(360deg); }
+}
+
 /* Toggle Switch */
 
 .settings-toggle {

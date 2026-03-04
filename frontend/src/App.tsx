@@ -19,6 +19,7 @@ import ChatHistory from './components/history/ChatHistory';
 import ScenarioEngineOverlay from './components/scenarioEngine/ScenarioEngineOverlay';
 import { ScenarioEngineProvider } from './components/scenarioEngine/context/ScenarioEngineContext';
 import LoadingOverlay from './components/common/LoadingOverlay';
+import AlertModal from './components/common/AlertModal';
 import { DotBot, Environment, ScenarioEngine, SigningRequest, BatchSigningRequest, DotBotEventType } from '@dotbot/core';
 import type { ChatInstanceData, ExecutionMessage, Network } from '@dotbot/core';
 import { useWalletStore } from './stores/walletStore';
@@ -35,6 +36,7 @@ import {
   type WalletAccount,
 } from './services/dotbotApi';
 import { subscribeBackendGoingDown } from './services/backendStatus';
+import { LOGGER_UI_EVENT, appLogger, installConsoleToModal, type LoggerUIEventDetail } from './utils/appLogger';
 import './styles/globals.css';
 import './styles/chat-history.css';
 import './styles/chat-history-card.css';
@@ -84,7 +86,33 @@ const AppContent: React.FC = () => {
 
   // Backend deploy warning (blue-green shutdown notice)
   const [backendGoingDown, setBackendGoingDown] = useState(false);
-  
+
+  // Logger UI: errors/warnings from appLogger (and console.error/warn) show in modal
+  const [loggerModal, setLoggerModal] = useState<{
+    message: string;
+    title: string;
+    variant: 'error' | 'warn';
+  } | null>(null);
+
+  useEffect(() => {
+    installConsoleToModal();
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { message, level } = (e as CustomEvent<LoggerUIEventDetail>).detail ?? {};
+      if (typeof message === 'string' && message) {
+        setLoggerModal({
+          message,
+          title: level === 'warn' ? 'Warning' : 'Error',
+          variant: level === 'warn' ? 'warn' : 'error',
+        });
+      }
+    };
+    window.addEventListener(LOGGER_UI_EVENT, handler);
+    return () => window.removeEventListener(LOGGER_UI_EVENT, handler);
+  }, []);
+
   // Cleanup ScenarioEngine on unmount to prevent subscription leaks
   useEffect(() => {
     return () => {
@@ -116,6 +144,18 @@ const AppContent: React.FC = () => {
     return unsubscribe;
   }, []);
 
+  // Show error modal when DotBot emits RPC connection failure (e.g. background init "Failed to create execution session")
+  useEffect(() => {
+    if (!dotbot) return;
+    const handler = (event: { type: string; error?: Error }) => {
+      if (event.type === DotBotEventType.RPC_CONNECTION_FAILED && event.error) {
+        appLogger.error(event.error.message);
+      }
+    };
+    dotbot.addEventListener(handler);
+    return () => dotbot.removeEventListener(handler);
+  }, [dotbot]);
+
   // Initialize DotBot when wallet connects
   useEffect(() => {
     if (isConnected && selectedAccount && !dotbot && !isInitializing) {
@@ -124,31 +164,33 @@ const AppContent: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, selectedAccount]);
 
-  // Initialize ScenarioEngine dependencies when enabled and DotBot is ready
-  useEffect(() => {
-    if (scenarioEngineEnabled && dotbot && selectedAccount && !isScenarioEngineReady && !isScenarioEngineInitializing) {
-      setIsScenarioEngineInitializing(true);
-      
-      const walletAccount: WalletAccount = {
-        address: selectedAccount.address,
-        name: selectedAccount.name,
-        source: selectedAccount.source,
-      };
-      
-      setupScenarioEngineDependencies(scenarioEngine, dotbot, walletAccount)
-        .then(() => {
-          setIsScenarioEngineReady(true);
-          setIsScenarioEngineInitializing(false);
-          console.log('[App] ScenarioEngine dependencies initialized');
-        })
-        .catch((error) => {
-          console.error('[App] Failed to initialize ScenarioEngine dependencies:', error);
-          setIsScenarioEngineInitializing(false);
-          // Don't set ready state on error - user can retry by toggling
-        });
+  // ScenarioEngine: only enable after RPC/setup succeeds; keep toggle off if setup fails
+  const handleToggleScenarioEngine = (enabled: boolean) => {
+    if (!enabled) {
+      setScenarioEngineEnabled(false);
+      setIsScenarioEngineReady(false);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenarioEngineEnabled, dotbot, selectedAccount, isScenarioEngineReady, isScenarioEngineInitializing]);
+    if (!dotbot || !selectedAccount) return;
+    setIsScenarioEngineInitializing(true);
+    const walletAccount: WalletAccount = {
+      address: selectedAccount.address,
+      name: selectedAccount.name,
+      source: selectedAccount.source,
+    };
+    setupScenarioEngineDependencies(scenarioEngine, dotbot, walletAccount)
+      .then(() => {
+        setIsScenarioEngineReady(true);
+        setScenarioEngineEnabled(true);
+        setIsScenarioEngineInitializing(false);
+      })
+      .catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        appLogger.error('ScenarioEngine setup failed (e.g. RPC connection): ' + msg);
+        setIsScenarioEngineInitializing(false);
+        // Don't set scenarioEngineEnabled - toggle stays off until RPC/setup succeeds
+      });
+  };
 
   // Sync current chat ID when dotbot changes
   useEffect(() => {
@@ -740,6 +782,14 @@ const AppContent: React.FC = () => {
           </div>
         )}
 
+        <AlertModal
+          isOpen={!!loggerModal}
+          title={loggerModal?.title ?? 'Error'}
+          message={loggerModal?.message ?? ''}
+          variant={loggerModal?.variant ?? 'error'}
+          onClose={() => setLoggerModal(null)}
+        />
+
         {/* Main Body */}
         <div className="main-body">
               {showChatHistory ? (
@@ -798,7 +848,9 @@ const AppContent: React.FC = () => {
             isOpen={showSettingsModal}
             onClose={() => setShowSettingsModal(false)}
             scenarioEngineEnabled={scenarioEngineEnabled}
-            onToggleScenarioEngine={setScenarioEngineEnabled}
+            onToggleScenarioEngine={handleToggleScenarioEngine}
+            scenarioEngineToggleDisabled={!dotbot || isScenarioEngineInitializing}
+            scenarioEngineInitializing={isScenarioEngineInitializing}
             isMainnet={getEnvironmentFromNetwork(dotbot?.getNetwork() ?? preferredNetwork) === 'mainnet'}
       />
 

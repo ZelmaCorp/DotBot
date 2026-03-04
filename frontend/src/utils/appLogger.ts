@@ -1,7 +1,7 @@
 /**
- * Frontend app logger with UI transport: error/warn also show in a modal.
- * Single path: logger.error() / logger.warn() → console + modal.
- * Optionally call installConsoleToModal() so console.error/warn also trigger the modal.
+ * Frontend app logger with UI transport: errors show in a modal, warnings do not.
+ * logger.error() and console.error (when patched) → console + modal.
+ * logger.warn() and console.warn are console-only. Call installConsoleToModal() to patch console.error.
  */
 
 export const LOGGER_UI_EVENT = 'dotbot-logger-ui';
@@ -50,7 +50,7 @@ const appLogger = {
   warn(msg: unknown, meta?: Record<string, unknown>): void {
     const message = formatMessage(msg, meta);
     console.warn('[App]', message, meta ?? '');
-    if (shouldEmitToModal(message)) emitToUI(message, 'warn');
+    // No UI transport for warnings – modal is errors only
   },
 
   info(msg: unknown, meta?: Record<string, unknown>): void {
@@ -79,16 +79,23 @@ function isTimestampOrTag(s: string): boolean {
   if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(trimmed)) return true;
   if (/^\[[\w.]+\](\s*\[\w+\])*$/.test(trimmed)) return true;
   if (/^(Error|Warning)$/i.test(trimmed)) return true;
+  if (/^api-ws$/i.test(trimmed)) return true;
   return false;
 }
 
 /** True if message is internal/Polkadot API noise we don't want in the modal (e.g. runtime API version warnings). */
 function isInternalNoise(message: string): boolean {
-  const t = message.trim();
+  const t = message.trim().replace(/\s+/g, ' ');
   if (!t) return true;
   if (/API\/INIT:/i.test(t)) return true;
   if (/Not decorating runtime apis/i.test(t)) return true;
   if (/\b(BeefyApi|DryRunApi|ParachainHost)\/\d+/i.test(t) && /\bknown\)/i.test(t)) return true;
+  // Polkadot/API internal: api-ws, API-WS, bare "error" or "error api-ws"
+  if (/^api-ws$/i.test(t)) return true;
+  if (/^error\s*$/i.test(t)) return true;
+  if (/^(error\s+)?api-ws(\s*$)/i.test(t)) return true;
+  if (/\bAPI-WS\b/i.test(t) && t.length < 80) return true;
+  if (/\bWsProvider\b/i.test(t) && !/\b(failed|error:|exception)\b/i.test(t)) return true;
   return false;
 }
 
@@ -154,8 +161,7 @@ export function installConsoleToModal(): void {
 
   console.warn = (...args: unknown[]) => {
     origWarn(...args);
-    const message = formatConsoleArgs(args);
-    if (shouldEmitToModal(message)) emitToUI(message, 'warn');
+    // No modal for warnings – errors only
   };
 }
 

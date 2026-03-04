@@ -3,7 +3,9 @@ import dotbotLogo from '../../assets/dotbot-logo.svg';
 import iconWrite from '../../assets/icon-write.svg';
 import iconSearch from '../../assets/icon-search.svg';
 import fetchAiLogo from '../../assets/fetch_ai.svg';
+import asiOneLogo from '../../assets/asi_one_logo.svg';
 import polkadotLogo from '../../assets/polkadot.svg';
+import { useTheme } from '../../contexts/ThemeContext';
 
 interface SidebarProps {
   onNewChat: () => void;
@@ -18,6 +20,9 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
   isExpanded,
   onToggle
 }) => {
+  const { theme } = useTheme();
+  const asiLogo = theme === 'dark' ? asiOneLogo : fetchAiLogo;
+
   const toggleSidebar = () => {
     onToggle(!isExpanded);
   };
@@ -85,8 +90,8 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
               <div className="sidebar-footer-powered">
                 <div className="sidebar-footer-logo-wrap">
                   <img
-                    src={fetchAiLogo}
-                    alt="Fetch.ai"
+                    src={asiLogo}
+                    alt="ASI.One"
                     className="sidebar-footer-logo"
                   />
                 </div>
@@ -111,8 +116,8 @@ const CollapsibleSidebar: React.FC<SidebarProps> = ({
         ) : (
           <div className="sidebar-footer-collapsed">
             <img
-              src={fetchAiLogo}
-              alt="Fetch.ai"
+              src={asiLogo}
+              alt="ASI.One"
               className="sidebar-footer-logo-collapsed"
             />
             <img
