@@ -82,6 +82,8 @@ export enum DotBotEventType {
   CHAT_COMPLETE = 'chat-complete',
   CHAT_ERROR = 'chat-error',
   CHAT_LOADED = 'chat-loaded',
+  /** Emitted when RPC/execution session init fails (e.g. background init). UI can show error modal. */
+  RPC_CONNECTION_FAILED = 'rpc-connection-failed',
 }
 
 /** Union of events DotBot can emit. */
@@ -93,7 +95,8 @@ export type DotBotEvent =
   | { type: DotBotEventType.EXECUTION_MESSAGE_UPDATED; executionId: string; timestamp: number }
   | { type: DotBotEventType.CHAT_COMPLETE; result: ChatResult }
   | { type: DotBotEventType.CHAT_ERROR; error: Error }
-  | { type: DotBotEventType.CHAT_LOADED; chatId: string; messageCount: number };
+  | { type: DotBotEventType.CHAT_LOADED; chatId: string; messageCount: number }
+  | { type: DotBotEventType.RPC_CONNECTION_FAILED; error: Error; context?: string };
 
 export type DotBotEventListener = (event: DotBotEvent) => void;
 

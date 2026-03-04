@@ -4,6 +4,9 @@ import App from './App';
 
 // Defensive: Polkadot.js _unsubscribeHealth can throw ".__internal__healthTimer is read-only"
 // in SES/frozen environments (sandbox, extension). Catch so the UI stays usable.
+// Note: This error appears during provider disconnect cleanup. The same disconnect can cause
+// transaction tracking to stop (the status subscription is lost), so if you see this and
+// ExecutionFlow is stuck at "broadcasting", the connection dropped mid-flight.
 const POLKADOT_HEALTH_TIMER_READONLY = '__internal__healthTimer';
 function isPolkadotHealthTimerReadOnlyError(error: unknown): boolean {
   if (error instanceof TypeError && error.message?.includes(POLKADOT_HEALTH_TIMER_READONLY)) {
