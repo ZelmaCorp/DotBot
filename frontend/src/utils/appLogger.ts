@@ -99,6 +99,14 @@ function isInternalNoise(message: string): boolean {
   return false;
 }
 
+/** Expected validation outcome (e.g. insufficient balance). App/ScenarioEngine handle it; don't show error modal. */
+function isValidationOutcome(message: string): boolean {
+  const t = message.trim();
+  if (!t) return false;
+  if (!/insufficient balance/i.test(t)) return false;
+  return /\bAvailable:\b/i.test(t) || /\bRequired:\b/i.test(t);
+}
+
 /**
  * Build a single message for the modal from console args.
  * Prefer the actual error message (Error or object.message); skip tags and timestamps.
@@ -139,10 +147,10 @@ function formatConsoleArgs(args: unknown[]): string {
   return '';
 }
 
-/** Only show modal when we have a real message, not a timestamp, bare tag, or internal noise. */
+/** Only show modal when we have a real message, not a timestamp, bare tag, internal noise, or expected validation. */
 function shouldEmitToModal(message: string): boolean {
   const t = message.trim();
-  return t.length > 0 && !isTimestampOrTag(t) && !isInternalNoise(t);
+  return t.length > 0 && !isTimestampOrTag(t) && !isInternalNoise(t) && !isValidationOutcome(t);
 }
 
 /**
