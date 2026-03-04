@@ -225,18 +225,21 @@ export function transferScenario(config: {
 }
 
 /**
- * Insufficient balance scenario
+ * Insufficient balance scenario.
+ * Use dynamic amount so we never guess: amount: '{{calc:moreThanBalance()}}'
+ * (returns balance+1 or 1 if balance 0; always insufficient, works on any network).
  */
 export function insufficientBalanceScenario(config: {
   id: string;
   name: string;
+  /** Amount in prompt; use {{calc:balancePlusAmount(0.01)}} for dynamic (recommended). */
   amount: string;
   recipient: string;
 }): Scenario {
   return createScenario(config.id, config.name)
     .category('edge-case')
     .tags('transfer', 'insufficient-balance', 'error')
-    .description(`Transfer ${config.amount} (more than available balance)`)
+    .description(`Transfer more than available balance (amount resolved at runtime)`)
     .withPrompt(`Send ${config.amount} ${TOKEN_PLACEHOLDER} to ${config.recipient}`)
     .expectText({
       contains: ['insufficient', 'balance'],

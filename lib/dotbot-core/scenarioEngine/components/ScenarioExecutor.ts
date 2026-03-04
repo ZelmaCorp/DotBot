@@ -1540,50 +1540,23 @@ export class ScenarioExecutor {
   }
 
   /**
-   * Execute a calculation function
-   * 
-   * Automatically selects the correct API based on the prompt context:
-   * - If prompt mentions Asset Hub or WND/DOT transfers, uses Asset Hub API if available
-   * - Otherwise uses Relay Chain API
+   * Execute a calculation function (balance, moreThanBalance, etc.).
+   * Uses Asset Hub API when available (default for balances / native token); otherwise relay.
    */
   private async executeCalculation(funcName: string, args: string[]): Promise<string> {
     const calculationFn = CALCULATION_FUNCTIONS[funcName];
-    
     if (!calculationFn) {
       throw new Error(`Unknown calculation function: ${funcName}`);
     }
-    
     if (!this.deps?.api) {
       throw new Error('API required for calculations');
     }
-    
-    // Determine which API to use based on context
-    // For balance calculations, prefer Asset Hub API if available and if we're dealing with Asset Hub transfers
-    // Check the current prompt context to see if it's an Asset Hub transfer
-    let apiToUse = this.deps.api;
-    
-    // Select API based on prompt context
-    // For WND transfers, use Asset Hub API since WND is native on Asset Hub
-    if (this.deps.assetHubApi) {
-      const prompt = this.context?.currentPrompt?.toLowerCase() || '';
-      const isAssetHubTransfer = prompt.includes('wnd') || prompt.includes('asset hub');
-      
-      if (isAssetHubTransfer) {
-        apiToUse = this.deps.assetHubApi;
-        this.emit({ 
-          type: 'log', 
-          level: 'debug', 
-          message: 'Using Asset Hub API for balance calculation (WND/Asset Hub transfer detected)' 
-        });
-      }
-    }
-    
+    const apiToUse = this.deps.assetHubApi ?? this.deps.api;
     const context: CalculationContext = {
       api: apiToUse,
       getUserAddress: () => this.getUserAddress(),
       emit: (event) => this.emit(event),
     };
-    
     return await calculationFn(args, context);
   }
 
