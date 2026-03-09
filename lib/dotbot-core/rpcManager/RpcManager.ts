@@ -108,41 +108,26 @@ export class RpcManager {
   }
 
   /**
-   * Attempt to connect to an endpoint
+   * Attempt to connect to an endpoint.
+   *
+   * Does NOT wait for provider 'connected' — Polkadot nodes send nothing until we send a JSON-RPC
+   * request. We start ApiPromise.create(provider) immediately so the API sends the first request
+   * (metadata etc.) and we wait for that response; this avoids false "connection timeout".
    */
   private async tryConnect(endpoint: string): Promise<ApiPromise> {
     const startTime = Date.now();
     const API_INIT_TIMEOUT_MS = 12000; // 12 seconds - faster failure for slow testnet endpoints
     const DISCONNECT_GRACE_PERIOD_MS = 2000; // 2 seconds grace period for normal closures
-    const MAX_TOTAL_TIMEOUT_MS = Math.max(this.connectionTimeout + API_INIT_TIMEOUT_MS + 5000, 20000); // Maximum total time (connection + API init + buffer)
-    
+    const MAX_TOTAL_TIMEOUT_MS = Math.max(this.connectionTimeout + API_INIT_TIMEOUT_MS + 5000, 20000);
+
     return new Promise<ApiPromise>((resolve, reject) => {
       const provider = new WsProvider(endpoint);
       let apiInitTimeoutHandle: NodeJS.Timeout | null = null;
       let disconnectGraceTimer: NodeJS.Timeout | null = null;
       let maxTimeoutHandle: NodeJS.Timeout | null = null;
       let isResolved = false;
-      let isConnected = false;
       let apiInstance: ApiPromise | null = null;
-      
-      // Maximum timeout - ensures we ALWAYS reject if something hangs
-      maxTimeoutHandle = setTimeout(() => {
-        if (!isResolved) {
-          cleanup();
-          safeDisconnect();
-          const error = new Error(`Maximum timeout (${MAX_TOTAL_TIMEOUT_MS}ms) exceeded for endpoint. The system will try the next endpoint.`);
-          this.rpcLogger.error({ endpoint }, `Maximum timeout exceeded - forcing failover`);
-          reject(error);
-        }
-      }, MAX_TOTAL_TIMEOUT_MS);
-      
-      const connectionTimeoutHandle = setTimeout(() => {
-        if (!isResolved) {
-          cleanup();
-          reject(new Error(`Connection timeout (${this.connectionTimeout}ms). The system will try the next endpoint.`));
-        }
-      }, this.connectionTimeout);
-      
+
       const safeDisconnect = () => {
         try {
           if (provider && typeof provider.disconnect === 'function') {
@@ -152,11 +137,10 @@ export class RpcManager {
           // Ignore disconnect errors
         }
       };
-      
+
       const cleanup = () => {
         if (isResolved) return;
         isResolved = true;
-        clearTimeout(connectionTimeoutHandle);
         if (maxTimeoutHandle) {
           clearTimeout(maxTimeoutHandle);
           maxTimeoutHandle = null;
@@ -171,143 +155,66 @@ export class RpcManager {
         }
         safeDisconnect();
       };
-      
+
       const errorHandler = (error: Error | string | unknown) => {
-        if (isResolved) {
-          return;
-        }
-        
+        if (isResolved) return;
         cleanup();
-        
         const { message, error: errorObj } = this.normalizeError(error);
         this.rpcLogger.error({ endpoint, error: message }, `Provider error - triggering failover`);
         reject(errorObj);
       };
-      
+
       const disconnectedHandler = () => {
         if (isResolved) return;
-        
-        // If API instance already exists, allow initialization to complete
-        if (apiInstance) {
-          return;
-        }
-        
-        // Give a grace period for disconnections during initialization
-        if (isConnected && !disconnectGraceTimer) {
-          const gracePeriod = DISCONNECT_GRACE_PERIOD_MS;
-          
-          disconnectGraceTimer = setTimeout(() => {
-            if (!isResolved && !apiInstance) {
-              cleanup();
-              safeDisconnect();
-              const error = new Error(`Connection lost during initialization - endpoint disconnected (may be normal closure). The system will try the next endpoint.`);
-              this.rpcLogger.error({ endpoint }, `Disconnected during API initialization after grace period - forcing failover`);
-              reject(error);
-            }
-          }, gracePeriod);
-          return;
-        }
-        
-        // If not connected yet, reject immediately
-        if (!isConnected) {
-          cleanup();
-          safeDisconnect();
-          const error = new Error(`Connection lost during initialization - endpoint disconnected before connection established. The system will try the next endpoint.`);
-          this.rpcLogger.error({ endpoint }, `Disconnected before connection established - forcing failover`);
-          reject(error);
-          return;
-        }
+        if (apiInstance) return;
+        if (disconnectGraceTimer) return;
+        disconnectGraceTimer = setTimeout(() => {
+          if (!isResolved && !apiInstance) {
+            cleanup();
+            const err = new Error(`Connection lost during initialization - endpoint disconnected. The system will try the next endpoint.`);
+            this.rpcLogger.error({ endpoint }, `Disconnected during API initialization - forcing failover`);
+            reject(err);
+          }
+        }, DISCONNECT_GRACE_PERIOD_MS);
       };
-      
-      const connectedHandler = async () => {
-        if (isResolved) return;
-        isConnected = true;
-        clearTimeout(connectionTimeoutHandle);
-        
-        // Clear disconnect grace timer if connection is re-established
-        if (disconnectGraceTimer) {
-          clearTimeout(disconnectGraceTimer);
-          disconnectGraceTimer = null;
+
+      maxTimeoutHandle = setTimeout(() => {
+        if (!isResolved) {
+          cleanup();
+          reject(new Error(`Maximum timeout (${MAX_TOTAL_TIMEOUT_MS}ms) exceeded for endpoint. The system will try the next endpoint.`));
+          this.rpcLogger.error({ endpoint }, `Maximum timeout exceeded - forcing failover`);
         }
-        
-        try {
-          // Check if provider is still connected before starting API creation
-          if (!provider.isConnected) {
+      }, MAX_TOTAL_TIMEOUT_MS);
+
+      let apiPromise: Promise<ApiPromise>;
+      try {
+        apiPromise = ApiPromise.create({ provider });
+      } catch (syncError) {
+        cleanup();
+        const { message: errorMessage } = this.normalizeError(syncError);
+        reject(new Error(`Synchronous error during API creation: ${errorMessage}. The system will try the next endpoint.`));
+        this.rpcLogger.error({ endpoint }, `Synchronous error during API creation - forcing failover`);
+        return;
+      }
+
+      const timeoutPromise = new Promise<never>((_, timeoutReject) => {
+        apiInitTimeoutHandle = setTimeout(() => {
+          if (!isResolved) {
             cleanup();
-            safeDisconnect();
-            const error = new Error(`Provider disconnected before API initialization could start. The system will try the next endpoint.`);
-            this.rpcLogger.error({ endpoint }, `Provider disconnected before API creation - forcing failover`);
-            reject(error);
-            return;
+            timeoutReject(new Error(`API initialization timeout (${API_INIT_TIMEOUT_MS}ms) - endpoint may be slow or unresponsive. The system will try the next endpoint.`));
           }
-          
-          // Short delay after 'connected' so the WebSocket is fully ready for RPC (reduces "WebSocket is not connected" during getMetadata)
-          const STABILITY_DELAY_MS = 150;
-          await new Promise<void>((r) => setTimeout(r, STABILITY_DELAY_MS));
+        }, API_INIT_TIMEOUT_MS);
+      });
+
+      provider.on('error', errorHandler);
+      provider.on('disconnected', disconnectedHandler);
+
+      Promise.race([apiPromise, timeoutPromise])
+        .then((api) => {
           if (isResolved) return;
-          if (!provider.isConnected) {
-            cleanup();
-            safeDisconnect();
-            const error = new Error(`Provider disconnected during stability delay. The system will try the next endpoint.`);
-            this.rpcLogger.debug({ endpoint }, `Disconnected during ${STABILITY_DELAY_MS}ms stability delay - forcing failover`);
-            reject(error);
-            return;
-          }
-          
-          let apiPromise: Promise<ApiPromise>;
-          try {
-            apiPromise = ApiPromise.create({ provider });
-          } catch (syncError) {
-            cleanup();
-            safeDisconnect();
-            const { message: errorMessage } = this.normalizeError(syncError);
-            const error = new Error(`Synchronous error during API creation: ${errorMessage}. The system will try the next endpoint.`);
-            this.rpcLogger.error({ endpoint }, `Synchronous error during API creation - forcing failover`);
-            reject(error);
-            return;
-          }
-          
-          apiPromise = apiPromise.catch((promiseError) => {
-            if (isResolved) {
-              return Promise.reject(promiseError);
-            }
-            throw promiseError;
-          });
-          
-          const timeoutPromise = new Promise<never>((_, timeoutReject) => {
-            apiInitTimeoutHandle = setTimeout(() => {
-              if (!isResolved) {
-                cleanup();
-                safeDisconnect();
-                timeoutReject(new Error(`API initialization timeout (${API_INIT_TIMEOUT_MS}ms) - endpoint may be slow or unresponsive. The system will try the next endpoint.`));
-              }
-            }, API_INIT_TIMEOUT_MS);
-          });
-          
-          // Race between API creation and timeout - ensure all errors are caught
-          const api = await Promise.race([apiPromise, timeoutPromise]);
-          
-          // Check if a disconnect happened while we were waiting
-          if (isResolved) {
-            return;
-          }
-          
-          // Check if provider disconnected during API creation
-          if (!provider.isConnected) {
-            cleanup();
-            safeDisconnect();
-            const error = new Error(`Provider disconnected during API initialization. The system will try the next endpoint.`);
-            this.rpcLogger.error({ endpoint }, `Provider disconnected during API creation - forcing failover`);
-            reject(error);
-            return;
-          }
-          
+          // ApiPromise.create() resolved => provider responded to RPC; no need to gate on provider.isConnected
           apiInstance = api;
-          
-          if (isResolved) return;
           isResolved = true;
-          
-          // Clear all timeouts on success
           if (maxTimeoutHandle) {
             clearTimeout(maxTimeoutHandle);
             maxTimeoutHandle = null;
@@ -320,82 +227,32 @@ export class RpcManager {
             clearTimeout(disconnectGraceTimer);
             disconnectGraceTimer = null;
           }
-          
           const responseTime = Date.now() - startTime;
           this.healthTracker.markEndpointHealthy(endpoint, responseTime);
           resolve(api);
-        } catch (error) {
+        })
+        .catch((error) => {
+          if (isResolved) return;
           const { message: errorMessage } = this.normalizeError(error);
-          const normalizedErrorMessage = errorMessage.trim().toLowerCase();
-          const isFatalError = 
-            errorMessage.includes('FATAL') || 
+          const isFatalError =
+            errorMessage.includes('FATAL') ||
             errorMessage.includes('Unable to initialize the API') ||
-            normalizedErrorMessage.includes('fatal') ||
-            normalizedErrorMessage.includes('unable to initialize');
-          
-          const providerDisconnected = !provider.isConnected;
-          const isDisconnectionError = 
-            errorMessage.includes('disconnected') || 
+            errorMessage.toLowerCase().includes('fatal') ||
+            errorMessage.toLowerCase().includes('unable to initialize');
+          const isDisconnectionError =
+            errorMessage.includes('disconnected') ||
             errorMessage.includes('Normal Closure') ||
             errorMessage.includes('1000') ||
-            errorMessage.includes('FATAL') ||
-            errorMessage.includes('Unable to initialize') ||
             errorMessage.includes('WebSocket is not connected') ||
-            providerDisconnected;
-          
-          // If this is a disconnection/FATAL error and provider is disconnected, reject immediately
-          if ((isFatalError || isDisconnectionError || providerDisconnected) && !isResolved) {
-            if (disconnectGraceTimer) {
-              clearTimeout(disconnectGraceTimer);
-              disconnectGraceTimer = null;
-            }
-            
-            cleanup();
-            safeDisconnect();
-            
-            const isNormalClosure = errorMessage.includes('Normal Closure') || errorMessage.includes('1000');
-            const finalError = new Error(
-              isNormalClosure 
-                ? `Connection lost during initialization - endpoint disconnected with normal closure (1000). The system will try the next endpoint.`
-                : isFatalError
-                ? `API initialization failed - endpoint disconnected during metadata fetch. The system will try the next endpoint. Original error: ${errorMessage}`
-                : `Connection lost during API initialization: ${errorMessage}. The system will try the next endpoint.`
-            );
-            
-            this.rpcLogger.error({ endpoint, error: errorMessage }, `FATAL/disconnect error - forcing failover`);
-            reject(finalError);
-            return;
-          }
-          
-          // Check if promise was already resolved/rejected
-          if (isResolved) {
-            if (isFatalError || isDisconnectionError) {
-              this.rpcLogger.debug({ endpoint }, `FATAL/disconnect error caught but promise already resolved`);
-            }
-            return;
-          }
-          
+            !provider.isConnected;
           cleanup();
-          
-          const isNormalClosure = errorMessage.includes('Normal Closure') || errorMessage.includes('1000');
-          const finalError = isDisconnectionError 
-            ? new Error(
-                isNormalClosure 
-                  ? `Connection lost during initialization - endpoint disconnected with normal closure (1000). The system will try the next endpoint.`
-                  : isFatalError
-                  ? `API initialization failed - endpoint disconnected during metadata fetch. The system will try the next endpoint. Original error: ${errorMessage}`
-                  : `Connection lost during API initialization: ${errorMessage}. The system will try the next endpoint.`
-              )
-            : (error instanceof Error ? error : new Error(errorMessage));
-          
+          const finalError =
+            isFatalError || isDisconnectionError
+              ? new Error(`API initialization failed: ${errorMessage}. The system will try the next endpoint.`)
+              : error instanceof Error ? error : new Error(errorMessage);
           this.rpcLogger.error({ endpoint, error: errorMessage }, `Failed to initialize API - forcing failover`);
           reject(finalError);
-        }
-      };
-      
-      provider.on('connected', connectedHandler);
-      provider.on('error', errorHandler);
-      provider.on('disconnected', disconnectedHandler);
+        });
     });
   }
 
@@ -653,9 +510,10 @@ export class RpcManager {
   }
 
   /**
-   * Perform a health check on all endpoints
-   * This performs a lightweight connection test.
-   * Skips opening new connections when we already have a healthy read API (reduces connection churn and log noise).
+   * Perform a health check on all endpoints.
+   * Uses the same flow as tryConnect: open WebSocket, send RPC (via ApiPromise), wait for response.
+   * Polkadot nodes send nothing until we send a request, so we must send then wait (no "connected"-only check).
+   * Skips when we already have a healthy read API (reduces churn).
    */
   async performHealthCheck(): Promise<void> {
     if (this.currentReadApi?.isConnected) {
@@ -663,86 +521,33 @@ export class RpcManager {
       return;
     }
 
-    // Only probe a subset of endpoints per run to limit connection churn (prefer first/health-ordered)
     const endpointsToCheck = this.healthTracker.getOrderedEndpoints().slice(0, 5);
-    const checkPromises = endpointsToCheck.map(async (endpoint) => {
-      const endpointStartTime = Date.now();
-      try {
-        const provider = new WsProvider(endpoint);
-        
-        return new Promise<void>((resolve) => {
-          let isResolved = false;
-          
-          const safeResolve = () => {
-            if (isResolved) return;
-            isResolved = true;
-            resolve();
-          };
-          
-          const safeDisconnect = () => {
-            if (isResolved) return; // Prevent re-entry
-            try {
-              if (provider && typeof provider.disconnect === 'function') {
-                provider.disconnect();
-              }
-            } catch (err) {
-              // Ignore disconnect errors
-            }
-          };
-          
-          const connectedHandler = () => {
-            if (isResolved) return;
-            isResolved = true; // Set BEFORE disconnect to prevent re-entry
-            clearTimeout(timeout);
-            const responseTime = Date.now() - endpointStartTime;
-            safeDisconnect();
-            this.healthTracker.markEndpointHealthy(endpoint, responseTime);
-            safeResolve();
-          };
-          
-          const errorHandler = () => {
-            if (isResolved) return;
-            isResolved = true; // Set BEFORE disconnect to prevent re-entry
-            clearTimeout(timeout);
-            safeDisconnect();
-            this.healthTracker.markEndpointFailed(endpoint);
-            safeResolve();
-          };
-          
-          const timeout = setTimeout(() => {
-            if (isResolved) return;
-            isResolved = true; // Set BEFORE disconnect to prevent re-entry
-            safeDisconnect();
-            this.healthTracker.markEndpointFailed(endpoint);
-            safeResolve();
-          }, 5000);
-          
-          provider.on('connected', connectedHandler);
-          provider.on('error', errorHandler);
-          
-          if (provider.isConnected) {
-            if (!isResolved) {
-              isResolved = true;
-              clearTimeout(timeout);
-              const responseTime = Date.now() - endpointStartTime;
-              safeDisconnect();
-              this.healthTracker.markEndpointHealthy(endpoint, responseTime);
-              safeResolve();
-            }
-          }
-        });
-      } catch (error) {
-        this.healthTracker.markEndpointFailed(endpoint);
-      }
-    });
-    
-    await Promise.all(checkPromises);
-    const healthyCount = Array.from(this.healthMap.values()).filter(h => h.healthy).length;
-    this.rpcLogger.info({ 
-      healthyCount,
-      totalEndpoints: this.endpoints.length,
-      checked: endpointsToCheck.length
-    }, `Health check complete: ${healthyCount}/${this.endpoints.length} endpoints healthy (checked ${endpointsToCheck.length})`);
+    const HEALTH_CHECK_TIMEOUT_MS = 10000;
+
+    await Promise.all(
+      endpointsToCheck.map(async (endpoint) => {
+        const start = Date.now();
+        try {
+          const api = await Promise.race([
+            this.tryConnect(endpoint),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Health check timeout')), HEALTH_CHECK_TIMEOUT_MS)
+            ),
+          ]);
+          const responseTime = Date.now() - start;
+          await api.disconnect();
+          this.healthTracker.markEndpointHealthy(endpoint, responseTime);
+        } catch {
+          this.healthTracker.markEndpointFailed(endpoint);
+        }
+      })
+    );
+
+    const healthyCount = Array.from(this.healthMap.values()).filter((h) => h.healthy).length;
+    this.rpcLogger.info(
+      { healthyCount, totalEndpoints: this.endpoints.length, checked: endpointsToCheck.length },
+      `Health check complete: ${healthyCount}/${this.endpoints.length} endpoints healthy (checked ${endpointsToCheck.length})`
+    );
   }
 
   /**

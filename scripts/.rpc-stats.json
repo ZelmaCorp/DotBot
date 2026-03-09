@@ -1,0 +1,88 @@
+{
+  "endpoints": {
+    "wss://polkadot.api.onfinality.io/public-ws": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://polkadot-rpc.dwellir.com": {
+      "checks": 59,
+      "ok": 0
+    },
+    "wss://rpc.ibp.network/polkadot": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://polkadot.dotters.network": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://rpc.polkadot.io": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://statemint.api.onfinality.io/public-ws": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://statemint-rpc.dwellir.com": {
+      "checks": 59,
+      "ok": 0
+    },
+    "wss://rpc-asset-hub.polkadot.io": {
+      "checks": 59,
+      "ok": 0
+    },
+    "wss://paseo.rpc.amforc.com:443": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://paseo-rpc.dwellir.com": {
+      "checks": 59,
+      "ok": 0
+    },
+    "wss://rpc.ibp.network/paseo": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://paseo.dotters.network": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://pas-rpc.stakeworld.io": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://asset-hub-paseo-rpc.n.dwellir.com": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://sys.ibp.network/asset-hub-paseo": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://asset-hub-paseo.dotters.network": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://sys.turboflakes.io/asset-hub-paseo": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://westend.api.onfinality.io/public-ws": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://westend.public.curie.radiumblock.co/ws": {
+      "checks": 59,
+      "ok": 59
+    },
+    "wss://westmint.api.onfinality.io/public-ws": {
+      "checks": 59,
+      "ok": 0
+    },
+    "wss://sys.ibp.network/westmint": {
+      "checks": 59,
+      "ok": 0
+    }
+  }
+}

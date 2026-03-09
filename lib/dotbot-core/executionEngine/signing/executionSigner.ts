@@ -131,8 +131,7 @@ export async function signExtrinsic(
   
   const injector = await getWeb3FromAddress(address);
   return await extrinsic.signAsync(address, {
-    // @ts-expect-error - Polkadot.js type mismatch
-    signer: injector.signer,
+    signer: injector.signer as unknown as import('@polkadot/api/types').Signer,
   });
 }
 
