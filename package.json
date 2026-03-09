@@ -27,16 +27,21 @@
     "lint:core": "npm run lint --workspace=@dotbot/core",
     "lint:express": "npm run lint --workspace=@dotbot/express",
     "type-check": "npm run type-check --workspace=frontend && npm run type-check --workspace=backend --if-present",
-    "install:all": "npm install && npm run install --workspaces"
+    "install:all": "npm install && npm run install --workspaces",
+    "dedupe": "npm dedupe",
+    "test:rpc": "node scripts/test-rpc-endpoints.mjs",
+    "test:rpc:once": "node scripts/test-rpc-endpoints.mjs --once"
   },
   "overrides": {
     "@polkadot/util": "^14.0.1",
     "@polkadot/util-crypto": "^14.0.1",
     "@polkadot/keyring": "^14.0.1",
-    "@polkadot/rpc-provider": "^14.3.1"
+    "@polkadot/rpc-provider": "^14.3.1",
+    "@polkadot/types-codec": "^14.3.1"
   },
   "devDependencies": {
     "@stoplight/prism-cli": "^5.14.2",
-    "lerna": "^8.0.0"
+    "lerna": "^8.0.0",
+    "ws": "^8.18.0"
   }
 }
